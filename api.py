@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 import logging
 import json
 
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
