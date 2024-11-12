@@ -1,16 +1,28 @@
+import sys
+import pydantic
+
+print(f"Pydantic version: {pydantic.__version__}")
+print(f"Python executable: {sys.executable}")
+
 import os
+import re
+import tiktoken
 import uuid
 import traceback
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 import openai
-import pdfplumber
-import chromadb
-from chromadb.config import Settings
 from dotenv import load_dotenv
 import logging
 import json
 
+# Updated imports from langchain-community
+from langchain.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.vectorstores import Chroma
+from langchain.llms import OpenAI
+from langchain.chains import RetrievalQA
 
 # Configure logging
 logging.basicConfig(
@@ -29,49 +41,32 @@ if not openai.api_key:
     logger.error("OPENAI_API_KEY is not set in the environment variables.")
     raise EnvironmentError("OPENAI_API_KEY not set.")
 
-# Initialize ChromaDB with persistence
-try:
-    client = chromadb.Client(Settings(persist_directory="./chromadb_data"))
-    if "pdf_chunks" not in client.list_collections():
-        collection = client.create_collection("pdf_chunks")
-        logger.info("ChromaDB collection 'pdf_chunks' created successfully.")
-    else:
-        collection = client.get_collection("pdf_chunks")
-        logger.info("ChromaDB collection 'pdf_chunks' retrieved successfully.")
-except Exception as e:
-    logger.error(f"Failed to initialize ChromaDB: {str(e)}")
-    raise
-
 # Initialize FastAPI app
 app = FastAPI()
-
-
-def extract_pdf_content(pdf_file):
-    """Extract text from a PDF file and return as a list of pages."""
-    try:
-        pages = []
-        with pdfplumber.open(pdf_file) as pdf:
-            for idx, page in enumerate(pdf.pages, start=1):
-                page_text = page.extract_text()
-                if page_text:
-                    pages.append({"page_number": idx, "text": page_text})
-        if not pages:
-            raise ValueError("Empty PDF content")
-        logger.info(f"Extracted {len(pages)} pages from PDF successfully.")
-        return pages
-    except Exception as e:
-        logger.error(f"PDF extraction error: {str(e)}\n{traceback.format_exc()}")
-        raise HTTPException(
-            status_code=500, detail="Failed to extract content from PDF"
-        )
 
 
 def generate_questions(content):
     """Generate 5 questions using OpenAI's ChatCompletion API."""
     try:
         logger.info("Generating questions using OpenAI's ChatCompletion API.")
+
+        # Initialize tiktoken encoder for the model
+        encoding = tiktoken.encoding_for_model("gpt-4")
+
+        # Calculate available tokens
+        max_model_tokens = 8192
+        reserve_tokens = 700  # For response and message overhead
+        max_content_tokens = max_model_tokens - reserve_tokens
+
+        # Encode the content and truncate if necessary
+        content_tokens = encoding.encode(content)
+        if len(content_tokens) > max_content_tokens:
+            logger.info(f"Content exceeds {max_content_tokens} tokens. Truncating.")
+            content_tokens = content_tokens[:max_content_tokens]
+            content = encoding.decode(content_tokens)
+
         response = openai.ChatCompletion.create(
-            model="gpt-4",  # Use a suitable model like gpt-4 or gpt-3.5-turbo
+            model="gpt-4",
             messages=[
                 {
                     "role": "system",
@@ -85,15 +80,29 @@ def generate_questions(content):
             max_tokens=500,
             temperature=0.7,
         )
+
         # Log the full response for debugging
         logger.debug(f"OpenAI ChatCompletion Response: {response}")
 
         # Extract the assistant's reply
         assistant_message = response["choices"][0]["message"]["content"]
-        # Split the questions by newline or numbering
-        questions = [
-            q.strip() for q in assistant_message.strip().split("\n") if q.strip()
-        ]
+        logger.info(f"Assistant's message: {assistant_message}")
+
+        # Use regex to extract questions
+        pattern = r"^\d+\.\s*(.*)$"  # Matches lines like '1. Question text'
+        matches = re.findall(pattern, assistant_message, re.MULTILINE)
+        if matches:
+            questions = [match.strip() for match in matches]
+        else:
+            # If numbering not used, split by lines
+            questions = [
+                q.strip("-").strip()
+                for q in assistant_message.strip().split("\n")
+                if q.strip()
+            ]
+
+        logger.info(f"Extracted questions: {questions}")
+
         if not questions:
             raise ValueError("No questions generated.")
         logger.info("Questions generated successfully.")
@@ -103,67 +112,59 @@ def generate_questions(content):
         raise HTTPException(status_code=500, detail="Failed to generate questions")
 
 
-def create_embedding(content):
-    """Generate an embedding using OpenAI's text-embedding-ada-002 model."""
-    try:
-        logger.info("Creating embedding using OpenAI's Embedding API.")
-        response = openai.Embedding.create(
-            input=content, model="text-embedding-ada-002"
-        )
-        embedding = response["data"][0]["embedding"]
-        if len(embedding) != 1536:
-            raise ValueError(f"Unexpected embedding size: {len(embedding)}")
-        logger.info("Embedding created successfully.")
-        return embedding
-    except Exception as e:
-        logger.error(f"OpenAI Embedding error: {str(e)}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail="Failed to generate embedding")
-
-
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
-    """Upload a PDF file, extract content, generate questions, and store in ChromaDB."""
+    """Upload a PDF file, extract content, generate questions, and store in ChromaDB using LangChain."""
     logger.info(f"Received file upload request: {file.filename}")
+    temp_file_path = f"/tmp/{uuid.uuid4()}.pdf"
     try:
         if file.content_type != "application/pdf":
             logger.warning(f"Invalid file type: {file.content_type}")
             raise HTTPException(status_code=400, detail="File must be a PDF.")
 
-        # Extract content from the PDF as pages
-        pages = extract_pdf_content(file.file)
+        # Save the uploaded file to a temporary location
+        with open(temp_file_path, "wb") as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+
+        # Load and split the PDF using LangChain
+        loader = PyPDFLoader(temp_file_path)
+        documents = loader.load()
+
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, chunk_overlap=200
+        )
+        docs = text_splitter.split_documents(documents)
+
+        # Initialize embeddings and vector store
+        embeddings = OpenAIEmbeddings()
+        persist_directory = "./chromadb_data"
+
+        # Create or load the vector store
+        if os.path.exists(persist_directory):
+            vectorstore = Chroma(
+                persist_directory=persist_directory, embedding_function=embeddings
+            )
+            vectorstore.add_documents(docs)
+            logger.info("Documents added to existing ChromaDB vector store.")
+        else:
+            vectorstore = Chroma.from_documents(
+                docs, embeddings, persist_directory=persist_directory
+            )
+            logger.info("ChromaDB vector store created and documents added.")
+
+        # Persist the vector store
+        vectorstore.persist()
 
         # Optionally, generate questions based on the entire content
-        # Combine all pages' text
-        full_content = "\n".join([page["text"] for page in pages])
+        full_content = "\n".join([doc.page_content for doc in docs])
         questions = generate_questions(full_content)
-
-        # Create embeddings and prepare data for ChromaDB
-        documents = []
-        embeddings = []
-        metadatas = []
-        for page in pages:
-            page_text = page["text"]
-            page_number = page["page_number"]
-            embedding = create_embedding(page_text)
-            documents.append(page_text)
-            embeddings.append(embedding)
-            metadatas.append({"page_number": page_number, "filename": file.filename})
-
-        # Store in ChromaDB
-        unique_ids = [str(uuid.uuid4()) for _ in documents]
-        collection.add(
-            ids=unique_ids,
-            documents=documents,
-            embeddings=embeddings,
-            metadatas=metadatas,
-        )
-        logger.info(f"Stored {len(documents)} page chunks in ChromaDB successfully.")
 
         return JSONResponse(
             {
                 "message": "File processed successfully",
                 "questions": questions,
-                "pages_stored": len(documents),
+                "pages_stored": len(docs),
             }
         )
 
@@ -173,19 +174,56 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
+    finally:
+        # Clean up the temporary file
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
 
 
 @app.get("/query/")
 async def query_chromadb(query: str):
-    """Query ChromaDB with a text input."""
+    """Query ChromaDB using LangChain's RetrievalQA chain."""
     logger.info(f"Received query: {query}")
     try:
-        # Query the collection to find relevant documents
-        results = collection.query(
-            query_texts=[query], n_results=5, include_metadata=True
+        # Initialize embeddings and vector store
+        embeddings = OpenAIEmbeddings()
+        persist_directory = "./chromadb_data"
+
+        # Load the persisted vector store
+        vectorstore = Chroma(
+            persist_directory=persist_directory, embedding_function=embeddings
         )
-        logger.info("ChromaDB query executed successfully.")
-        return JSONResponse(results)
+
+        # Set up the RetrievalQA chain
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=OpenAI(model_name="gpt-4", temperature=0),
+            chain_type="stuff",
+            retriever=vectorstore.as_retriever(),
+            return_source_documents=True,
+        )
+
+        # Run the query through the chain
+        result = qa_chain({"query": query})
+
+        # Extract the answer and source documents
+        answer = result["result"]
+        source_documents = result["source_documents"]
+
+        # Prepare the response
+        response = {
+            "answer": answer,
+            "sources": [
+                {
+                    "page_content": doc.page_content,
+                    "metadata": doc.metadata,
+                }
+                for doc in source_documents
+            ],
+        }
+
+        logger.info("Query processed successfully.")
+        return JSONResponse(response)
+
     except Exception as e:
         logger.error(f"Query error: {str(e)}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail="Failed to query ChromaDB")
+        raise HTTPException(status_code=500, detail="Failed to process the query")
