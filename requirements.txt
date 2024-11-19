@@ -1,0 +1,6 @@
+fastapi==0.95.0
+uvicorn==0.22.0
+langchain==0.3.7  # Replace with the actual version you are using
+chromadb==0.3.21
+openai==0.28.0
+python-multipart==0.0.6
