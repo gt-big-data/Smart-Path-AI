@@ -1,6 +1,6 @@
 import requests
 import streamlit as st
-from streamlit_lottie import st_lottie
+# from streamlit_lottie import st_lottie
 import uuid
 import os
 import json
@@ -14,13 +14,13 @@ st.set_page_config(
     layout="wide"
 )
 
-def load_lottieurl(url):
-    r = requests.get(url)
-    if r.status_code != 200:
-        return None
-    return r.json()
+# def load_lottieurl(url):
+#     r = requests.get(url)
+#     if r.status_code != 200:
+#         return None
+#     return r.json()
 
-lottie_coding = load_lottieurl("https://lottie.host/2021bcc3-70ad-4e1c-b919-eb0cbd2b2fd3/bgpv9Cb4Lt.json")
+# lottie_coding = load_lottieurl("https://lottie.host/2021bcc3-70ad-4e1c-b919-eb0cbd2b2fd3/bgpv9Cb4Lt.json")
 
 # --- HEADER SECTION ---
 with st.container():
@@ -86,8 +86,8 @@ with st.container():
             questions_md = "\n".join([f"{idx + 1}. {question}" for idx, question in enumerate(st.session_state['questions'])])
             st.markdown(f"**Generated Questions:**\n\n{questions_md}")
 
-    with right_column:
-        st_lottie(lottie_coding, height=300, key="coding")
+    # with right_column:
+    #     st_lottie(lottie_coding, height=300, key="coding")
         
 # --- CHATBOT SECTION ---
 st.write("---")
