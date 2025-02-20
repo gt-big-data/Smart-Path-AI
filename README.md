@@ -2,7 +2,7 @@
 * "/server" directory contains all the backend functionality (database stuff and google auth implementation).
 * "/src" directory contains all the pages for the website - basically the frontend.
 * Bolt made the project structure kinda weird so some of the files in the front end are outside of the src directory.
-* Make sure to run "npm install" at both the root level and within the root directory to install all the dependencies listed in the package.json files.
+* Make sure to run "npm install" at both the root level and within the server directory to install all the dependencies listed in the package.json files.
 * Now running "npm run dev" at the root level should run both front and back end simultaneously - You should see something like this in your terminal :
 
   ## Example Terminal output:
