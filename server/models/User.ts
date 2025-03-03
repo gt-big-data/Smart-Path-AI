@@ -9,12 +9,13 @@ interface IUser extends Document {
 
 const userSchema = new Schema<IUser>(
     {
-        email: { type: String, sparse: true , unique: true},
+        email: { type: String, unique: true, required: true, index: true },
         googleId: { type: String, unique: true, sparse: true, partialFilterExpression: { googleId: { $exists: true, $ne: null } } },
         displayName: String,
         password: String,
     }
 );
+
 
 const User: Model<IUser> = mongoose.model<IUser>('User', userSchema);
 export default User;
