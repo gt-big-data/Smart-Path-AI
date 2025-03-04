@@ -1,31 +1,32 @@
-# Smart-Path-AI
+# TL;DR
+* "/server" directory contains all the backend functionality (database stuff and google auth implementation).
+* "/src" directory contains all the pages for the website - basically the frontend.
+* Bolt made the project structure kinda weird so some of the files in the front end are outside of the src directory.
+* Make sure to run "npm install" at both the root level and within the server directory to install all the dependencies listed in the package.json files.
+* Now running "npm run dev" at the root level should run both front and back end simultaneously - You should see something like this in your terminal :
 
-Smart-Path-AI is an innovative AI-based learning tool designed to help users prepare for exams by providing personalized quizzes based on their study materials. By simply uploading PDF(s) of study material, users are given 5 tailored questions generated from the content to reinforce their learning and assess their understanding.
-
-## Features ✨
-
-- **📄 Upload Study Materials**: Upload your PDF(s) of study material to the web app.
-- **🤖 AI-Powered Question Generation**: The AI analyzes your PDF(s) and generates 5 relevant questions.
-- **🎯 Personalized Learning**: Get questions specific to the content of your study material to test your understanding.
-- **📱 Responsive Interface**: A user-friendly, intuitive interface for interacting with your study materials and quizzes.
-- **🔄 Instant Feedback**: Receive instant feedback on your answers to enhance learning.
-
-## Usage 🛠️
-
-1. **📤 Upload Your PDF**: Simply upload your study material in PDF format.
-2. **🧠 Generate Questions**: Once your PDF is parsed, the AI generates 5 questions based on the content.
-3. **📝 Answer the Questions**: Respond to the questions and get instant feedback.
-4. **🔄 Repeat**: Upload more PDFs and continue improving your knowledge with personalized quizzes.
-
-## Contributing 🤝
-
-We welcome contributions to improve Smart-Path-AI! If you'd like to contribute, please fork the repository and submit a pull request.
-
-## Acknowledgments 🙏
-
-- Thanks to all contributors and open-source libraries that made this project possible.
-- Special thanks to the AI research team for developing the question generation model.
-
----
-
-For more information, feel free to contact the team at **gt-big-data**.
+  ## Example Terminal output:
+          npm run dev                                                       
+          
+          > vite-react-typescript-starter@0.0.0 dev
+          > concurrently "npm run dev:server" "npm run dev:client"
+          
+          [1] 
+          [1] > vite-react-typescript-starter@0.0.0 dev:client
+          [1] > vite
+          [1] 
+          [0] 
+          [0] > vite-react-typescript-starter@0.0.0 dev:server
+          [0] > cd server && npm run dev
+          [0]
+          [1] 
+          [1]   VITE v5.4.8  ready in 236 ms
+          [1]
+          [1]   ➜  Local:   http://localhost:5173/
+          [1]   ➜  Network: use --host to expose
+          [0] 
+          [0] > server@1.0.0 dev
+          [0] > npx ts-node --project tsconfig.json index.ts
+          [0]
+          [0] Server running on http://localhost:4000
+          [0] MongoDB connected
