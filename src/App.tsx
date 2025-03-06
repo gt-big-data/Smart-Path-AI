@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { BookOpen, Sparkles, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -10,6 +10,20 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 function Home() {
   // Access auth state
   const { isAuthenticated, userName } = useAuth();
+
+  useEffect(() => {
+    fetch('http://localhost:4000/auth/flask/hi')
+      .then(response => response.text())
+      .then(data => {
+        console.log(data); 
+        // data should be the HTML from Flask: "<h1>Flask server called successfully</h1>"
+        // You can do something like setState or dangerouslySetInnerHTML if you want to render it
+      })
+      .catch(error => {
+        console.error('Error calling Node route:', error);
+      });
+  }, []);
+
 
   return (
       <div className="min-h-screen bg-gradient-to-b from-indigo-50 to-white">
