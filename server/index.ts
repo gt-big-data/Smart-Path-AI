@@ -5,9 +5,11 @@ import passport from 'passport';
 import cors from 'cors';
 import authRoutes from './auth/routes';
 import session from 'express-session';
+import axios from 'axios';
 dotenv.config();
 
 import './config/passport';
+import router from './auth/routes'
 
 const app = express();
 
@@ -45,6 +47,19 @@ app.use(passport.session());
 
 // Auth routes
 app.use('/auth', authRoutes);
+
+// New route: Calls the Flask server and returns its response
+app.get('/flask/hi', async (req, res) => {
+    try {
+        // Call the Flask server on port 5000 (make sure Flask is running)
+        const flaskResponse = await axios.get('http://localhost:5000/');
+        // Return the HTML/template response from Flask
+        res.send(flaskResponse.data);
+    } catch (error) {
+        console.error(error);
+        res.status(500).send('Error calling Flask server');
+    }
+});
 
 // Start server
 app.listen(4000, () => {

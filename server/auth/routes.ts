@@ -1,11 +1,26 @@
 import { Router, Request, Response } from 'express';
 import passport from 'passport';
 import { signup, login } from '../controllers/authController';
+import axios from 'axios';
 
 const router = Router();
 
 router.post('/signup', signup); // calls a controller method to create a user in DB
 router.post('/login', login);   // calls a controller method to verify credentials
+
+
+
+router.get('/flask/hi', async (req, res) => {
+    try {
+      // Call Flask on port 5000
+      const flaskResponse = await axios.get('http://localhost:5000/');
+      // Forward the response ("hi") back to the client
+      res.send(flaskResponse.data);
+    } catch (error) {
+      console.error(error);
+      res.status(500).send('Error calling Flask server');
+    }
+  });
 
 /**
  * Google OAuth endpoints using Passport
