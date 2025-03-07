@@ -47,7 +47,7 @@ function Home() {
             </p>
             <div className="flex justify-center gap-4">
               <Link
-                  to="/login"
+                  to="/Signup"
                   className="px-8 py-3 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors inline-flex items-center gap-2"
               >
                 Get Started <ArrowRight className="h-5 w-5" />

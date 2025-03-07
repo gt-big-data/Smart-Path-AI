@@ -40,7 +40,7 @@ export default function Login() {
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center space-x-2 mb-4">
               <Brain className="h-10 w-10 text-indigo-600" />
-              <span className="text-2xl font-bold text-gray-800">StudyAI</span>
+              <span className="text-2xl font-bold text-gray-800">SmartPathAI</span>
             </div>
             <h2 className="text-3xl font-bold text-gray-900">Welcome back</h2>
             <p className="text-gray-600 mt-2">Please enter your details to sign in</p>
