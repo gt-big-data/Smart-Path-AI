@@ -6,6 +6,7 @@ import cors from 'cors';
 import authRoutes from './auth/routes';
 import session from 'express-session';
 import axios from 'axios';
+import User from './models/User';
 dotenv.config();
 
 import './config/passport';
@@ -33,17 +34,35 @@ app.use(cors({
 
 app.use(express.json());
 
-// Add express-session middleware BEFORE initializing Passport sessions
+// Session middleware (before passport middleware)
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'mysecret',
+    secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false }
+    cookie: {
+        secure: process.env.NODE_ENV === 'production', // Only use secure in production
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
 }));
 
-// Initialize Passport and use Passport sessions
+// Initialize passport and restore authentication state from session
 app.use(passport.initialize());
 app.use(passport.session());
+
+// Passport serialization (add these if they're not already present)
+passport.serializeUser((user: any, done) => {
+    done(null, user._id);
+});
+
+passport.deserializeUser(async (id: string, done) => {
+    try {
+        const user = await User.findById(id);
+        done(null, user);
+    } catch (err) {
+        done(err);
+    }
+});
 
 // Auth routes
 app.use('/auth', authRoutes);
