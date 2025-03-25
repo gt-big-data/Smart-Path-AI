@@ -48,6 +48,7 @@ export default function Signup() {
 
   const navigate = useNavigate();
   const { signup, loginWithGoogle } = useAuth();
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,7 +84,7 @@ export default function Signup() {
       } else {
         setFormError(errorMessage);
       }
-    }
+}
   };
 
   const handleGoogleSignup = () => {
@@ -151,6 +152,13 @@ export default function Signup() {
                 <span className="px-2 bg-white text-gray-500">Or continue with</span>
               </div>
             </div>
+
+            {error && (
+  <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+    <strong className="font-bold">Error: </strong>
+    <span className="block sm:inline">{error}</span>
+  </div>
+)}
 
 
             <form onSubmit={handleSubmit} className="space-y-6">
