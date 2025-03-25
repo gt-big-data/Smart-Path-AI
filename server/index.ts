@@ -67,6 +67,10 @@ passport.deserializeUser(async (id: string, done) => {
 // Auth routes
 app.use('/auth', authRoutes);
 
+app.get('/', (req, res) => {
+    res.send('API is running');
+  });
+
 // New route: Calls the Flask server and returns its response
 app.get('/flask/hi', async (req, res) => {
     try {

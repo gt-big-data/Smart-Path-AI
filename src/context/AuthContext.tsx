@@ -59,14 +59,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         body: JSON.stringify({ email, password, name }),
         credentials: 'include', // This is important for cookies/session
       });
-      
+
+      console.log('Signup response:', response);
+
       const data = await response.json();
+      console.log('Signup response:', data);
+
       if (!response.ok) {
         throw new Error(data.message || 'Signup failed');
       }
-      
-      // Make sure we're setting the auth state after successful signup
-      const nameFromServer = data.user.displayName || data.user.name || data.user.email;
+
+      // Try to use "displayName", then "name", then fallback to email
+      const nameFromServer = data.user.displayName || data.user.email;
       setIsAuthenticated(true);
       setUserName(nameFromServer);
     } catch (err) {

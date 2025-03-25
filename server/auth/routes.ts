@@ -24,18 +24,18 @@ router.get('/flask/hi', async (req, res) => {
 router.get(
     '/google',
     passport.authenticate('google', {
-        failureRedirect: 'http://localhost:5173/login',
-        scope: ['profile', 'email'],
-        prompt: 'select_account'
+
+        //failureRedirect: 'http://localhost:5173/login', // or wherever you want users to land on failure
+        scope: ['profile', 'email'], // what data you want from the user
+        prompt: 'select_account',    // optional: always prompt user to pick account
     })
 );
 
-router.get(
-    '/google/callback',
-    passport.authenticate('google', {
-        failureRedirect: 'http://localhost:5173/login',
-    }),
-    (req: Request, res: Response) => {
+// 2. Google OAuth callback
+//    Google redirects here after the user grants permission
+router.get('/google/callback',
+    passport.authenticate('google', { failureMessage: true }),
+    (req:Request, res: Response) => {
         res.redirect('http://localhost:5173');
     }
 );
