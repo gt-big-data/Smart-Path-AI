@@ -5,6 +5,7 @@ import {
   PanelGroup,
   PanelResizeHandle,
 } from 'react-resizable-panels';
+import { useNavigate } from 'react-router-dom';
 
 interface Message {
   id: string;
@@ -33,6 +34,8 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const navigate = useNavigate();
   
   const [chats, setChats] = useState<Chat[]>([
     {
@@ -392,9 +395,15 @@ function App() {
         <Panel minSize={30}>
           <div className="h-full flex flex-col">
             {/* Chat Header */}
-            <div className="bg-gray-800 p-4 border-b border-gray-700">
-              <h1 className="text-xl font-semibold text-white">{currentChat.title}</h1>
-            </div>
+            <div className="bg-gray-800 p-4 border-b border-gray-700 flex justify-between items-center">
+  <h1 className="text-xl font-semibold text-white">{currentChat.title}</h1>
+  <button
+    onClick={() => navigate('/')}
+    className="p-2 bg-transparent text-purple-400 border border-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-colors duration-200 flex items-center justify-center gap-2"
+  >
+    Return to Homepage
+  </button>
+</div>
 
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-900">
