@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { BookOpen, Sparkles, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import Chat from './pages/Chat';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Navigation from './components/Navigation';
@@ -11,13 +12,13 @@ function Home() {
   // Access auth state
   const { isAuthenticated, userName } = useAuth();
 
-  const handleChatClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    if (isAuthenticated) {
-      // Open in new tab when authenticated
-      window.open('/chat', '_blank');
-      e.preventDefault();
-    }
-  };
+  // const handleChatClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+  //   if (isAuthenticated) {
+  //     // Open in new tab when authenticated
+  //     window.open('/chat', '_blank');
+  //     e.preventDefault();
+  //   }
+  // };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-indigo-50 to-white">
@@ -40,13 +41,20 @@ function Home() {
             Personalized study assistance powered by artificial intelligence to help you learn smarter, not harder.
           </p>
           <div className="flex justify-center gap-4">
-            <Link
+            {/* <Link
               to={isAuthenticated ? "/chat" : "/signup"}
               onClick={handleChatClick}
               className="px-8 py-3 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors inline-flex items-center gap-2"
             >
               {isAuthenticated ? "Start a new chat" : "Get Started"} <ArrowRight className="h-5 w-5" />
-            </Link>
+            </Link> */
+            <Link
+  to={isAuthenticated ? "/chat" : "/signup"}
+  className="px-8 py-3 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors inline-flex items-center gap-2"
+>
+  {isAuthenticated ? "Start a new chat" : "Get Started"} <ArrowRight className="h-5 w-5" />
+</Link>
+            }
           </div>
         </div>
 
@@ -85,6 +93,7 @@ function AppContent() {
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
+      <Route path="/chat" element={<Chat />} />
     </Routes>
   );
 }
