@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import User, { IUser } from '../models/User';
 import { Types, Document as MongooseDocument } from 'mongoose';
+import 'express-session';
 
 // Extend the session type to include userId
 declare module 'express-session' {
@@ -38,7 +39,7 @@ const validatePassword = (password: string): { isValid: boolean; error: string }
 export const signup = async (req: Request, res: Response) => {
     try {
         const { email, password, name } = req.body;
-        console.log('Received signup request:', { email, name }); // Log incoming request
+        console.log('Received signup request:', { email, name, }); // Log incoming request
 
         // Validate password
         const { isValid, error } = validatePassword(password);
@@ -56,6 +57,8 @@ export const signup = async (req: Request, res: Response) => {
             email,
             password: hashedPassword,
             displayName: name,
+            chats: [],
+
         };
 
         const newUser = (await User.create(userData)) as unknown as MongooseDocument<Types.ObjectId> & IUser;
@@ -80,6 +83,7 @@ export const signup = async (req: Request, res: Response) => {
                     id: newUser._id,
                     email: newUser.email,
                     displayName: newUser.displayName,
+                    chats: newUser.chats,
                 },
             });
         }); 
@@ -94,38 +98,53 @@ export const signup = async (req: Request, res: Response) => {
  */
 export const login = async (req: Request, res: Response) => {
     try {
-        const { email, password } = req.body;
-        const user = await User.findOne({ email });
-        if (!user) {
-            res.status(401).json({ message: 'Invalid email or password' });
-            return;
+      const { email, password } = req.body;
+      const user = await User.findOne({ email }) as unknown as MongooseDocument<Types.ObjectId> & IUser;
+  
+      if (!user) {
+        return res.status(401).json({ message: 'Invalid email or password' });
+      }
+  
+      const isMatch = await bcrypt.compare(password, user.password!);
+      if (!isMatch) {
+        return res.status(401).json({ message: 'Invalid email or password' });
+      }
+  
+      // Set the session userId
+      req.session.userId = user._id.toString();
+      
+      // Explicitly save the session before proceeding
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error('Session save error:', saveErr);
+          return res.status(500).json({ message: 'Failed to save session' });
         }
-        const isMatch = await bcrypt.compare(password, user.password!);
-        if (!isMatch) {
-            res.status(401).json({ message: 'Invalid email or password' });
-            return;
-        }
-        req.login(user, (err) => {
-                if (err) {
-                    console.error('Error establishing session on signup:', err);
-                    res.status(500).json({ message: 'Failed to establish session' });
-                    return;
-                }
-                res.status(200).json({
-                    message: 'Login successful',
-                    user: {
-                        _id: user._id,
-                        email: user.email,
-                        displayName: user.displayName,
-                    },
-                });
-            }
-        );
+        
+        // Now proceed with login
+        req.login(user, (loginErr) => {
+          if (loginErr) {
+            console.error('Error establishing session on login:', loginErr);
+            return res.status(500).json({ message: 'Failed to establish session' });
+          }
+          
+          console.log('Session established on login:', req.session.userId);
+          return res.status(200).json({
+            message: 'Login successful',
+            user: {
+              _id: user._id,
+              email: user.email,
+              displayName: user.displayName,
+              chats: user.chats,
+            },
+          });
+        });
+      });
     } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ message: 'Internal server error' });
+      console.error('Login error:', error);
+      return res.status(500).json({ message: 'Internal server error' });
     }
-};
+  };
+  
 
 /**
  * GOOGLE AUTH CALLBACK

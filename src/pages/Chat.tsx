@@ -59,70 +59,6 @@ function App() {
   
   const [chats, setChats] = useState<Chat[]>([
     {
-      id: '1',
-      title: 'Project Planning',
-      lastMessage: 'Let\'s break down the tasks into sprints...',
-      timestamp: new Date(Date.now() - 1000 * 60 * 60),
-      messages: [
-        {
-          id: '1-1',
-          content: 'Hi, I need help planning my project timeline.',
-          sender: 'user',
-          timestamp: new Date(Date.now() - 1000 * 60 * 65),
-        },
-        {
-          id: '1-2',
-          content: 'I\'d be happy to help with project planning! What kind of project are we looking at?',
-          sender: 'ai',
-          timestamp: new Date(Date.now() - 1000 * 60 * 64),
-        },
-        {
-          id: '1-3',
-          content: 'It\'s a web application that needs to be completed in 3 months.',
-          sender: 'user',
-          timestamp: new Date(Date.now() - 1000 * 60 * 63),
-        },
-        {
-          id: '1-4',
-          content: 'Let\'s break down the tasks into sprints...',
-          sender: 'ai',
-          timestamp: new Date(Date.now() - 1000 * 60 * 60),
-        },
-      ],
-    },
-    {
-      id: '2',
-      title: 'Code Review',
-      lastMessage: 'The new feature implementation looks solid...',
-      timestamp: new Date(Date.now() - 1000 * 60 * 30),
-      messages: [
-        {
-          id: '2-1',
-          content: 'Could you review my latest pull request?',
-          sender: 'user',
-          timestamp: new Date(Date.now() - 1000 * 60 * 35),
-        },
-        {
-          id: '2-2',
-          content: 'Of course! I\'ll take a look at your code. Which features did you implement?',
-          sender: 'ai',
-          timestamp: new Date(Date.now() - 1000 * 60 * 34),
-        },
-        {
-          id: '2-3',
-          content: 'I added user authentication and profile management.',
-          sender: 'user',
-          timestamp: new Date(Date.now() - 1000 * 60 * 32),
-        },
-        {
-          id: '2-4',
-          content: 'The new feature implementation looks solid...',
-          sender: 'ai',
-          timestamp: new Date(Date.now() - 1000 * 60 * 30),
-        },
-      ],
-    },
-    {
       id: '3',
       title: 'New Chat',
       lastMessage: 'Hello! How can I help you today?',
@@ -358,6 +294,18 @@ function App() {
         : chat
     ));
 
+    try {
+      await axios.post('http://localhost:4000/chat/message', {
+        chat_id: currentChatId,
+        sender: 'user',
+        text: input,
+      }, { withCredentials: true });
+  
+      console.log('Message saved to backend');
+    } catch (error) {
+      console.error('Error saving message:', error);
+    }
+
     // Find the last question message
     const lastQuestion = [...currentChat.messages].reverse().find(m => m.isQuestion);
 
@@ -502,25 +450,48 @@ function App() {
     setCurrentChatId(chatId);
   };
 
-  const handleNewChat = () => {
-    const newChat: Chat = {
-      id: Date.now().toString(),
-      title: 'New Chat',
-      lastMessage: 'Hello! I am your personal assistant. I will show you the Smart Path to you studies. Please upload a PDF file to get started.',
-      timestamp: new Date(),
-      messages: [
-        {
-          id: 'welcome',
-          content: 'Hello! I am your personal assistant. I will show you the Smart Path to you studies. Please upload a PDF file to get started.',
-          sender: 'ai',
-          timestamp: new Date(),
-        },
-      ],
-    };
-    
-    setChats(prev => [newChat, ...prev]);
-    setCurrentChatId(newChat.id);
+  const handleNewChat = async () => {
+    try {
+      console.log('Creating new chat...');
+  
+      const response = await axios.post('http://localhost:4000/chat/new', {}, { withCredentials: true });
+
+      console.log('Create chat response:', response.data);
+  
+      const newChatFromBackend = response.data.chat;
+  
+      const newChat: Chat = {
+        id: newChatFromBackend.chat_id,
+        title: 'New Chat',
+        lastMessage: 'Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.',
+        timestamp: new Date(newChatFromBackend.date_created),
+        messages: [
+          {
+            id: 'welcome',
+            content: 'Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.',
+            sender: 'ai',
+            timestamp: new Date(),
+          },
+        ],
+      };
+  
+      console.log('New chat object to add to state:', newChat);
+  
+      setChats(prev => [newChat, ...prev]);
+      setCurrentChatId(newChat.id);
+  
+      console.log('New chat added successfully! Current chats:', [...chats, newChat]);
+  
+    } catch (error: any) {
+      console.error('Error creating new chat:', error);
+      if (error.response) {
+        console.error('Backend error response:', error.response.data);
+      }
+      alert('Failed to create a new chat.');
+    }
   };
+  
+  
 
   const getFileIcon = (type: string) => {
     if (type.startsWith('image/')) {
