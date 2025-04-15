@@ -55,6 +55,7 @@ function App() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
   const [isAnswering, setIsAnswering] = useState<boolean>(false);
 
+
   const navigate = useNavigate();
   
   const [chats, setChats] = useState<Chat[]>([
@@ -151,6 +152,45 @@ function App() {
     }
   };
 
+
+  //load all of user's old chats:
+  useEffect(() => {
+    const fetchUserChats = async () => {
+      try {
+        const resUser = await axios.get('/chat/user');
+        const userId = resUser.data;
+        console.log("Fetched userId:", userId);
+  
+        const resChats = await axios.get(`/chat/${userId}/chats`);
+        const userChats = resChats.data;
+        console.log("Fetched chats from DB:", resChats.data);
+  
+        if (userChats.length > 0) {
+          const formattedChats = userChats.map((chat: { chat_id: any; messages: { (): any; new(): any; text: any; }[]; date_created: string | number | Date; }) => ({
+            id: chat.chat_id,
+            title: 'Chat',
+            lastMessage: chat.messages.at(-1)?.text || 'No messages yet',
+            timestamp: new Date(chat.date_created),
+            messages: chat.messages.map((msg: any, index: number) => ({
+              id: `${chat.chat_id}-${index}`,
+              content: msg.text,
+              sender: msg.sender,
+              timestamp: new Date(msg.timestamp),
+            })),
+          }));
+  
+          setChats(formattedChats);
+          setCurrentChatId(formattedChats[0].id); // auto-load latest chat
+        }
+  
+      } catch (err) {
+        console.error('Error fetching chats:', err);
+      }
+    };
+    fetchUserChats();
+  }, []);
+  
+
   const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -232,6 +272,12 @@ function App() {
                   }
                 : chat
             ));
+
+            await axios.post('http://localhost:4000/chat/message', {
+              chat_id: currentChatId,
+              sender: 'ai',
+              text: firstQuestionMessage.content,
+              }, { withCredentials: true });
           }
         } catch (error) {
           console.error('Error fetching QA data:', error);
@@ -352,6 +398,12 @@ function App() {
                 : chat
             ));
 
+            await axios.post('http://localhost:4000/chat/message', {
+                 chat_id: currentChatId,
+                 sender: 'ai',
+                 text: verificationResult.content,
+          }, { withCredentials: true });
+
             setCurrentQuestionIndex(prev => prev + 1);
           } else {
             // All questions answered correctly
@@ -368,6 +420,13 @@ function App() {
                   }
                 : chat
             ));
+            const finalMessage = `${verificationResult.feedback}\n\nCongratulations! You've successfully answered all the questions. You have a good understanding of the material.`;
+
+            await axios.post('http://localhost:4000/chat/message', {
+              chat_id: currentChatId,
+              sender: 'ai',
+              text: finalMessage,
+          }, { withCredentials: true });
             setIsAnswering(false);
           }
         } else {
@@ -389,6 +448,13 @@ function App() {
                 }
               : chat
           ));
+
+          const feedbackContent = feedbackMessage.content;
+          await axios.post('http://localhost:4000/chat/message', {
+            chat_id: currentChatId,
+            sender: 'ai',
+            text: feedbackContent,
+      }, { withCredentials: true });
         }
       } catch (error) {
         console.error('Error verifying answer:', error);
@@ -406,6 +472,13 @@ function App() {
               }
             : chat
         ));
+        const errorMessage = "Sorry, I encountered an error while verifying your answer. Please try again.";
+
+        await axios.post('http://localhost:4000/chat/message', {
+  chat_id: currentChatId,
+  sender: 'ai',
+  text: errorMessage,
+}, { withCredentials: true });
       } finally {
         setIsTyping(false);
       }
@@ -414,6 +487,8 @@ function App() {
       try {
         setIsTyping(true);
         const aiMessage = await generateAIResponse(input);
+
+console.log('AI message saved to backend');
         
         setChats(prevChats => prevChats.map(chat => 
           chat.id === currentChatId
@@ -425,6 +500,12 @@ function App() {
               }
             : chat
         ));
+
+        await axios.post('http://localhost:4000/chat/message', {
+  chat_id: currentChatId,
+  sender: 'ai',
+  text: aiMessage.content,
+}, { withCredentials: true });
       } catch (error) {
         console.error('Error generating AI response:', error);
         setChats(prevChats => prevChats.map(chat =>
@@ -440,6 +521,14 @@ function App() {
               }
             : chat
         ));
+
+        const errorMessage = "Sorry, I encountered an error while verifying your answer. Please try again.";
+
+        await axios.post('http://localhost:4000/chat/message', {
+  chat_id: currentChatId,
+  sender: 'ai',
+  text: errorMessage,
+}, { withCredentials: true });
       } finally {
         setIsTyping(false);
       }
@@ -479,6 +568,14 @@ function App() {
   
       setChats(prev => [newChat, ...prev]);
       setCurrentChatId(newChat.id);
+
+      const welcomeMessage = 'Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.';
+
+      await axios.post('http://localhost:4000/chat/message', {
+        chat_id: newChat.id,
+        sender: 'ai',
+        text: welcomeMessage,
+      }, { withCredentials: true });
   
       console.log('New chat added successfully! Current chats:', [...chats, newChat]);
   

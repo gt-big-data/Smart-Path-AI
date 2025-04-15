@@ -3,6 +3,27 @@ import User from '../models/User';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
+ * Get current logged in user's ID
+ * GET /chat/user
+ */
+export const getCurrentUserId = async (req: Request, res: Response) => {
+  try {
+    const userId = (req.session as any)?.passport?.user;
+
+    if (!userId) {
+      res.status(401).json({ message: 'Unauthorized' });
+    }
+    console.log("userId from backend", userId);
+    const idString = typeof userId === 'object' ? userId._id : userId;
+
+    res.status(200).send(idString);
+  } catch (err) {
+    console.error('Get current user ID error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+/**
  * Create a new chat for the current user
  * POST /chat/new
  */
@@ -108,5 +129,22 @@ export const addMessageToChat = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Add message error:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+
+// GET /chat/chats
+export const getUserChats = async (req: Request, res: Response) => {
+  try {
+    const userId = req.params.userId;
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      res.status(404).json({ message: 'User not found' });
+    }
+
+    res.status(200).json(user?.chats);  // assuming chats are stored in user.chats
+  } catch (err) {
+    res.status(500).json({ message: 'Server Error' });
   }
 };
