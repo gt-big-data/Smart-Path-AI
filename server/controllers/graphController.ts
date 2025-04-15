@@ -19,7 +19,11 @@ if (!process.env.OPENAI_API_KEY) {
 
 export const viewGraph = async (req: Request, res: Response) => {
   try {
-    const response = await axios.get('http://localhost:8000/view-graph');
+    const graph_id = req.query.graph_id;
+    if (!graph_id) {
+      return res.status(400).json({ error: 'graph_id is required' });
+    }
+    const response = await axios.get(`http://localhost:8000/view-graph?graph_id=${graph_id}`);
     res.json(response.data);
   } catch (error) {
     console.error('Error fetching graph data:', error);
@@ -29,7 +33,11 @@ export const viewGraph = async (req: Request, res: Response) => {
 
 export const generateQuestionsWithAnswers = async (req: Request, res: Response) => {
   try {
-    const response = await axios.get('http://localhost:8000/generate-questions-with-answers');
+    const graph_id = req.query.graph_id;
+    if (!graph_id) {
+      return res.status(400).json({ error: 'graph_id is required' });
+    }
+    const response = await axios.get(`http://localhost:8000/generate-questions-with-answers?graph_id=${graph_id}`);
     res.json(response.data);
   } catch (error) {
     console.error('Error generating questions and answers:', error);

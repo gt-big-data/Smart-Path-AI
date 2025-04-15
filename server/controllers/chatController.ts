@@ -80,7 +80,7 @@ export const addMessageToChat = async (req: Request, res: Response) => {
 
   try {
     const userId = (req.session as any)?.passport?.user; // Access userId from passport
-    const { chat_id, sender, text } = req.body;
+    const { chat_id, sender, text, graph_id } = req.body;
 
     if (!userId) {
       console.log("unauthorized");
@@ -101,25 +101,33 @@ export const addMessageToChat = async (req: Request, res: Response) => {
       chat = {
         chat_id,
         date_created: new Date(),
-        graph_id: '', // Set to null if no graph is created yet
+        graph_id: graph_id || '', // Initialize with empty string if no graph_id
         messages: [],
       };
       user?.chats.push(chat);
     }
 
-    const newMessage = {
-      sender,
-      text,
-      timestamp: new Date(),
-    };
+    // If graph_id is provided, update it
+    if (graph_id) {
+      chat.graph_id = graph_id;
+    }
+
+    // Only add message if text is provided (allows for graph_id only updates)
+    if (text) {
+      const newMessage = {
+        sender,
+        text,
+        timestamp: new Date(),
+      };
+      chat.messages.push(newMessage);
+    }
 
     if (user) {
-      chat.messages.push(newMessage);
       await user.save();
 
-      console.log("message added successfully");
+      console.log("message/graph_id update successful");
       res.status(200).json({
-        message: 'Message added',
+        message: text ? 'Message added' : 'Graph ID updated',
         chat,
       });
     } else {

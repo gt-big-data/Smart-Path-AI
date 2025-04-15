@@ -34,6 +34,7 @@ interface Chat {
   lastMessage: string;
   timestamp: Date;
   messages: Message[];
+  graph_id?: string;
 }
 
 interface QAPair {
@@ -54,7 +55,7 @@ function App() {
   const [loadingDots, setLoadingDots] = useState('');
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
   const [isAnswering, setIsAnswering] = useState<boolean>(false);
-
+  const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
 
   const navigate = useNavigate();
   
@@ -141,9 +142,10 @@ function App() {
     };
   };
 
-  const fetchGraphData = async () => {
+  const fetchGraphData = async (graphId?: string) => {
+    if (!graphId) return;
     try {
-      const response = await axios.get('http://localhost:4000/api/view-graph');
+      const response = await axios.get(`http://localhost:4000/api/view-graph?graph_id=${graphId}`);
       console.log('Graph data response:', response.data);
       setGraphData(response.data);
     } catch (error) {
@@ -166,7 +168,7 @@ function App() {
         console.log("Fetched chats from DB:", resChats.data);
   
         if (userChats.length > 0) {
-          const formattedChats = userChats.map((chat: { chat_id: any; messages: { (): any; new(): any; text: any; }[]; date_created: string | number | Date; }) => ({
+          const formattedChats = userChats.map((chat: { chat_id: any; messages: { (): any; new(): any; text: any; }[]; date_created: string | number | Date; graph_id: string; }) => ({
             id: chat.chat_id,
             title: 'Chat',
             lastMessage: chat.messages.at(-1)?.text || 'No messages yet',
@@ -177,6 +179,7 @@ function App() {
               sender: msg.sender,
               timestamp: new Date(msg.timestamp),
             })),
+            graph_id: chat.graph_id
           }));
   
           setChats(formattedChats);
@@ -213,8 +216,14 @@ function App() {
           size: file.size
         });
 
+        // Get current chat's graph_id if it exists
+        const currentChatData = chats.find(chat => chat.id === currentChatId);
+        const url = currentChatData?.graph_id 
+          ? `http://localhost:4000/upload/process-pdf?graph_id=${currentChatData.graph_id}`
+          : 'http://localhost:4000/upload/process-pdf';
+
         // Send to our backend first
-        const response = await fetch('http://localhost:4000/upload/process-pdf', {
+        const response = await fetch(url, {
           method: 'POST',
           body: formData,
         });
@@ -227,12 +236,59 @@ function App() {
           throw new Error(responseData.error || 'Failed to process file');
         }
 
-        // Fetch graph data
-        await fetchGraphData();
+        // Create file upload message
+        const fileUploadMessage: Message = {
+          id: Date.now().toString(),
+          content: `Uploaded file: ${file.name}`,
+          sender: 'user',
+          timestamp: new Date(),
+          file: {
+            name: file.name,
+            type: file.type,
+            url: URL.createObjectURL(file)
+          }
+        };
+
+        // Save file upload message to backend first
+        await axios.post('http://localhost:4000/chat/message', {
+          chat_id: currentChatId,
+          sender: 'user',
+          text: fileUploadMessage.content,
+        }, { withCredentials: true });
+
+        // Update local state with file upload message
+        setChats(prevChats => prevChats.map(chat =>
+          chat.id === currentChatId
+            ? {
+                ...chat,
+                lastMessage: fileUploadMessage.content,
+                timestamp: new Date(),
+                messages: [...chat.messages, fileUploadMessage],
+              }
+            : chat
+        ));
+
+        // If this is a new graph, update the chat with the graph_id
+        if (responseData.graph_id) {
+          await axios.post('http://localhost:4000/chat/message', {
+            chat_id: currentChatId,
+            graph_id: responseData.graph_id,
+          }, { withCredentials: true });
+
+          // Update local state
+          setChats(prevChats => prevChats.map(chat => 
+            chat.id === currentChatId
+              ? { ...chat, graph_id: responseData.graph_id }
+              : chat
+          ));
+        }
+
+        // Fetch graph data with the graph_id
+        await fetchGraphData(responseData.graph_id);
         
         // Fetch QA data
         try {
-          const qaResponse = await fetch('http://localhost:4000/api/generate-questions-with-answers');
+          const qaResponse = await fetch(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${responseData.graph_id}`);
           const qaResponseData = await qaResponse.json();
           if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
             setQaData(qaResponseData.qa_pairs);
@@ -258,17 +314,7 @@ function App() {
               chat.id === currentChatId
                 ? {
                     ...chat,
-                    messages: [...chat.messages, {
-                      id: Date.now().toString(),
-                      content: `Uploaded file: ${file.name}`,
-                      sender: 'user' as const,
-                      timestamp: new Date(),
-                      file: {
-                        name: file.name,
-                        type: file.type,
-                        url: URL.createObjectURL(file)
-                      }
-                    }, firstQuestionMessage],
+                    messages: [...chat.messages, firstQuestionMessage],
                   }
                 : chat
             ));
@@ -277,7 +323,7 @@ function App() {
               chat_id: currentChatId,
               sender: 'ai',
               text: firstQuestionMessage.content,
-              }, { withCredentials: true });
+            }, { withCredentials: true });
           }
         } catch (error) {
           console.error('Error fetching QA data:', error);
@@ -294,6 +340,31 @@ function App() {
           });
           errorMessage = error.message;
         }
+        
+        // Create and save error message
+        const errorMsg: Message = {
+          id: Date.now().toString(),
+          content: errorMessage,
+          sender: 'ai',
+          timestamp: new Date(),
+        };
+
+        setChats(prevChats => prevChats.map(chat =>
+          chat.id === currentChatId
+            ? {
+                ...chat,
+                lastMessage: errorMessage,
+                timestamp: new Date(),
+                messages: [...chat.messages, errorMsg],
+              }
+            : chat
+        ));
+
+        await axios.post('http://localhost:4000/chat/message', {
+          chat_id: currentChatId,
+          sender: 'ai',
+          text: errorMessage,
+        }, { withCredentials: true });
         
         alert(errorMessage);
       } finally {
@@ -340,6 +411,7 @@ function App() {
         : chat
     ));
 
+    // Save user message to backend
     try {
       await axios.post('http://localhost:4000/chat/message', {
         chat_id: currentChatId,
@@ -384,49 +456,61 @@ function App() {
               }
             };
 
+            const feedbackMessage: Message = {
+              id: Date.now().toString(),
+              content: verificationResult.feedback,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+
             setChats(prevChats => prevChats.map(chat =>
               chat.id === currentChatId
                 ? {
                     ...chat,
-                    messages: [...chat.messages, {
-                      id: Date.now().toString(),
-                      content: verificationResult.feedback,
-                      sender: 'ai',
-                      timestamp: new Date(),
-                    }, nextQuestionMessage],
+                    messages: [...chat.messages, feedbackMessage, nextQuestionMessage],
                   }
                 : chat
             ));
 
+            // Save both feedback and next question to backend
             await axios.post('http://localhost:4000/chat/message', {
-                 chat_id: currentChatId,
-                 sender: 'ai',
-                 text: verificationResult.content,
-          }, { withCredentials: true });
-
-            setCurrentQuestionIndex(prev => prev + 1);
-          } else {
-            // All questions answered correctly
-            setChats(prevChats => prevChats.map(chat =>
-              chat.id === currentChatId
-                ? {
-                    ...chat,
-                    messages: [...chat.messages, {
-                      id: Date.now().toString(),
-                      content: `${verificationResult.feedback}\n\nCongratulations! You've successfully answered all the questions. You have a good understanding of the material.`,
-                      sender: 'ai',
-                      timestamp: new Date(),
-                    }],
-                  }
-                : chat
-            ));
-            const finalMessage = `${verificationResult.feedback}\n\nCongratulations! You've successfully answered all the questions. You have a good understanding of the material.`;
+              chat_id: currentChatId,
+              sender: 'ai',
+              text: feedbackMessage.content,
+            }, { withCredentials: true });
 
             await axios.post('http://localhost:4000/chat/message', {
               chat_id: currentChatId,
               sender: 'ai',
-              text: finalMessage,
-          }, { withCredentials: true });
+              text: nextQuestionMessage.content,
+            }, { withCredentials: true });
+
+            setCurrentQuestionIndex(prev => prev + 1);
+          } else {
+            // All questions answered correctly
+            const finalMessage: Message = {
+              id: Date.now().toString(),
+              content: `${verificationResult.feedback}\n\nCongratulations! You've successfully answered all the questions. You have a good understanding of the material.`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+
+            setChats(prevChats => prevChats.map(chat =>
+              chat.id === currentChatId
+                ? {
+                    ...chat,
+                    messages: [...chat.messages, finalMessage],
+                  }
+                : chat
+            ));
+
+            // Save final message to backend
+            await axios.post('http://localhost:4000/chat/message', {
+              chat_id: currentChatId,
+              sender: 'ai',
+              text: finalMessage.content,
+            }, { withCredentials: true });
+
             setIsAnswering(false);
           }
         } else {
@@ -449,36 +533,37 @@ function App() {
               : chat
           ));
 
-          const feedbackContent = feedbackMessage.content;
+          // Save feedback message to backend
           await axios.post('http://localhost:4000/chat/message', {
             chat_id: currentChatId,
             sender: 'ai',
-            text: feedbackContent,
-      }, { withCredentials: true });
+            text: feedbackMessage.content,
+          }, { withCredentials: true });
         }
       } catch (error) {
         console.error('Error verifying answer:', error);
-        // Handle error appropriately
+        const errorMessage: Message = {
+          id: Date.now().toString(),
+          content: "Sorry, I encountered an error while verifying your answer. Please try again.",
+          sender: 'ai',
+          timestamp: new Date(),
+        };
+
         setChats(prevChats => prevChats.map(chat =>
           chat.id === currentChatId
             ? {
                 ...chat,
-                messages: [...chat.messages, {
-                  id: Date.now().toString(),
-                  content: "Sorry, I encountered an error while verifying your answer. Please try again.",
-                  sender: 'ai',
-                  timestamp: new Date(),
-                }],
+                messages: [...chat.messages, errorMessage],
               }
             : chat
         ));
-        const errorMessage = "Sorry, I encountered an error while verifying your answer. Please try again.";
 
+        // Save error message to backend
         await axios.post('http://localhost:4000/chat/message', {
-  chat_id: currentChatId,
-  sender: 'ai',
-  text: errorMessage,
-}, { withCredentials: true });
+          chat_id: currentChatId,
+          sender: 'ai',
+          text: errorMessage.content,
+        }, { withCredentials: true });
       } finally {
         setIsTyping(false);
       }
@@ -487,8 +572,6 @@ function App() {
       try {
         setIsTyping(true);
         const aiMessage = await generateAIResponse(input);
-
-console.log('AI message saved to backend');
         
         setChats(prevChats => prevChats.map(chat => 
           chat.id === currentChatId
@@ -501,34 +584,36 @@ console.log('AI message saved to backend');
             : chat
         ));
 
+        // Save AI response to backend
         await axios.post('http://localhost:4000/chat/message', {
-  chat_id: currentChatId,
-  sender: 'ai',
-  text: aiMessage.content,
-}, { withCredentials: true });
+          chat_id: currentChatId,
+          sender: 'ai',
+          text: aiMessage.content,
+        }, { withCredentials: true });
       } catch (error) {
         console.error('Error generating AI response:', error);
+        const errorMessage: Message = {
+          id: Date.now().toString(),
+          content: "Sorry, I encountered an error while generating a response. Please try again.",
+          sender: 'ai',
+          timestamp: new Date(),
+        };
+
         setChats(prevChats => prevChats.map(chat =>
           chat.id === currentChatId
             ? {
                 ...chat,
-                messages: [...chat.messages, {
-                  id: Date.now().toString(),
-                  content: "Sorry, I encountered an error while generating a response. Please try again.",
-                  sender: 'ai',
-                  timestamp: new Date(),
-                }],
+                messages: [...chat.messages, errorMessage],
               }
             : chat
         ));
 
-        const errorMessage = "Sorry, I encountered an error while verifying your answer. Please try again.";
-
+        // Save error message to backend
         await axios.post('http://localhost:4000/chat/message', {
-  chat_id: currentChatId,
-  sender: 'ai',
-  text: errorMessage,
-}, { withCredentials: true });
+          chat_id: currentChatId,
+          sender: 'ai',
+          text: errorMessage.content,
+        }, { withCredentials: true });
       } finally {
         setIsTyping(false);
       }
@@ -611,6 +696,83 @@ console.log('AI message saved to backend');
     </PanelResizeHandle>
   );
 
+  // Add useEffect to load graph and questions when chat changes
+  useEffect(() => {
+    let isMounted = true;
+    const currentChat = chats.find(chat => chat.id === currentChatId);
+
+    const fetchQA = async () => {
+      if (isGeneratingQuestions || !currentChat?.graph_id) return;
+      
+      try {
+        setIsGeneratingQuestions(true);
+        const qaResponse = await fetch(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}`);
+        const qaResponseData = await qaResponse.json();
+        
+        // Check if component is still mounted and chat ID hasn't changed
+        if (!isMounted || currentChatId !== currentChat.id) return;
+
+        if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
+          setQaData(qaResponseData.qa_pairs);
+          setCurrentQuestionIndex(0);
+          setIsAnswering(true);
+          
+          const firstQuestionMessage: Message = {
+            id: Date.now().toString(),
+            content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${qaResponseData.qa_pairs.length}:\n\n${qaResponseData.qa_pairs[0].question}`,
+            sender: 'ai',
+            timestamp: new Date(),
+            isQuestion: true,
+            questionData: {
+              question: qaResponseData.qa_pairs[0].question,
+              correctAnswer: qaResponseData.qa_pairs[0].answer,
+              questionIndex: 0,
+              totalQuestions: qaResponseData.qa_pairs.length
+            }
+          };
+
+          if (isMounted && currentChatId === currentChat.id) {
+            setChats(prevChats => prevChats.map(chat =>
+              chat.id === currentChatId
+                ? {
+                    ...chat,
+                    messages: [...chat.messages, firstQuestionMessage],
+                  }
+                : chat
+            ));
+
+            await axios.post('http://localhost:4000/chat/message', {
+              chat_id: currentChatId,
+              sender: 'ai',
+              text: firstQuestionMessage.content,
+            }, { withCredentials: true });
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching QA data:', error);
+      } finally {
+        if (isMounted) {
+          setIsGeneratingQuestions(false);
+        }
+      }
+    };
+
+    if (currentChat?.graph_id) {
+      fetchGraphData(currentChat.graph_id);
+      fetchQA();
+    } else {
+      setGraphData(null);
+      setQaData([]);
+      setIsAnswering(false);
+    }
+
+    // Cleanup function
+    return () => {
+      isMounted = false;
+      setIsGeneratingQuestions(false);
+    };
+  }, [currentChatId]);
+
   return (
     <div className="flex h-screen bg-gray-900">
       {/* Chat History Sidebar */}
@@ -648,7 +810,9 @@ console.log('AI message saved to backend');
 
         {!isSidebarCollapsed && (
           <div className="flex-1 overflow-y-auto">
-            {chats.map((chat) => (
+            {chats
+              .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+              .map((chat) => (
               <div
                 key={chat.id}
                 onClick={() => handleChatSelect(chat.id)}

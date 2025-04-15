@@ -127,13 +127,26 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data }) => {
   const [minimapLocked, setMinimapLocked] = useState(false);
 
   const getNodeLabel = (node: any) => {
-    // If it's a Topic or Subtopic, use the name property
+    // If it's a Topic or Subtopic, try name first, then follow the hierarchy
     if (node.labels.includes('Topic') || node.labels.includes('Subtopic')) {
-      return node.properties.name || 'No Label';
+      if (node.properties.name && node.properties.name.trim()) {
+        return node.properties.name;
+      }
+      // If no name, follow text → description → illustration → explanation → 'No Label'
+      const content = node.properties.text || 
+                     node.properties.description || 
+                     node.properties.illustration || 
+                     node.properties.explanation || 
+                     'No Label';
+      return content.split(' ').slice(0, 4).join(' ') + (content.split(' ').length > 4 ? '...' : '');
     }
-    // For Definition and Example, use first few words of the text
-    const text = node.properties.text || '';
-    return text.split(' ').slice(0, 4).join(' ') + (text.split(' ').length > 4 ? '...' : '');
+    // For Definition and Example, follow text → description → illustration → explanation → 'No Label'
+    const content = node.properties.text || 
+                   node.properties.description || 
+                   node.properties.illustration || 
+                   node.properties.explanation || 
+                   'No Label';
+    return content.split(' ').slice(0, 4).join(' ') + (content.split(' ').length > 4 ? '...' : '');
   };
 
   const processGraphData = useCallback((graphData: GraphData) => {
