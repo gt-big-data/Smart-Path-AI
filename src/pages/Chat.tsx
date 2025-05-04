@@ -691,8 +691,8 @@ function App() {
   };
 
   const ResizeHandle = ({ className = '' }) => (
-    <PanelResizeHandle className={`w-2 hover:bg-purple-500/20 transition-colors duration-150 ${className}`}>
-      <div className="h-full w-[2px] bg-gray-700 mx-auto" />
+    <PanelResizeHandle className={`w-2 hover:bg-teal-500/20 transition-colors duration-150 ${className}`}>
+      <div className="h-full w-[2px] bg-gray-200 mx-auto" />
     </PanelResizeHandle>
   );
 
@@ -774,25 +774,25 @@ function App() {
   }, [currentChatId]);
 
   return (
-    <div className="flex h-screen bg-gray-900">
+    <div className="flex h-screen bg-white">
       {/* Chat History Sidebar */}
       <div
         className={`${
           isSidebarCollapsed ? 'w-12' : 'w-64'
-        } bg-gray-800 border-r border-gray-700 flex flex-col transition-all duration-300`}
+        } bg-white border-r border-gray-200 flex flex-col transition-all duration-300`}
       >
-        <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+        <div className="p-4 border-b border-gray-200 flex justify-between items-center">
           {!isSidebarCollapsed && (
-            <h2 className="text-lg font-semibold text-white">Chat History</h2>
+            <h2 className="text-lg font-semibold text-gray-800">Chat History</h2>
           )}
           <button
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="p-1 hover:bg-gray-700 rounded-lg transition-colors duration-150"
+            className="p-1 hover:bg-gray-100 rounded-lg transition-colors duration-150"
           >
             {isSidebarCollapsed ? (
-              <ChevronRight className="w-5 h-5 text-gray-400" />
+              <ChevronRight className="w-5 h-5 text-gray-600" />
             ) : (
-              <ChevronLeft className="w-5 h-5 text-gray-400" />
+              <ChevronLeft className="w-5 h-5 text-gray-600" />
             )}
           </button>
         </div>
@@ -800,7 +800,7 @@ function App() {
         {/* New Chat Button */}
         <button
           onClick={handleNewChat}
-          className={`m-4 p-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-200 flex items-center justify-center gap-2 ${
+          className={`m-4 p-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors duration-200 flex items-center justify-center gap-2 ${
             isSidebarCollapsed ? 'p-2' : ''
           }`}
         >
@@ -816,20 +816,20 @@ function App() {
               <div
                 key={chat.id}
                 onClick={() => handleChatSelect(chat.id)}
-                className={`p-3 hover:bg-gray-700 cursor-pointer border-b border-gray-700 transition-colors duration-150 ${
-                  currentChatId === chat.id ? 'bg-gray-700' : ''
+                className={`p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-200 transition-colors duration-150 ${
+                  currentChatId === chat.id ? 'bg-gray-50' : ''
                 }`}
               >
                 <div className="flex items-center space-x-3">
-                  <MessageSquare className="w-5 h-5 text-purple-400" />
+                  <MessageSquare className="w-5 h-5 text-teal-500" />
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-medium text-white truncate">
+                    <h3 className="text-sm font-medium text-gray-800 truncate">
                       {chat.title}
                     </h3>
-                    <p className="text-xs text-gray-400 truncate">{chat.lastMessage}</p>
+                    <p className="text-xs text-gray-500 truncate">{chat.lastMessage}</p>
                   </div>
                 </div>
-                <div className="mt-1 text-xs text-gray-500">
+                <div className="mt-1 text-xs text-gray-400">
                   {chat.timestamp.toLocaleTimeString()}
                 </div>
               </div>
@@ -842,11 +842,11 @@ function App() {
       <PanelGroup direction="horizontal" className="flex-1">
         {/* Graph Section */}
         <Panel defaultSize={40} minSize={20}>
-          <div className="h-full p-6 bg-gray-800">
-            <div className="h-full rounded-lg bg-gray-800 border-2 border-gray-700">
+          <div className="h-full p-6 bg-white">
+            <div className="h-full rounded-lg bg-white border-2 border-gray-200">
               {isProcessingFile ? (
                 <div className="h-full flex items-center justify-center">
-                  <p className="text-gray-400 text-lg">
+                  <p className="text-gray-600 text-lg">
                     Processing your file{loadingDots}
                   </p>
                 </div>
@@ -857,24 +857,24 @@ function App() {
           </div>
         </Panel>
 
-        <ResizeHandle />
+        <ResizeHandle className="w-2 hover:bg-teal-500/20 transition-colors duration-150" />
 
         {/* Chat Section */}
         <Panel minSize={30}>
           <div className="h-full flex flex-col">
             {/* Chat Header */}
-            <div className="bg-gray-800 p-4 border-b border-gray-700 flex justify-between items-center">
-  <h1 className="text-xl font-semibold text-white">{currentChat.title}</h1>
-  <button
-    onClick={() => navigate('/')}
-    className="p-2 bg-transparent text-purple-400 border border-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-colors duration-200 flex items-center justify-center gap-2"
-  >
-    Return to Homepage
-  </button>
-</div>
+            <div className="bg-white p-4 border-b border-gray-200 flex justify-between items-center">
+              <h1 className="text-xl font-semibold text-gray-800">{currentChat.title}</h1>
+              <button
+                onClick={() => navigate('/')}
+                className="p-2 bg-transparent text-teal-600 border border-teal-500 rounded-lg hover:bg-teal-50 transition-colors duration-200 flex items-center justify-center gap-2"
+              >
+                Return to Homepage
+              </button>
+            </div>
 
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-900">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
               {currentChat.messages.map((message) => (
                 <div
                   key={message.id}
@@ -890,8 +890,8 @@ function App() {
                     <div
                       className={`p-2 rounded-lg ${
                         message.sender === 'user'
-                          ? 'bg-purple-600 text-white'
-                          : 'bg-gray-800 text-gray-100'
+                          ? 'bg-teal-500 text-white'
+                          : 'bg-white text-gray-800 border border-gray-200'
                       }`}
                     >
                       <div className="flex items-center space-x-2 mb-1">
@@ -906,7 +906,7 @@ function App() {
                       </div>
                       <p className="text-sm">{message.content}</p>
                       {message.file && (
-                        <div className="mt-2 p-2 bg-gray-700 rounded-lg">
+                        <div className="mt-2 p-2 bg-white/10 rounded-lg">
                           <div className="flex items-center space-x-2">
                             {getFileIcon(message.file.type)}
                             <a
@@ -933,7 +933,7 @@ function App() {
               ))}
               {isTyping && (
                 <div className="flex justify-start">
-                  <div className="bg-gray-800 text-gray-100 p-3 rounded-lg">
+                  <div className="bg-white text-gray-800 p-3 rounded-lg border border-gray-200">
                     <div className="flex items-center space-x-2">
                       <Bot className="w-4 h-4" />
                       <span className="text-sm">Typing...</span>
@@ -945,17 +945,17 @@ function App() {
             </div>
 
             {/* Input Area */}
-            <form onSubmit={handleSubmit} className="p-4 bg-gray-800 border-t border-gray-700">
+            <form onSubmit={handleSubmit} className="p-4 bg-white border-t border-gray-200">
               {selectedFile && !isProcessingFile && (
-                <div className="mb-2 p-2 bg-gray-700 rounded-lg flex items-center justify-between">
+                <div className="mb-2 p-2 bg-gray-50 rounded-lg flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     {getFileIcon(selectedFile.type)}
-                    <span className="text-sm text-gray-300 truncate">{selectedFile.name}</span>
+                    <span className="text-sm text-gray-600 truncate">{selectedFile.name}</span>
                   </div>
                   <button
                     type="button"
                     onClick={handleRemoveFile}
-                    className="text-gray-400 hover:text-gray-300"
+                    className="text-gray-400 hover:text-gray-600"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -967,7 +967,7 @@ function App() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="Type your message..."
-                  className="flex-1 px-4 py-2 bg-gray-700 text-white border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent placeholder-gray-400"
+                  className="flex-1 px-4 py-2 bg-white text-gray-900 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent placeholder-gray-400"
                 />
                 <input
                   type="file"
@@ -978,13 +978,13 @@ function App() {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 flex items-center transition-colors duration-200"
+                  className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500 flex items-center transition-colors duration-200"
                 >
                   <Paperclip className="w-5 h-5" />
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 flex items-center transition-colors duration-200"
+                  className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-500 flex items-center transition-colors duration-200"
                 >
                   <Send className="w-5 h-5" />
                 </button>

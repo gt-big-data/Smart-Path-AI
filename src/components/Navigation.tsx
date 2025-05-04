@@ -20,20 +20,20 @@ export default function Navigation() {
     <nav className="container mx-auto px-6 py-4">
       <div className="flex items-center justify-between">
         <Link to="/" className="flex items-center space-x-2">
-          <Brain className="h-8 w-8 text-white" />
-          <span className="text-xl font-bold text-white">SmartPathAI</span>
+          <Brain className="h-8 w-8 text-teal-500" />
+          <span className="text-xl font-bold text-gray-800">SmartPathAI</span>
         </Link>
         {isAuthenticated ? (
           <button
             onClick={handleLogout}
-            className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors inline-flex items-center gap-2"
+            className="px-6 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors inline-flex items-center gap-2"
           >
             Logout <LogOut className="h-5 w-5" />
           </button>
         ) : (
           <Link
             to="/login"
-            className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+            className="px-6 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors"
           >
             Login
           </Link>
