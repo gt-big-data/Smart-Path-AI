@@ -37,8 +37,46 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
     if (!graph_id) {
       return res.status(400).json({ error: 'graph_id is required' });
     }
-    const response = await axios.get(`http://localhost:8000/generate-questions-with-answers?graph_id=${graph_id}`);
-    res.json(response.data);
+    // Call the AI server's LangChain-backed questions endpoint which returns mixed MCQ/TF
+    const id = encodeURIComponent(String(graph_id));
+
+    // Prefer the new LangChain endpoint on port 8000
+    let response;
+    try {
+      response = await axios.get(`http://localhost:8000/questions/${id}?use_langchain=true`);
+    } catch (err: any) {
+      // If the new AI server is inaccessible or returns 403, try legacy endpoint on port 5000 as a graceful fallback
+      const status = err?.response?.status;
+      console.error(`Primary questions endpoint failed (status=${status}). Attempting legacy fallback...`);
+      if (status === 403 || status === 404 || !response) {
+        try {
+          // Legacy endpoint expected format: GET /generate?graph_id=...&num_questions=5
+          response = await axios.get(`http://localhost:5000/generate`, {
+            params: { graph_id: id, num_questions: 5 }
+          });
+        } catch (legacyErr) {
+          console.error('Both primary and legacy question endpoints failed:', legacyErr);
+          return res.status(502).json({ error: 'AI question generation service unavailable' });
+        }
+      } else {
+        console.error('Error calling primary questions endpoint:', err);
+        return res.status(502).json({ error: 'AI question generation failed' });
+      }
+    }
+
+    // The AI server returns { questions: [ { kind, format, id, text, correct_answer, explanation }, ... ] }
+    // Map that to the frontend's expected shape: { status: 'success', qa_pairs: [{ question, answer }, ...] }
+    const questions = response.data?.questions || response.data?.data || response.data;
+    if (!Array.isArray(questions)) {
+      return res.status(502).json({ error: 'Invalid response from AI server' });
+    }
+
+    const qa_pairs = questions.map((q: any) => ({
+      question: q.text || q.question || '',
+      answer: q.correct_answer || q.correctAnswer || ''
+    }));
+
+    res.json({ status: 'success', qa_pairs, graph_id: graph_id });
   } catch (error) {
     console.error('Error generating questions and answers:', error);
     res.status(500).json({ error: 'Failed to generate questions and answers' });

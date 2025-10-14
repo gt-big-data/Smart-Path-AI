@@ -99,38 +99,29 @@ function App() {
 
   const generateAIResponse = async (userMessage: string, fileType?: string) => {
     let aiResponse = '';
-    let newTitle = currentChat.title;
 
     // Handle file uploads
     if (fileType) {
       if (fileType.startsWith('image/')) {
         aiResponse = 'I see you\'ve shared an image. What would you like me to help you with regarding this image?';
-        newTitle = 'Image Analysis';
       } else if (fileType.includes('document') || fileType.includes('pdf')) {
         aiResponse = 'I\'ve received your document. What aspects would you like me to review or analyze?';
-        newTitle = 'Document Review';
       } else {
         aiResponse = 'I\'ve received your file. How can I help you with it?';
-        newTitle = 'File Analysis';
       }
     } else {
       // Simple response logic based on user input
       const lowerMessage = userMessage.toLowerCase();
       if (lowerMessage.includes('hello') || lowerMessage.includes('hi')) {
         aiResponse = 'Hello! It\'s great to meet you. How can I assist you today?';
-        newTitle = 'Greeting & Introduction';
       } else if (lowerMessage.includes('help')) {
         aiResponse = 'I\'d be happy to help! Could you please provide more details about what you need assistance with?';
-        newTitle = 'Help Request';
       } else if (lowerMessage.includes('thank')) {
         aiResponse = 'You\'re welcome! Is there anything else you\'d like to know?';
       } else if (lowerMessage.includes('bye')) {
         aiResponse = 'Goodbye! Feel free to return if you have more questions!';
       } else {
         aiResponse = 'That\'s an interesting point! Could you tell me more about what you\'re thinking?';
-        if (currentChat.title === 'New Chat') {
-          newTitle = `Discussion: ${userMessage.slice(0, 20)}${userMessage.length > 20 ? '...' : ''}`;
-        }
       }
     }
 
@@ -291,22 +282,28 @@ function App() {
           const qaResponse = await fetch(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${responseData.graph_id}`);
           const qaResponseData = await qaResponse.json();
           if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
-            setQaData(qaResponseData.qa_pairs);
+            // Normalize TF answers: server may return 'T'/'F' for true/false
+            const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair) => ({
+              question: p.question,
+              answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer
+            }));
+
+            setQaData(normalizedPairs);
             setCurrentQuestionIndex(0);
             setIsAnswering(true);
-            
+
             // Show the first question
             const firstQuestionMessage: Message = {
               id: Date.now().toString(),
-              content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${qaResponseData.qa_pairs.length}:\n\n${qaResponseData.qa_pairs[0].question}`,
+              content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${normalizedPairs.length}:\n\n${normalizedPairs[0].question}`,
               sender: 'ai',
               timestamp: new Date(),
               isQuestion: true,
               questionData: {
-                question: qaResponseData.qa_pairs[0].question,
-                correctAnswer: qaResponseData.qa_pairs[0].answer,
+                question: normalizedPairs[0].question,
+                correctAnswer: normalizedPairs[0].answer,
                 questionIndex: 0,
-                totalQuestions: qaResponseData.qa_pairs.length
+                totalQuestions: normalizedPairs.length
               }
             };
 
@@ -684,11 +681,7 @@ function App() {
     return <File className="w-5 h-5" />;
   };
 
-  // Function to get answer for a specific question
-  const getAnswerForQuestion = (question: string) => {
-    const qaPair = qaData.find(qa => qa.question === question);
-    return qaPair?.answer || 'No answer available';
-  };
+  // ...existing code... (no local helper required)
 
   const ResizeHandle = ({ className = '' }) => (
     <PanelResizeHandle className={`w-2 hover:bg-teal-500/20 transition-colors duration-150 ${className}`}>
@@ -713,21 +706,26 @@ function App() {
         if (!isMounted || currentChatId !== currentChat.id) return;
 
         if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
-          setQaData(qaResponseData.qa_pairs);
+          const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair) => ({
+            question: p.question,
+            answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer
+          }));
+
+          setQaData(normalizedPairs);
           setCurrentQuestionIndex(0);
           setIsAnswering(true);
-          
+
           const firstQuestionMessage: Message = {
             id: Date.now().toString(),
-            content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${qaResponseData.qa_pairs.length}:\n\n${qaResponseData.qa_pairs[0].question}`,
+            content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${normalizedPairs.length}:\n\n${normalizedPairs[0].question}`,
             sender: 'ai',
             timestamp: new Date(),
             isQuestion: true,
             questionData: {
-              question: qaResponseData.qa_pairs[0].question,
-              correctAnswer: qaResponseData.qa_pairs[0].answer,
+              question: normalizedPairs[0].question,
+              correctAnswer: normalizedPairs[0].answer,
               questionIndex: 0,
-              totalQuestions: qaResponseData.qa_pairs.length
+              totalQuestions: normalizedPairs.length
             }
           };
 
