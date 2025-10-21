@@ -12,6 +12,7 @@ import authRoutes from './auth/routes';
 import uploadRoutes from './routes/uploadRoutes';
 import graphRoutes from './routes/graphRoutes';
 import chatRoutes from './routes/chatRoutes';
+import progressRoutes from './routes/progressRoutes';
 import session from 'express-session';
 import axios from 'axios';
 import User from './models/User';
@@ -82,6 +83,9 @@ app.use('/api', graphRoutes);
 
 //Chat Routes
 app.use('/chat', chatRoutes);
+
+//Progress Routes
+app.use('/progress', progressRoutes);
 
 app.get('/', (req, res) => {
     res.send('API is running');
