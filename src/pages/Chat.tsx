@@ -8,6 +8,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import GraphVisualization from '../components/GraphVisualization';
+import { useProgress } from '../context/ProgressContext';
 
 interface Message {
   id: string;
@@ -50,6 +51,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [graphData, setGraphData] = useState<any>(null);
   const [qaData, setQaData] = useState<QAPair[]>([]);
+  const { updateProgress } = useProgress();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [loadingDots, setLoadingDots] = useState('');
@@ -427,6 +429,8 @@ function App() {
     if (lastQuestion?.questionData && isAnswering) {
       try {
         setIsTyping(true);
+        const isRetry = currentChat.messages.filter(m => m.questionData?.question === lastQuestion.questionData?.question).length > 1;
+
         // Send answer for verification
         const response = await axios.post('http://localhost:4000/api/verify-answer', {
           question: lastQuestion.questionData.question,
@@ -436,6 +440,10 @@ function App() {
 
         const verificationResult = response.data;
         
+        // Update concept progress
+        const conceptId = lastQuestion.questionData.question; // Assuming question is the conceptId
+        await updateProgress(conceptId, verificationResult.isCorrect, isRetry);
+
         if (verificationResult.isCorrect) {
           // If answer is correct and there are more questions, show the next one
           if (qaData.length > currentQuestionIndex + 1) {
