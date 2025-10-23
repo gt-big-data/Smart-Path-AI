@@ -3,6 +3,7 @@ import axios from 'axios';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import path from 'path';
+import ConceptProgress from '../models/ConceptProgress';
 
 // Load environment variables
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -34,18 +35,30 @@ export const viewGraph = async (req: Request, res: Response) => {
 export const generateQuestionsWithAnswers = async (req: Request, res: Response) => {
   try {
     const graph_id = req.query.graph_id;
+    const userId = (req.session as any)?.passport?.user;
+
     if (!graph_id) {
       return res.status(400).json({ error: 'graph_id is required' });
     }
-    // Call the AI server's LangChain-backed questions endpoint which returns mixed MCQ/TF
+
+    let progressDict = {};
+    if (userId) {
+      const userProgress = await ConceptProgress.find({ user: userId });
+      progressDict = Object.fromEntries(
+        userProgress.map(p => [p.conceptId, p.confidenceScore])
+      );
+    } else {
+      console.log('User not authenticated. Generating generic questions.');
+    }
+
     const id = encodeURIComponent(String(graph_id));
 
-    // Prefer the new LangChain endpoint on port 8000
     let response;
     try {
-      response = await axios.get(`http://localhost:8000/questions/${id}?use_langchain=true`);
+      response = await axios.post(`http://localhost:8000/questions/${id}?use_langchain=true`, {
+        progress: progressDict
+      });
     } catch (err: any) {
-      // If the new AI server is inaccessible or returns 403, try legacy endpoint on port 5000 as a graceful fallback
       const status = err?.response?.status;
       console.error(`Primary questions endpoint failed (status=${status}). Attempting legacy fallback...`);
       if (status === 403 || status === 404 || !response) {
@@ -73,7 +86,8 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
 
     const qa_pairs = questions.map((q: any) => ({
       question: q.text || q.question || '',
-      answer: q.correct_answer || q.correctAnswer || ''
+      answer: q.correct_answer || q.correctAnswer || '',
+      conceptId: q.topic || q.id || ''
     }));
 
     res.json({ status: 'success', qa_pairs, graph_id: graph_id });
@@ -168,4 +182,4 @@ Provide feedback in this JSON format:
       followUpQuestion: "Could you rephrase your answer?"
     });
   }
-}; 
+};
