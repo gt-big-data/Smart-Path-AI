@@ -6,7 +6,8 @@
     "start": "node index.js",
     "dev": "npx ts-node --project tsconfig.json index.ts",
     "build": "tsc",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:quiz-history": "npx ts-node --project tsconfig.json tests/runQuizHistoryTest.ts"
   },
   "keywords": [],
   "author": "",

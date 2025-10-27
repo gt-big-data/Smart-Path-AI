@@ -56,6 +56,7 @@ function App() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
   const [isAnswering, setIsAnswering] = useState<boolean>(false);
   const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
+  const [userAnswers, setUserAnswers] = useState<string[]>([]);
 
   const navigate = useNavigate();
   
@@ -437,6 +438,9 @@ function App() {
         const verificationResult = response.data;
         
         if (verificationResult.isCorrect) {
+          // Track this answer
+          setUserAnswers(prev => [...prev, input]);
+          
           // If answer is correct and there are more questions, show the next one
           if (qaData.length > currentQuestionIndex + 1) {
             const nextQuestionMessage: Message = {
@@ -507,6 +511,36 @@ function App() {
               sender: 'ai',
               text: finalMessage.content,
             }, { withCredentials: true });
+
+            // Save quiz history to backend
+            try {
+              // Add the final answer to userAnswers
+              const allAnswers = [...userAnswers, input];
+              
+              const quizHistoryData = {
+                concepts: qaData.map((qa, index) => ({
+                  conceptID: `concept_${currentChat.graph_id}_${index}`,
+                  name: `Question ${index + 1} Concept`
+                })),
+                questions: qaData.map((qa, index) => ({
+                  questionText: qa.question,
+                  userAnswer: allAnswers[index] || 'No answer provided',
+                  correctAnswer: qa.answer,
+                  explanation: `This question tests understanding of the material covered in the graph.`,
+                  timestamp: new Date().toISOString()
+                }))
+              };
+
+              console.log('Saving quiz history:', quizHistoryData);
+              
+              await axios.post('http://localhost:4000/api/quiz-history', quizHistoryData, { 
+                withCredentials: true 
+              });
+              
+              console.log('Quiz history saved successfully');
+            } catch (error) {
+              console.error('Error saving quiz history:', error);
+            }
 
             setIsAnswering(false);
           }
@@ -714,6 +748,7 @@ function App() {
           setQaData(normalizedPairs);
           setCurrentQuestionIndex(0);
           setIsAnswering(true);
+          setUserAnswers([]); // Reset user answers for new quiz
 
           const firstQuestionMessage: Message = {
             id: Date.now().toString(),
