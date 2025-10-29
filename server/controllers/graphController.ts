@@ -87,7 +87,7 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
     const qa_pairs = questions.map((q: any) => ({
       question: q.text || q.question || '',
       answer: q.correct_answer || q.correctAnswer || '',
-      conceptId: q.topic || q.id || ''
+      conceptId: q.topic_id || q.id || ''
     }));
 
     res.json({ status: 'success', qa_pairs, graph_id: graph_id });
