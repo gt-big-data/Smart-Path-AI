@@ -8,7 +8,6 @@ import {
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import GraphVisualization from '../components/GraphVisualization';
-import { useProgress } from '../context/ProgressContext';
 
 interface Message {
   id: string;
@@ -24,6 +23,7 @@ interface Message {
   questionData?: {
     question: string;
     correctAnswer: string;
+    conceptId: string;
     questionIndex?: number;
     totalQuestions?: number;
   };
@@ -41,6 +41,7 @@ interface Chat {
 interface QAPair {
   question: string;
   answer: string;
+  conceptId: string;
 }
 
 function App() {
@@ -51,7 +52,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [graphData, setGraphData] = useState<any>(null);
   const [qaData, setQaData] = useState<QAPair[]>([]);
-  const { updateProgress } = useProgress();
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [loadingDots, setLoadingDots] = useState('');
@@ -281,13 +282,14 @@ function App() {
         
         // Fetch QA data
         try {
-          const qaResponse = await fetch(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${responseData.graph_id}`);
-          const qaResponseData = await qaResponse.json();
+          const qaResponse = await axios.get(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${responseData.graph_id}`, { withCredentials: true });
+          const qaResponseData = qaResponse.data;
           if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
             // Normalize TF answers: server may return 'T'/'F' for true/false
             const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair) => ({
               question: p.question,
-              answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer
+              answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
+              conceptId: p.conceptId
             }));
 
             setQaData(normalizedPairs);
@@ -304,6 +306,7 @@ function App() {
               questionData: {
                 question: normalizedPairs[0].question,
                 correctAnswer: normalizedPairs[0].answer,
+                conceptId: normalizedPairs[0].conceptId,
                 questionIndex: 0,
                 totalQuestions: normalizedPairs.length
               }
@@ -435,14 +438,16 @@ function App() {
         const response = await axios.post('http://localhost:4000/api/verify-answer', {
           question: lastQuestion.questionData.question,
           userAnswer: input,
-          correctAnswer: lastQuestion.questionData.correctAnswer
-        });
+          correctAnswer: lastQuestion.questionData.correctAnswer,
+          conceptId: lastQuestion.questionData.conceptId,
+          isRetry: isRetry
+        }, { withCredentials: true });
 
         const verificationResult = response.data;
         
-        // Update concept progress
-        const conceptId = lastQuestion.questionData.question; // Assuming question is the conceptId
-        await updateProgress(conceptId, verificationResult.isCorrect, isRetry);
+        // The backend now handles progress updates.
+        // const conceptId = lastQuestion.questionData.conceptId; 
+        // await updateProgress(conceptId, verificationResult.isCorrect, isRetry);
 
         if (verificationResult.isCorrect) {
           // If answer is correct and there are more questions, show the next one
@@ -456,6 +461,7 @@ function App() {
               questionData: {
                 question: qaData[currentQuestionIndex + 1].question,
                 correctAnswer: qaData[currentQuestionIndex + 1].answer,
+                conceptId: qaData[currentQuestionIndex + 1].conceptId,
                 questionIndex: currentQuestionIndex + 1,
                 totalQuestions: qaData.length
               }
@@ -707,8 +713,8 @@ function App() {
       
       try {
         setIsGeneratingQuestions(true);
-        const qaResponse = await fetch(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}`);
-        const qaResponseData = await qaResponse.json();
+        const qaResponse = await axios.get(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}`, { withCredentials: true });
+        const qaResponseData = qaResponse.data;
         
         // Check if component is still mounted and chat ID hasn't changed
         if (!isMounted || currentChatId !== currentChat.id) return;
@@ -716,7 +722,8 @@ function App() {
         if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
           const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair) => ({
             question: p.question,
-            answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer
+            answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
+            conceptId: p.conceptId
           }));
 
           setQaData(normalizedPairs);
@@ -732,6 +739,7 @@ function App() {
             questionData: {
               question: normalizedPairs[0].question,
               correctAnswer: normalizedPairs[0].answer,
+              conceptId: normalizedPairs[0].conceptId,
               questionIndex: 0,
               totalQuestions: normalizedPairs.length
             }
