@@ -23,6 +23,7 @@ interface Message {
   questionData?: {
     question: string;
     correctAnswer: string;
+    conceptId: string;
     questionIndex?: number;
     totalQuestions?: number;
   };
@@ -40,6 +41,7 @@ interface Chat {
 interface QAPair {
   question: string;
   answer: string;
+  conceptId: string;
 }
 
 function App() {
@@ -50,6 +52,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [graphData, setGraphData] = useState<any>(null);
   const [qaData, setQaData] = useState<QAPair[]>([]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [loadingDots, setLoadingDots] = useState('');
@@ -99,38 +102,29 @@ function App() {
 
   const generateAIResponse = async (userMessage: string, fileType?: string) => {
     let aiResponse = '';
-    let newTitle = currentChat.title;
 
     // Handle file uploads
     if (fileType) {
       if (fileType.startsWith('image/')) {
         aiResponse = 'I see you\'ve shared an image. What would you like me to help you with regarding this image?';
-        newTitle = 'Image Analysis';
       } else if (fileType.includes('document') || fileType.includes('pdf')) {
         aiResponse = 'I\'ve received your document. What aspects would you like me to review or analyze?';
-        newTitle = 'Document Review';
       } else {
         aiResponse = 'I\'ve received your file. How can I help you with it?';
-        newTitle = 'File Analysis';
       }
     } else {
       // Simple response logic based on user input
       const lowerMessage = userMessage.toLowerCase();
       if (lowerMessage.includes('hello') || lowerMessage.includes('hi')) {
         aiResponse = 'Hello! It\'s great to meet you. How can I assist you today?';
-        newTitle = 'Greeting & Introduction';
       } else if (lowerMessage.includes('help')) {
         aiResponse = 'I\'d be happy to help! Could you please provide more details about what you need assistance with?';
-        newTitle = 'Help Request';
       } else if (lowerMessage.includes('thank')) {
         aiResponse = 'You\'re welcome! Is there anything else you\'d like to know?';
       } else if (lowerMessage.includes('bye')) {
         aiResponse = 'Goodbye! Feel free to return if you have more questions!';
       } else {
         aiResponse = 'That\'s an interesting point! Could you tell me more about what you\'re thinking?';
-        if (currentChat.title === 'New Chat') {
-          newTitle = `Discussion: ${userMessage.slice(0, 20)}${userMessage.length > 20 ? '...' : ''}`;
-        }
       }
     }
 
@@ -289,25 +283,33 @@ function App() {
         // Fetch QA data
         /*
         try {
-          const qaResponse = await fetch(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${responseData.graph_id}`);
-          const qaResponseData = await qaResponse.json();
+          const qaResponse = await axios.get(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${responseData.graph_id}`, { withCredentials: true });
+          const qaResponseData = qaResponse.data;
           if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
-            setQaData(qaResponseData.qa_pairs);
+            // Normalize TF answers: server may return 'T'/'F' for true/false
+            const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair) => ({
+              question: p.question,
+              answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
+              conceptId: p.conceptId
+            }));
+
+            setQaData(normalizedPairs);
             setCurrentQuestionIndex(0);
             setIsAnswering(true);
-            
+
             // Show the first question
             const firstQuestionMessage: Message = {
               id: Date.now().toString(),
-              content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${qaResponseData.qa_pairs.length}:\n\n${qaResponseData.qa_pairs[0].question}`,
+              content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${normalizedPairs.length}:\n\n${normalizedPairs[0].question}`,
               sender: 'ai',
               timestamp: new Date(),
               isQuestion: true,
               questionData: {
-                question: qaResponseData.qa_pairs[0].question,
-                correctAnswer: qaResponseData.qa_pairs[0].answer,
+                question: normalizedPairs[0].question,
+                correctAnswer: normalizedPairs[0].answer,
+                conceptId: normalizedPairs[0].conceptId,
                 questionIndex: 0,
-                totalQuestions: qaResponseData.qa_pairs.length
+                totalQuestions: normalizedPairs.length
               }
             };
 
@@ -433,15 +435,23 @@ function App() {
     if (lastQuestion?.questionData && isAnswering) {
       try {
         setIsTyping(true);
+        const isRetry = currentChat.messages.filter(m => m.questionData?.question === lastQuestion.questionData?.question).length > 1;
+
         // Send answer for verification
         const response = await axios.post('http://localhost:4000/api/verify-answer', {
           question: lastQuestion.questionData.question,
           userAnswer: input,
-          correctAnswer: lastQuestion.questionData.correctAnswer
-        });
+          correctAnswer: lastQuestion.questionData.correctAnswer,
+          conceptId: lastQuestion.questionData.conceptId,
+          isRetry: isRetry
+        }, { withCredentials: true });
 
         const verificationResult = response.data;
         
+        // The backend now handles progress updates.
+        // const conceptId = lastQuestion.questionData.conceptId; 
+        // await updateProgress(conceptId, verificationResult.isCorrect, isRetry);
+
         if (verificationResult.isCorrect) {
           // If answer is correct and there are more questions, show the next one
           if (qaData.length > currentQuestionIndex + 1) {
@@ -454,6 +464,7 @@ function App() {
               questionData: {
                 question: qaData[currentQuestionIndex + 1].question,
                 correctAnswer: qaData[currentQuestionIndex + 1].answer,
+                conceptId: qaData[currentQuestionIndex + 1].conceptId,
                 questionIndex: currentQuestionIndex + 1,
                 totalQuestions: qaData.length
               }
@@ -723,11 +734,7 @@ function App() {
     return <File className="w-5 h-5" />;
   };
 
-  // Function to get answer for a specific question
-  const getAnswerForQuestion = (question: string) => {
-    const qaPair = qaData.find(qa => qa.question === question);
-    return qaPair?.answer || 'No answer available';
-  };
+  // ...existing code... (no local helper required)
 
   const ResizeHandle = ({ className = '' }) => (
     <PanelResizeHandle className={`w-2 hover:bg-teal-500/20 transition-colors duration-150 ${className}`}>
@@ -745,28 +752,35 @@ function App() {
       
       try {
         setIsGeneratingQuestions(true);
-        const qaResponse = await fetch(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}`);
-        const qaResponseData = await qaResponse.json();
+        const qaResponse = await axios.get(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}`, { withCredentials: true });
+        const qaResponseData = qaResponse.data;
         
         // Check if component is still mounted and chat ID hasn't changed
         if (!isMounted || currentChatId !== currentChat.id) return;
 
         if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
-          setQaData(qaResponseData.qa_pairs);
+          const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair) => ({
+            question: p.question,
+            answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
+            conceptId: p.conceptId
+          }));
+
+          setQaData(normalizedPairs);
           setCurrentQuestionIndex(0);
           setIsAnswering(true);
-          
+
           const firstQuestionMessage: Message = {
             id: Date.now().toString(),
-            content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${qaResponseData.qa_pairs.length}:\n\n${qaResponseData.qa_pairs[0].question}`,
+            content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${normalizedPairs.length}:\n\n${normalizedPairs[0].question}`,
             sender: 'ai',
             timestamp: new Date(),
             isQuestion: true,
             questionData: {
-              question: qaResponseData.qa_pairs[0].question,
-              correctAnswer: qaResponseData.qa_pairs[0].answer,
+              question: normalizedPairs[0].question,
+              correctAnswer: normalizedPairs[0].answer,
+              conceptId: normalizedPairs[0].conceptId,
               questionIndex: 0,
-              totalQuestions: qaResponseData.qa_pairs.length
+              totalQuestions: normalizedPairs.length
             }
           };
 

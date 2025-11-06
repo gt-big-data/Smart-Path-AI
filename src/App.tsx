@@ -7,6 +7,7 @@ import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Navigation from './components/Navigation';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ProgressProvider } from './context/ProgressContext';
 
 function Home() {
   // Access auth state
@@ -93,7 +94,9 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <ProgressProvider>
+        <AppContent />
+      </ProgressProvider>
     </AuthProvider>
   );
 }
