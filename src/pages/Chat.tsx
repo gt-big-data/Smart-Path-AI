@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, ChangeEvent } from 'react';
-import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File } from 'lucide-react';
+import React, { useState, useEffect, useRef, ChangeEvent, useCallback } from 'react';
+import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File, Trash2 } from 'lucide-react';
 import {
   Panel,
   PanelGroup,
@@ -46,7 +46,7 @@ interface QAPair {
 
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [currentChatId, setCurrentChatId] = useState('3');
+  const [currentChatId, setCurrentChatId] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -55,6 +55,7 @@ function App() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const deletingChatRef = useRef<string | null>(null); // Track which chat is being deleted
   const [loadingDots, setLoadingDots] = useState('');
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
   const [isAnswering, setIsAnswering] = useState<boolean>(false);
@@ -63,24 +64,9 @@ function App() {
 
   const navigate = useNavigate();
   
-  const [chats, setChats] = useState<Chat[]>([
-    {
-      id: '3',
-      title: 'New Chat',
-      lastMessage: 'Hello! How can I help you today?',
-      timestamp: new Date(),
-      messages: [
-        {
-          id: '3-1',
-          content: 'Hello! How can I help you today? Feel free to ask me anything!',
-          sender: 'ai',
-          timestamp: new Date(),
-        },
-      ],
-    },
-  ]);
+  const [chats, setChats] = useState<Chat[]>([]);
 
-  const currentChat = chats.find(chat => chat.id === currentChatId)!;
+  const currentChat = chats.find(chat => chat.id === currentChatId) ?? null;
   const [input, setInput] = useState('');
 
   const scrollToBottom = () => {
@@ -88,8 +74,10 @@ function App() {
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [currentChat.messages]);
+    if (currentChat) {
+      scrollToBottom();
+    }
+  }, [currentChat]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -149,45 +137,6 @@ function App() {
     }
   };
 
-
-  //load all of user's old chats:
-  useEffect(() => {
-    const fetchUserChats = async () => {
-      try {
-        const resUser = await axios.get('/chat/user');
-        const userId = resUser.data;
-        console.log("Fetched userId:", userId);
-  
-        const resChats = await axios.get(`/chat/${userId}/chats`);
-        const userChats = resChats.data;
-        console.log("Fetched chats from DB:", resChats.data);
-  
-        if (userChats.length > 0) {
-          const formattedChats = userChats.map((chat: { chat_id: any; messages: { (): any; new(): any; text: any; }[]; date_created: string | number | Date; graph_id: string; }) => ({
-            id: chat.chat_id,
-            title: 'Chat',
-            lastMessage: chat.messages.at(-1)?.text || 'No messages yet',
-            timestamp: new Date(chat.date_created),
-            messages: chat.messages.map((msg: any, index: number) => ({
-              id: `${chat.chat_id}-${index}`,
-              content: msg.text,
-              sender: msg.sender,
-              timestamp: new Date(msg.timestamp),
-            })),
-            graph_id: chat.graph_id
-          }));
-  
-          setChats(formattedChats);
-          setCurrentChatId(formattedChats[0].id); // auto-load latest chat
-        }
-  
-      } catch (err) {
-        console.error('Error fetching chats:', err);
-      }
-    };
-    fetchUserChats();
-  }, []);
-  
 
   const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -431,12 +380,13 @@ function App() {
     }
 
     // Find the last question message
-    const lastQuestion = [...currentChat.messages].reverse().find(m => m.isQuestion);
+    const currentMessages = currentChat?.messages ?? [];
+    const lastQuestion = [...currentMessages].reverse().find(m => m.isQuestion);
 
     if (lastQuestion?.questionData && isAnswering) {
       try {
         setIsTyping(true);
-        const isRetry = currentChat.messages.filter(m => m.questionData?.question === lastQuestion.questionData?.question).length > 1;
+        const isRetry = currentMessages.filter(m => m.questionData?.question === lastQuestion.questionData?.question).length > 1;
 
         // Send answer for verification
         const response = await axios.post('http://localhost:4000/api/verify-answer', {
@@ -535,8 +485,8 @@ function App() {
               const allAnswers = [...userAnswers, input];
               
               const quizHistoryData = {
-                concepts: qaData.map((qa, index) => ({
-                  conceptID: `concept_${currentChat.graph_id}_${index}`,
+                concepts: qaData.map((_, index) => ({
+                  conceptID: `concept_${currentChat?.graph_id}_${index}`,
                   name: `Question ${index + 1} Concept`
                 })),
                 questions: qaData.map((qa, index) => ({
@@ -615,7 +565,7 @@ function App() {
       } finally {
         setIsTyping(false);
       }
-    } else if (currentChat.graph_id) {
+    } else if (currentChat?.graph_id) {
     try {
       setIsTyping(true);
       const response = await axios.post(
@@ -708,7 +658,7 @@ function App() {
     setCurrentChatId(chatId);
   };
 
-  const handleNewChat = async () => {
+  const handleNewChat = useCallback(async () => {
     try {
       console.log('Creating new chat...');
   
@@ -735,7 +685,7 @@ function App() {
   
       console.log('New chat object to add to state:', newChat);
   
-      setChats(prev => [newChat, ...prev]);
+      setChats(prev => [newChat, ...prev.filter(chat => chat.id !== newChat.id)]);
       setCurrentChatId(newChat.id);
 
       const welcomeMessage = 'Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.';
@@ -745,19 +695,81 @@ function App() {
         sender: 'ai',
         text: welcomeMessage,
       }, { withCredentials: true });
-  
-      console.log('New chat added successfully! Current chats:', [...chats, newChat]);
-  
+ 
+      return newChat;
+
     } catch (error: any) {
       console.error('Error creating new chat:', error);
       if (error.response) {
         console.error('Backend error response:', error.response.data);
       }
       alert('Failed to create a new chat.');
+      return undefined;
     }
-  };
-  
-  
+  }, []);
+
+  const fetchUserChats = useCallback(async (createIfEmpty = false) => {
+    try {
+      const resUser = await axios.get('http://localhost:4000/chat/user', {
+        withCredentials: true
+      });
+      const userId = resUser.data;
+
+      if (!userId) {
+        console.warn('No user ID returned while fetching chats');
+        return;
+      }
+
+      const resChats = await axios.get(`http://localhost:4000/chat/${userId}/chats`, {
+        withCredentials: true
+      });
+      const userChats = Array.isArray(resChats.data) ? resChats.data : [];
+
+      if (userChats.length === 0) {
+        if (createIfEmpty) {
+          await handleNewChat();
+        } else {
+          setChats([]);
+          setCurrentChatId('');
+        }
+        return;
+      }
+
+      const formattedChats: Chat[] = userChats.map((chat: any) => ({
+        id: chat.chat_id,
+        title: chat.title || 'Chat',
+        lastMessage: chat.messages?.at?.(-1)?.text || 'No messages yet',
+        timestamp: new Date(chat.date_created),
+        messages: (chat.messages || []).map((msg: any, index: number) => ({
+          id: `${chat.chat_id}-${index}`,
+          content: msg.text,
+          sender: msg.sender,
+          timestamp: new Date(msg.timestamp),
+        })),
+        graph_id: chat.graph_id,
+      }));
+
+      setChats(formattedChats);
+      setCurrentChatId(prevId => {
+        if (prevId && formattedChats.some(chat => chat.id === prevId)) {
+          return prevId;
+        }
+        return formattedChats[0]?.id ?? prevId;
+      });
+    } catch (err) {
+      console.error('Error fetching chats:', err);
+    }
+  }, [handleNewChat]);
+
+  useEffect(() => {
+    fetchUserChats(true);
+  }, [fetchUserChats]);
+
+  useEffect(() => {
+    if (!currentChatId && chats.length > 0) {
+      setCurrentChatId(chats[0].id);
+    }
+  }, [chats, currentChatId]);
 
   const getFileIcon = (type: string) => {
     if (type.startsWith('image/')) {
@@ -766,6 +778,156 @@ function App() {
       return <FileText className="w-5 h-5" />;
     }
     return <File className="w-5 h-5" />;
+  };
+
+  // Format question text for better readability
+  const formatQuestion = (text: string): React.ReactNode => {
+    if (!text) return text;
+
+    // Split by newlines first to preserve existing line breaks
+    const lines = text.split('\n');
+    const formattedLines: React.ReactNode[] = [];
+
+    lines.forEach((line, lineIndex) => {
+      // Check for multiple choice patterns: A), B), C), D) or A., B., C., D.
+      // Pattern: Letter followed by ) or . followed by space and text, until next letter choice or end
+      const multipleChoicePattern = /\b([A-Z])[\)\.]\s+([^A-Z\)\.]+?)(?=\s+[A-Z][\)\.]|$)/g;
+      let matches = Array.from(line.matchAll(multipleChoicePattern));
+      
+      // If no matches with space after ), try without space requirement
+      if (matches.length < 2) {
+        const altPattern = /\b([A-Z])[\)\.]([^A-Z\)\.]+?)(?=\s*[A-Z][\)\.]|$)/g;
+        matches = Array.from(line.matchAll(altPattern));
+      }
+      
+      if (matches.length >= 2) {
+        // This is a multiple choice question
+        // Extract the question part (before the first choice)
+        const firstMatch = matches[0];
+        const firstMatchIndex = line.indexOf(firstMatch[0]);
+        const questionPart = line.substring(0, firstMatchIndex).trim();
+        
+        if (questionPart) {
+          formattedLines.push(
+            <div key={`q-${lineIndex}`} className="mb-3 font-medium">
+              {questionPart}
+            </div>
+          );
+        }
+
+        // Format each choice on a new line
+        matches.forEach((match, matchIndex) => {
+          const choiceLetter = match[1];
+          const choiceText = match[2].trim();
+          const separator = match[0].includes('.') ? '.' : ')';
+          formattedLines.push(
+            <div key={`choice-${lineIndex}-${matchIndex}`} className="ml-4 mb-2 pl-2 border-l-2 border-gray-300">
+              <span className="font-semibold text-teal-600">{choiceLetter}{separator}</span> {choiceText}
+            </div>
+          );
+        });
+      } else {
+        // Check for numbered lists or other formatting
+        // Regular line, preserve as is but format nicely
+        if (line.trim()) {
+          // Check if it's a question number line (e.g., "Question 1 of 5:")
+          if (line.match(/Question\s+\d+\s+of\s+\d+/i)) {
+            formattedLines.push(
+              <div key={`q-header-${lineIndex}`} className="mb-3 font-semibold text-teal-600">
+                {line}
+              </div>
+            );
+          } else {
+            formattedLines.push(
+              <div key={`line-${lineIndex}`} className={lineIndex > 0 ? 'mt-2' : ''}>
+                {line}
+              </div>
+            );
+          }
+        }
+      }
+    });
+
+    return formattedLines.length > 0 ? <div className="space-y-1">{formattedLines}</div> : text;
+  };
+
+  const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    // Prevent double-deletion
+    if (deletingChatRef.current === chatId) {
+      console.log('⚠️ Delete already in progress for chat:', chatId);
+      return;
+    }
+
+    console.log('🗑️ Delete button clicked for chat:', chatId);
+    console.log('Current chats:', chats.map(c => c.id));
+
+    // Mark as deleting immediately to prevent double-clicks
+    deletingChatRef.current = chatId;
+
+    // Delete immediately - confirmation removed for now due to dialog issues
+    console.log('✅ Proceeding with delete...');
+    console.log('Sending DELETE request to:', `http://localhost:4000/chat/delete/${chatId}`);
+
+    // Optimistically update UI immediately (before server response)
+    console.log('Updating local state optimistically...');
+    setChats(prev => {
+      const beforeCount = prev.length;
+      const filtered = prev.filter(chat => chat.id !== chatId);
+      console.log(`Chats: ${beforeCount} -> ${filtered.length} (removed ${beforeCount - filtered.length})`);
+      return filtered;
+    });
+    
+    // Clear current chat if it was deleted
+    if (currentChatId === chatId) {
+      console.log('Clearing current chat ID because it was deleted');
+      setCurrentChatId('');
+    }
+
+    try {
+      const response = await axios.delete(`http://localhost:4000/chat/delete/${chatId}`, {
+        withCredentials: true,
+      });
+
+      console.log('✅ Delete response received:', response.data);
+      console.log('Response status:', response.status);
+      console.log('✅ Chat deleted successfully on server');
+      
+      // Clear deletion flag
+      deletingChatRef.current = null;
+      
+      // Only refresh if the server deletion failed (to restore state)
+      // Otherwise, our optimistic update is already correct
+    } catch (error: any) {
+      console.error('❌ Error deleting chat on server:', error);
+      
+      // Clear deletion flag on error too
+      deletingChatRef.current = null;
+      console.error('Error details:', {
+        message: error?.message,
+        response: error?.response,
+        status: error?.response?.status,
+        data: error?.response?.data
+      });
+      
+      // Restore the chat since deletion failed
+      console.log('Restoring chat in UI since server deletion failed...');
+      await fetchUserChats(false);
+      
+      if (error?.response) {
+        console.error('Backend error status:', error.response.status);
+        console.error('Backend error response:', error.response.data);
+        alert(`Failed to delete chat: ${error.response.data?.message || error.response.statusText || 'Unknown error'}`);
+      } else if (error?.request) {
+        console.error('No response received from server');
+        alert('Failed to delete chat: No response from server. Is the server running?');
+      } else {
+        console.error('Request setup error:', error.message);
+        alert(`Failed to delete chat: ${error.message}`);
+      }
+    }
   };
 
   // ...existing code... (no local helper required)
@@ -861,6 +1023,23 @@ function App() {
     };
   }, [currentChatId]);
 
+  if (!currentChat) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-white">
+        <div className="text-center space-y-4">
+          <h2 className="text-2xl font-semibold text-gray-800">No chats yet</h2>
+          <p className="text-gray-500">Start a new conversation to begin chatting with your study assistant.</p>
+          <button
+            onClick={() => void handleNewChat()}
+            className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors duration-200"
+          >
+            Start a New Chat
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-white">
       {/* Chat History Sidebar */}
@@ -887,7 +1066,7 @@ function App() {
         
         {/* New Chat Button */}
         <button
-          onClick={handleNewChat}
+          onClick={() => void handleNewChat()}
           className={`m-4 p-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors duration-200 flex items-center justify-center gap-2 ${
             isSidebarCollapsed ? 'p-2' : ''
           }`}
@@ -903,8 +1082,14 @@ function App() {
               .map((chat) => (
               <div
                 key={chat.id}
-                onClick={() => handleChatSelect(chat.id)}
-                className={`p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-200 transition-colors duration-150 ${
+                onClick={(e) => {
+                  // Don't select chat if clicking on delete button
+                  if ((e.target as HTMLElement).closest('button[title="Delete chat"]')) {
+                    return;
+                  }
+                  handleChatSelect(chat.id);
+                }}
+                className={`p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-200 transition-colors duration-150 relative group ${
                   currentChatId === chat.id ? 'bg-gray-50' : ''
                 }`}
               >
@@ -915,6 +1100,30 @@ function App() {
                       {chat.title}
                     </h3>
                     <p className="text-xs text-gray-500 truncate">{chat.lastMessage}</p>
+                  </div>
+                  <div 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                    }}
+                  >
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        console.log('Delete button onClick triggered for chat:', chat.id);
+                        handleDeleteChat(chat.id, e);
+                      }}
+                      className="opacity-70 group-hover:opacity-100 p-1.5 hover:bg-red-100 rounded transition-all duration-150 z-50 relative flex-shrink-0"
+                      title="Delete chat"
+                      type="button"
+                    >
+                      <Trash2 className="w-4 h-4 text-red-500 hover:text-red-700" />
+                    </button>
                   </div>
                 </div>
                 <div className="mt-1 text-xs text-gray-400">
@@ -952,7 +1161,7 @@ function App() {
           <div className="h-full flex flex-col">
             {/* Chat Header */}
             <div className="bg-white p-4 border-b border-gray-200 flex justify-between items-center">
-              <h1 className="text-xl font-semibold text-gray-800">{currentChat.title}</h1>
+              <h1 className="text-xl font-semibold text-gray-800">{currentChat?.title || 'Loading...'}</h1>
               <button
                 onClick={() => navigate('/')}
                 className="p-2 bg-transparent text-teal-600 border border-teal-500 rounded-lg hover:bg-teal-50 transition-colors duration-200 flex items-center justify-center gap-2"
@@ -963,7 +1172,7 @@ function App() {
 
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
-              {currentChat.messages.map((message) => (
+              {currentChat?.messages.map((message) => (
                 <div
                   key={message.id}
                   className={`flex ${
@@ -992,7 +1201,9 @@ function App() {
                           {message.timestamp.toLocaleTimeString()}
                         </span>
                       </div>
-                      <p className="text-sm">{message.content}</p>
+                      <div className="text-sm whitespace-pre-wrap">
+                        {message.isQuestion ? formatQuestion(message.content) : message.content}
+                      </div>
                       {message.file && (
                         <div className="mt-2 p-2 bg-white/10 rounded-lg">
                           <div className="flex items-center space-x-2">

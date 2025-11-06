@@ -156,3 +156,71 @@ export const getUserChats = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Server Error' });
   }
 };
+
+/**
+ * Delete a chat for the current user
+ * DELETE /chat/delete/:chat_id
+ */
+export const deleteChat = async (req: Request, res: Response): Promise<void> => {
+  console.log("=== DELETE CHAT REQUEST ===");
+  console.log("Request params:", req.params);
+  console.log("Request method:", req.method);
+  console.log("Request URL:", req.url);
+
+  try {
+    const userId = (req.session as any)?.passport?.user;
+    const { chat_id } = req.params;
+
+    console.log("User ID from session:", userId);
+    console.log("Chat ID from params:", chat_id);
+
+    if (!userId) {
+      console.log("ERROR: Unauthorized - no userId in session");
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
+    }
+
+    if (!chat_id) {
+      console.log("ERROR: Chat ID is required");
+      res.status(400).json({ message: 'Chat ID is required' });
+      return;
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      console.log("ERROR: User not found in database");
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+
+    console.log(`User has ${user.chats.length} chats`);
+    console.log("Looking for chat_id:", chat_id);
+    console.log("Available chat_ids:", user.chats.map(c => c.chat_id));
+
+    // Find the chat index
+    const chatIndex = user.chats.findIndex((chat) => chat.chat_id === chat_id);
+
+    if (chatIndex === -1) {
+      console.log("ERROR: Chat not found in user's chats");
+      res.status(404).json({ message: 'Chat not found' });
+      return;
+    }
+
+    console.log(`Found chat at index ${chatIndex}, deleting...`);
+
+    // Remove the chat from the array
+    user.chats.splice(chatIndex, 1);
+    await user.save();
+
+    console.log(`✅ Chat ${chat_id} deleted successfully. User now has ${user.chats.length} chats.`);
+    res.status(200).json({
+      message: 'Chat deleted successfully',
+      chat_id: chat_id,
+    });
+
+  } catch (error) {
+    console.error('❌ Delete chat error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
