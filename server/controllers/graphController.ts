@@ -130,4 +130,53 @@ Provide feedback in this JSON format:
       followUpQuestion: "Could you rephrase your answer?"
     });
   }
+};
+
+interface GenerateConversationRequest {
+  message: string;
+  graph_id: string;
+}
+
+export const generateConversationResponse = async (req: Request, res: Response) => {
+  try {
+    const { message, graph_id }: GenerateConversationRequest = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    if (!graph_id) {
+      return res.status(400).json({ error: 'graph_id is required' });
+    }
+
+    // Forward request to Python/FastAPI backend which handles Neo4j and OpenAI
+    const response = await axios.post(
+      `http://localhost:8000/generate-conversation-response?user_input=${encodeURIComponent(message)}&graph_id=${encodeURIComponent(graph_id)}`
+    );
+
+    // Return the response from Python backend
+    res.json({
+      success: true,
+      response: response.data.message,
+      graph_id: response.data.graph_id
+    });
+
+  } catch (error) {
+    console.error('Error generating conversation response:', error);
+    
+    // Handle specific error cases
+    if (axios.isAxiosError(error) && error.response) {
+      return res.status(error.response.status).json({
+        success: false,
+        error: error.response.data.detail || 'Failed to generate response',
+        response: "I apologize, but I'm having trouble generating a response right now. Please try again."
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate response',
+      response: "I apologize, but I'm having trouble generating a response right now. Please try again."
+    });
+  }
 }; 
