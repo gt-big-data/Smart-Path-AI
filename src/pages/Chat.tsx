@@ -287,6 +287,7 @@ function App() {
         await fetchGraphData(responseData.graph_id);
         
         // Fetch QA data
+        /*
         try {
           const qaResponse = await fetch(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${responseData.graph_id}`);
           const qaResponseData = await qaResponse.json();
@@ -328,6 +329,7 @@ function App() {
         } catch (error) {
           console.error('Error fetching QA data:', error);
         }
+          */
 
       } catch (error) {
         console.error('Detailed upload error:', error);
@@ -386,6 +388,7 @@ function App() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     
     if (!input.trim()) return;
 
@@ -567,6 +570,42 @@ function App() {
       } finally {
         setIsTyping(false);
       }
+    } else if (currentChat.graph_id) {
+    try {
+      setIsTyping(true);
+      const response = await axios.post(
+        `http://localhost:4000/api/generate-conversation-response?graph_id=${currentChat.graph_id}&user_input=${encodeURIComponent(input)}`,
+        {},
+        { withCredentials: true }
+      );
+      const aiMessage: Message = {
+        id: Date.now().toString(),
+        content: response.data.message,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+
+      setChats(prevChats => prevChats.map(chat =>
+        chat.id === currentChatId
+          ? {
+              ...chat,
+              lastMessage: aiMessage.content,
+              timestamp: new Date(),
+              messages: [...chat.messages, aiMessage],
+            }
+          : chat
+      ));
+
+      // Save AI response to backend
+      await axios.post('http://localhost:4000/chat/message', {
+        chat_id: currentChatId,
+        sender: 'ai',
+        text: aiMessage.content,
+      }, { withCredentials: true });
+    } catch (error) {
+    } finally {
+      setIsTyping(false);
+    }    
     } else {
       // Regular chat message handling
       try {
