@@ -215,10 +215,11 @@ interface GenerateConversationRequest {
 
 export const generateConversationResponse = async (req: Request, res: Response) => {
   try {
-    const { message, graph_id }: GenerateConversationRequest = req.body;
+    const message = req.query.user_input as string;
+    const graph_id = req.query.graph_id as string;
 
     if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
+      return res.status(400).json({ error: 'Message (user_input) is required' });
     }
 
     if (!graph_id) {
@@ -233,7 +234,8 @@ export const generateConversationResponse = async (req: Request, res: Response) 
     // Return the response from Python backend
     res.json({
       success: true,
-      response: response.data.message,
+      message: response.data.message,  // ← Keep as 'message' to match frontend expectation
+      response: response.data.message, // ← Add 'response' for compatibility
       graph_id: response.data.graph_id
     });
 

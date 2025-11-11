@@ -231,7 +231,6 @@ function App() {
         await fetchGraphData(responseData.graph_id);
         
         // Fetch QA data
-        /*
         try {
           const qaResponse = await axios.get(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${responseData.graph_id}`, { withCredentials: true });
           const qaResponseData = qaResponse.data;
@@ -281,7 +280,6 @@ function App() {
         } catch (error) {
           console.error('Error fetching QA data:', error);
         }
-          */
 
       } catch (error) {
         console.error('Detailed upload error:', error);
