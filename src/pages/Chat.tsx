@@ -52,6 +52,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [graphData, setGraphData] = useState<any>(null);
   const [qaData, setQaData] = useState<QAPair[]>([]);
+  const [quizLength, setQuizLength] = useState<5 | 10 | 15>(5);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -948,7 +949,10 @@ function App() {
       
       try {
         setIsGeneratingQuestions(true);
-        const qaResponse = await axios.get(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}`, { withCredentials: true });
+        const qaResponse = await axios.get(
+          `http://localhost:4000/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}&length=${quizLength}`,
+          { withCredentials: true }
+        );
         const qaResponseData = qaResponse.data;
         
         // Check if component is still mounted and chat ID hasn't changed
@@ -1021,7 +1025,7 @@ function App() {
       isMounted = false;
       setIsGeneratingQuestions(false);
     };
-  }, [currentChatId]);
+  }, [currentChatId, quizLength, currentChat?.graph_id]);
 
   if (!currentChat) {
     return (
@@ -1162,12 +1166,24 @@ function App() {
             {/* Chat Header */}
             <div className="bg-white p-4 border-b border-gray-200 flex justify-between items-center">
               <h1 className="text-xl font-semibold text-gray-800">{currentChat?.title || 'Loading...'}</h1>
-              <button
-                onClick={() => navigate('/')}
-                className="p-2 bg-transparent text-teal-600 border border-teal-500 rounded-lg hover:bg-teal-50 transition-colors duration-200 flex items-center justify-center gap-2"
-              >
-                Return to Homepage
-              </button>
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-gray-600">Quiz length</label>
+                <select
+                  value={quizLength}
+                  onChange={(e) => setQuizLength(Number(e.target.value) as 5 | 10 | 15)}
+                  className="text-sm border border-gray-300 rounded px-2 py-1"
+                >
+                  <option value={5}>5</option>
+                  <option value={10}>10</option>
+                  <option value={15}>15</option>
+                </select>
+                <button
+                  onClick={() => navigate('/')}
+                  className="p-2 bg-transparent text-teal-600 border border-teal-500 rounded-lg hover:bg-teal-50 transition-colors duration-200 flex items-center justify-center gap-2"
+                >
+                  Return to Homepage
+                </button>
+              </div>
             </div>
 
             {/* Messages Area */}

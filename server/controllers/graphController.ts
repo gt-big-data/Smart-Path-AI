@@ -63,6 +63,10 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
   try {
     const graph_id = req.query.graph_id;
     const userId = (req.session as any)?.passport?.user;
+    const rawLength = req.query.length as string | undefined;
+    const parsedLength = Number(rawLength);
+    const allowed = [5, 10, 15];
+    const length = allowed.includes(parsedLength) ? parsedLength : 5;
 
     if (!graph_id) {
       return res.status(400).json({ error: 'graph_id is required' });
@@ -77,7 +81,7 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
     }
 
     const id = encodeURIComponent(String(graph_id));
-    const url = `http://localhost:8000/questions/${id}?user_id=${userId}`;
+    const url = `http://localhost:8000/questions/${id}?user_id=${userId}&length=${length}`;
 
     console.log(`Requesting questions from AI server: ${url}`);
 
@@ -93,10 +97,15 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
     const qa_pairs = questions.map((q: any) => ({
       question: q.text || '',
       answer: q.correct_answer || '',
-      conceptId: q.topic_id || ''
+      conceptId: q.topic_id || '',
+      // Optional metadata for future UI use
+      id: q.id,
+      explanation: q.explanation,
+      difficulty: q.difficulty,
+      format: q.format,
     }));
 
-    res.json({ status: 'success', qa_pairs, graph_id: graph_id });
+    res.json({ status: 'success', qa_pairs, graph_id: graph_id, requested_length: length, actual_length: qa_pairs.length });
   } catch (error: any) {
     console.error('Error generating questions and answers:', error.message);
     res.status(500).json({ error: 'Failed to generate questions and answers' });
