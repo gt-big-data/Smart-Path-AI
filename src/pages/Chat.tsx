@@ -53,6 +53,8 @@ function App() {
   const [graphData, setGraphData] = useState<any>(null);
   const [qaData, setQaData] = useState<QAPair[]>([]);
   const [quizLength, setQuizLength] = useState<5 | 10 | 15>(5);
+  const [shouldStartQuiz, setShouldStartQuiz] = useState(false);
+  const [quizCompleted, setQuizCompleted] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -69,6 +71,18 @@ function App() {
 
   const currentChat = chats.find(chat => chat.id === currentChatId) ?? null;
   const [input, setInput] = useState('');
+
+  // Generate robust unique IDs to avoid duplicate keys when multiple messages are created in the same millisecond
+  const generateMessageId = () => {
+    try {
+      if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+        return (crypto as any).randomUUID();
+      }
+    } catch (_) {
+      // ignore and fallback
+    }
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -119,7 +133,7 @@ function App() {
     }
 
     return {
-      id: Date.now().toString(),
+      id: generateMessageId(),
       content: aiResponse,
       sender: 'ai' as const,
       timestamp: new Date(),
@@ -173,9 +187,27 @@ function App() {
           body: formData,
         });
 
-        console.log('Response status:', response.status);
-        const responseData = await response.json();
-        console.log('Response data:', responseData);
+        const status = response.status;
+        const contentType = response.headers.get('content-type') || '';
+        console.log('[Upload] Response status:', status, 'content-type:', contentType);
+
+        let responseData: any;
+        if (contentType.includes('application/json')) {
+          try {
+            responseData = await response.json();
+          } catch (parseErr) {
+            console.error('[Upload] Failed to parse JSON', parseErr);
+            const rawText = await response.text();
+            console.error('[Upload] Raw non-JSON response snippet:', rawText.slice(0, 300));
+            throw new Error('Upload returned malformed JSON');
+          }
+        } else {
+          // Likely an HTML error page (hence Unexpected token '<')
+          const rawText = await response.text();
+          console.error('[Upload] Non-JSON response (first 300 chars):', rawText.slice(0, 300));
+          throw new Error(`Unexpected non-JSON response (status ${status}).`);
+        }
+        console.log('[Upload] Parsed response JSON:', responseData);
 
         if (!response.ok) {
           throw new Error(responseData.error || 'Failed to process file');
@@ -183,7 +215,7 @@ function App() {
 
         // Create file upload message
         const fileUploadMessage: Message = {
-          id: Date.now().toString(),
+          id: generateMessageId(),
           content: `Uploaded file: ${file.name}`,
           sender: 'user',
           timestamp: new Date(),
@@ -231,58 +263,8 @@ function App() {
         // Fetch graph data with the graph_id
         await fetchGraphData(responseData.graph_id);
         
-        // Fetch QA data
-        /*
-        try {
-          const qaResponse = await axios.get(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${responseData.graph_id}`, { withCredentials: true });
-          const qaResponseData = qaResponse.data;
-          if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
-            // Normalize TF answers: server may return 'T'/'F' for true/false
-            const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair) => ({
-              question: p.question,
-              answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
-              conceptId: p.conceptId
-            }));
-
-            setQaData(normalizedPairs);
-            setCurrentQuestionIndex(0);
-            setIsAnswering(true);
-
-            // Show the first question
-            const firstQuestionMessage: Message = {
-              id: Date.now().toString(),
-              content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${normalizedPairs.length}:\n\n${normalizedPairs[0].question}`,
-              sender: 'ai',
-              timestamp: new Date(),
-              isQuestion: true,
-              questionData: {
-                question: normalizedPairs[0].question,
-                correctAnswer: normalizedPairs[0].answer,
-                conceptId: normalizedPairs[0].conceptId,
-                questionIndex: 0,
-                totalQuestions: normalizedPairs.length
-              }
-            };
-
-            setChats(prevChats => prevChats.map(chat =>
-              chat.id === currentChatId
-                ? {
-                    ...chat,
-                    messages: [...chat.messages, firstQuestionMessage],
-                  }
-                : chat
-            ));
-
-            await axios.post('http://localhost:4000/chat/message', {
-              chat_id: currentChatId,
-              sender: 'ai',
-              text: firstQuestionMessage.content,
-            }, { withCredentials: true });
-          }
-        } catch (error) {
-          console.error('Error fetching QA data:', error);
-        }
-          */
+        // Set the trigger to show the "Start Quiz" button
+        setShouldStartQuiz(true);
 
       } catch (error) {
         console.error('Detailed upload error:', error);
@@ -298,7 +280,7 @@ function App() {
         
         // Create and save error message
         const errorMsg: Message = {
-          id: Date.now().toString(),
+          id: generateMessageId(),
           content: errorMessage,
           sender: 'ai',
           timestamp: new Date(),
@@ -342,63 +324,109 @@ function App() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    
-    if (!input.trim()) return;
+    const trimmedInput = input.trim();
+    if (!trimmedInput) return;
 
+    // --- Start of Fix ---
+
+  // 1. Capture current messages BEFORE updating the chat state.
+  // `currentChat` is from the current render, so its `messages` array is what's currently displayed.
+  const currentMessages = currentChat?.messages ?? [];
+
+    // 2. Create the user message object.
     const userMessage: Message = {
-      id: Date.now().toString(),
-      content: input,
+      id: generateMessageId(),
+      content: trimmedInput,
       sender: 'user',
       timestamp: new Date(),
     };
 
-    // Clear input immediately
+    // 3. Clear the input field.
     setInput('');
 
-    // Always add user message immediately
+    // 4. Update the chat state with the new user message.
+    // This is asynchronous, but that's okay because we've already captured the last question.
     setChats(prevChats => prevChats.map(chat => 
       chat.id === currentChatId
         ? {
             ...chat,
-            lastMessage: input,
+            lastMessage: trimmedInput,
             timestamp: new Date(),
             messages: [...chat.messages, userMessage],
           }
         : chat
     ));
 
-    // Save user message to backend
+    // 5. Save the user message to the backend.
     try {
       await axios.post('http://localhost:4000/chat/message', {
         chat_id: currentChatId,
         sender: 'user',
-        text: input,
+        text: trimmedInput,
       }, { withCredentials: true });
-  
-      console.log('Message saved to backend');
     } catch (error) {
       console.error('Error saving message:', error);
     }
 
-    // Find the last question message
-    const currentMessages = currentChat?.messages ?? [];
-    const lastQuestion = [...currentMessages].reverse().find(m => m.isQuestion);
+    // 6. Now, decide what to do based on whether we are in a quiz.
+    // --- End of Fix ---
 
-    if (lastQuestion?.questionData && isAnswering) {
+    // Prefer authoritative quiz state over inferring from chat history
+    const currentQA = qaData[currentQuestionIndex];
+    if (isAnswering && currentQA) {
       try {
         setIsTyping(true);
-        const isRetry = currentMessages.filter(m => m.questionData?.question === lastQuestion.questionData?.question).length > 1;
+        console.log('[Quiz] Submitting answer', {
+          isAnswering,
+          currentQuestionIndex,
+          totalQuestions: qaData.length,
+          question: currentQA.question,
+          expectedAnswer: currentQA.answer,
+          userAnswer: trimmedInput
+        });
+        // Simple retry detection: count how many times this question appears as a question message
+        const isRetry = currentMessages.filter(m => m.isQuestion && m.questionData?.question === currentQA.question).length > 1;
 
         // Send answer for verification
         const response = await axios.post('http://localhost:4000/api/verify-answer', {
-          question: lastQuestion.questionData.question,
-          userAnswer: input,
-          correctAnswer: lastQuestion.questionData.correctAnswer,
-          conceptId: lastQuestion.questionData.conceptId,
-          isRetry: isRetry
+          question: currentQA.question,
+          userAnswer: trimmedInput,
+          correctAnswer: currentQA.answer,
+          conceptId: currentQA.conceptId,
+          isRetry: isRetry,
+          graph_id: currentChat?.graph_id
         }, { withCredentials: true });
 
         const verificationResult = response.data;
+        console.log('[Quiz] Verification raw result:', verificationResult);
+
+        // Defensive shape check
+        const hasIsCorrect = typeof verificationResult?.isCorrect === 'boolean';
+        const hasFeedback = typeof verificationResult?.feedback === 'string' && verificationResult.feedback.length > 0;
+        if (!hasIsCorrect || !hasFeedback) {
+          const diagnosticContent = `Verification response missing expected keys.\nExpected: { isCorrect: boolean, feedback: string, followUpQuestion?: string }\nReceived: ${JSON.stringify(verificationResult, null, 2)}`;
+          const diagnosticMessage: Message = {
+            id: generateMessageId(),
+            content: diagnosticContent,
+            sender: 'ai',
+            timestamp: new Date()
+          };
+          setChats(prevChats => prevChats.map(chat =>
+            chat.id === currentChatId
+              ? { ...chat, messages: [...chat.messages, diagnosticMessage] }
+              : chat
+          ));
+          try {
+            await axios.post('http://localhost:4000/chat/message', {
+              chat_id: currentChatId,
+              sender: 'ai',
+              text: diagnosticMessage.content,
+            }, { withCredentials: true });
+          } catch (persistErr) {
+            console.error('[Quiz] Failed to persist diagnostic message', persistErr);
+          }
+          return; // Abort normal flow
+        }
         
         // The backend now handles progress updates.
         // const conceptId = lastQuestion.questionData.conceptId; 
@@ -406,12 +434,12 @@ function App() {
 
         if (verificationResult.isCorrect) {
           // Track this answer
-          setUserAnswers(prev => [...prev, input]);
+          setUserAnswers(prev => [...prev, trimmedInput]);
           
           // If answer is correct and there are more questions, show the next one
           if (qaData.length > currentQuestionIndex + 1) {
             const nextQuestionMessage: Message = {
-              id: Date.now().toString(),
+              id: generateMessageId(),
               content: `Correct! Let's move on to the next question:\n\n${qaData[currentQuestionIndex + 1].question}`,
               sender: 'ai',
               timestamp: new Date(),
@@ -426,7 +454,7 @@ function App() {
             };
 
             const feedbackMessage: Message = {
-              id: Date.now().toString(),
+              id: generateMessageId(),
               content: verificationResult.feedback,
               sender: 'ai',
               timestamp: new Date(),
@@ -455,10 +483,11 @@ function App() {
             }, { withCredentials: true });
 
             setCurrentQuestionIndex(prev => prev + 1);
+            console.log('[Quiz] Advanced to next question index', currentQuestionIndex + 1);
           } else {
             // All questions answered correctly
             const finalMessage: Message = {
-              id: Date.now().toString(),
+              id: generateMessageId(),
               content: `${verificationResult.feedback}\n\nCongratulations! You've successfully answered all the questions. You have a good understanding of the material.`,
               sender: 'ai',
               timestamp: new Date(),
@@ -483,7 +512,7 @@ function App() {
             // Save quiz history to backend
             try {
               // Add the final answer to userAnswers
-              const allAnswers = [...userAnswers, input];
+              const allAnswers = [...userAnswers, trimmedInput];
               
               const quizHistoryData = {
                 concepts: qaData.map((_, index) => ({
@@ -511,16 +540,26 @@ function App() {
             }
 
             setIsAnswering(false);
+            console.log('[Quiz] Quiz completed successfully');
+            // Allow the user to start a new quiz after finishing the previous one
+            setShouldStartQuiz(true);
+            setQuizCompleted(true);
           }
         } else {
           // If answer is incorrect, show feedback and follow-up
           const feedbackMessage: Message = {
-            id: Date.now().toString(),
+            id: generateMessageId(),
             content: `${verificationResult.feedback}\n\n${verificationResult.followUpQuestion}\n\nTry answering the original question again:`,
             sender: 'ai',
             timestamp: new Date(),
             isQuestion: true,
-            questionData: lastQuestion.questionData
+            questionData: {
+              question: currentQA.question,
+              correctAnswer: currentQA.answer,
+              conceptId: currentQA.conceptId,
+              questionIndex: currentQuestionIndex,
+              totalQuestions: qaData.length
+            }
           };
 
           setChats(prevChats => prevChats.map(chat =>
@@ -542,7 +581,7 @@ function App() {
       } catch (error) {
         console.error('Error verifying answer:', error);
         const errorMessage: Message = {
-          id: Date.now().toString(),
+          id: generateMessageId(),
           content: "Sorry, I encountered an error while verifying your answer. Please try again.",
           sender: 'ai',
           timestamp: new Date(),
@@ -567,41 +606,64 @@ function App() {
         setIsTyping(false);
       }
     } else if (currentChat?.graph_id) {
-    try {
-      setIsTyping(true);
-      const response = await axios.post(
-        `http://localhost:4000/api/generate-conversation-response?graph_id=${currentChat.graph_id}&user_input=${encodeURIComponent(input)}`,
-        {},
-        { withCredentials: true }
-      );
-      const aiMessage: Message = {
-        id: Date.now().toString(),
-        content: response.data.message,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
+      try {
+        setIsTyping(true);
+        console.log('[Conversation] Sending request', { message: trimmedInput, graph_id: currentChat.graph_id });
+        const response = await axios.post(
+          'http://localhost:4000/api/generate-conversation-response',
+          { message: trimmedInput, graph_id: currentChat.graph_id },
+          { withCredentials: true }
+        );
+        console.log('[Conversation] Raw response', response.data);
+        const aiMessage: Message = {
+          id: generateMessageId(),
+          content: response.data.response || response.data.message || 'I received your message.',
+          sender: 'ai',
+          timestamp: new Date(),
+        };
 
-      setChats(prevChats => prevChats.map(chat =>
-        chat.id === currentChatId
-          ? {
-              ...chat,
-              lastMessage: aiMessage.content,
-              timestamp: new Date(),
-              messages: [...chat.messages, aiMessage],
-            }
-          : chat
-      ));
+        setChats(prevChats => prevChats.map(chat =>
+          chat.id === currentChatId
+            ? {
+                ...chat,
+                lastMessage: aiMessage.content,
+                timestamp: new Date(),
+                messages: [...chat.messages, aiMessage],
+              }
+            : chat
+        ));
 
-      // Save AI response to backend
-      await axios.post('http://localhost:4000/chat/message', {
-        chat_id: currentChatId,
-        sender: 'ai',
-        text: aiMessage.content,
-      }, { withCredentials: true });
-    } catch (error) {
-    } finally {
-      setIsTyping(false);
-    }    
+        // Save AI response to backend
+        await axios.post('http://localhost:4000/chat/message', {
+          chat_id: currentChatId,
+          sender: 'ai',
+          text: aiMessage.content,
+        }, { withCredentials: true });
+      } catch (error) {
+        console.error('Error generating conversation response:', error);
+        const errorMessage: Message = {
+          id: generateMessageId(),
+          content: 'Sorry, I could not generate a response. Please retry or rephrase.',
+          sender: 'ai',
+          timestamp: new Date(),
+        };
+        setChats(prevChats => prevChats.map(chat =>
+          chat.id === currentChatId
+            ? { ...chat, messages: [...chat.messages, errorMessage] }
+            : chat
+        ));
+        try {
+          await axios.post('http://localhost:4000/chat/message', {
+            chat_id: currentChatId,
+            sender: 'ai',
+            text: errorMessage.content,
+          }, { withCredentials: true });
+        } catch (persistErr) {
+          console.error('Failed to persist AI error message', persistErr);
+        }
+      } finally {
+        setIsTyping(false);
+      }
     } else {
       // Regular chat message handling
       try {
@@ -628,7 +690,7 @@ function App() {
       } catch (error) {
         console.error('Error generating AI response:', error);
         const errorMessage: Message = {
-          id: Date.now().toString(),
+          id: generateMessageId(),
           content: "Sorry, I encountered an error while generating a response. Please try again.",
           sender: 'ai',
           timestamp: new Date(),
@@ -939,93 +1001,100 @@ function App() {
     </PanelResizeHandle>
   );
 
-  // Add useEffect to load graph and questions when chat changes
-  useEffect(() => {
-    let isMounted = true;
-    const currentChat = chats.find(chat => chat.id === currentChatId);
-
-    const fetchQA = async () => {
-      if (isGeneratingQuestions || !currentChat?.graph_id) return;
+  const startQuiz = async () => {
+    if (isGeneratingQuestions || !currentChat?.graph_id) return;
+    // clear completed flag when starting a new quiz
+    setQuizCompleted(false);
+    
+    try {
+      setIsGeneratingQuestions(true);
+      const qaResponse = await axios.get(
+        `http://localhost:4000/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}&length=${quizLength}`,
+        { withCredentials: true }
+      );
+      const qaResponseData = qaResponse.data;
       
-      try {
-        setIsGeneratingQuestions(true);
-        const qaResponse = await axios.get(
-          `http://localhost:4000/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}&length=${quizLength}`,
-          { withCredentials: true }
-        );
-        const qaResponseData = qaResponse.data;
-        
-        // Check if component is still mounted and chat ID hasn't changed
-        if (!isMounted || currentChatId !== currentChat.id) return;
+      if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
+        const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair) => ({
+          question: p.question,
+          answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
+          conceptId: p.conceptId
+        }));
 
-        if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
-          const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair) => ({
-            question: p.question,
-            answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
-            conceptId: p.conceptId
-          }));
-
-          setQaData(normalizedPairs);
-          setCurrentQuestionIndex(0);
-          setIsAnswering(true);
-          setUserAnswers([]); // Reset user answers for new quiz
-
-          const firstQuestionMessage: Message = {
-            id: Date.now().toString(),
-            content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${normalizedPairs.length}:\n\n${normalizedPairs[0].question}`,
-            sender: 'ai',
-            timestamp: new Date(),
-            isQuestion: true,
-            questionData: {
-              question: normalizedPairs[0].question,
-              correctAnswer: normalizedPairs[0].answer,
-              conceptId: normalizedPairs[0].conceptId,
-              questionIndex: 0,
-              totalQuestions: normalizedPairs.length
-            }
-          };
-
-          if (isMounted && currentChatId === currentChat.id) {
-            setChats(prevChats => prevChats.map(chat =>
-              chat.id === currentChatId
-                ? {
-                    ...chat,
-                    messages: [...chat.messages, firstQuestionMessage],
-                  }
-                : chat
-            ));
-
-            await axios.post('http://localhost:4000/chat/message', {
-              chat_id: currentChatId,
-              sender: 'ai',
-              text: firstQuestionMessage.content,
-            }, { withCredentials: true });
+        setQaData(normalizedPairs);
+        setCurrentQuestionIndex(0);
+        setIsAnswering(true);
+        setUserAnswers([]); // Reset user answers for new quiz
+        setShouldStartQuiz(false); // Hide the start button
+        const firstQuestionMessage: Message = {
+          id: generateMessageId(),
+          content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${normalizedPairs.length}:\n\n${normalizedPairs[0].question}`,
+          sender: 'ai',
+          timestamp: new Date(),
+          isQuestion: true,
+          questionData: {
+            question: normalizedPairs[0].question,
+            correctAnswer: normalizedPairs[0].answer,
+            conceptId: normalizedPairs[0].conceptId,
+            questionIndex: 0,
+            totalQuestions: normalizedPairs.length
           }
-        }
-      } catch (error) {
-        console.error('Error fetching QA data:', error);
-      } finally {
-        if (isMounted) {
-          setIsGeneratingQuestions(false);
-        }
+        };
+
+        // Remove any leftover question messages from previous quizzes before adding the new first question.
+        setChats(prevChats => prevChats.map(chat =>
+          chat.id === currentChatId
+            ? {
+                ...chat,
+                messages: [...chat.messages.filter(m => !m.isQuestion), firstQuestionMessage],
+              }
+            : chat
+        ));
+
+        await axios.post('http://localhost:4000/chat/message', {
+          chat_id: currentChatId,
+          sender: 'ai',
+          text: firstQuestionMessage.content,
+        }, { withCredentials: true });
       }
-    };
-
-    if (currentChat?.graph_id) {
-      fetchGraphData(currentChat.graph_id);
-      fetchQA();
-    } else {
-      setGraphData(null);
-      setQaData([]);
-      setIsAnswering(false);
-    }
-
-    // Cleanup function
-    return () => {
-      isMounted = false;
+    } catch (error) {
+      console.error('Error fetching QA data:', error);
+    } finally {
       setIsGeneratingQuestions(false);
-    };
-  }, [currentChatId, quizLength, currentChat?.graph_id]);
+    }
+  };
+
+  // Add useEffect to load graph when chat changes
+  // Add useEffect to load graph and restore quiz state when chat changes
+  useEffect(() => {
+      const currentChat = chats.find(chat => chat.id === currentChatId);
+
+      if (currentChat?.graph_id) {
+          fetchGraphData(currentChat.graph_id);
+
+          // Check if a quiz is already in progress for this chat
+          const hasExistingQuestions = currentChat.messages.some(m => m.isQuestion);
+          if (hasExistingQuestions && qaData.length === 0) {
+              // If there are questions in history but not in state, it means we need to restore the quiz.
+              // We can re-trigger the question generation to get back on track.
+              startQuiz(); 
+      } else if (!hasExistingQuestions) {
+        // If there are no questions in history, reset the quiz state and show the Start Quiz button.
+        setQaData([]);
+        setIsAnswering(false);
+        // If this chat has a graph, allow starting a quiz from the UI (e.g. after returning from Profile).
+        if (currentChat?.graph_id) {
+        setShouldStartQuiz(true);
+        }
+          }
+      } else {
+          // This is a chat without a document/graph, so reset everything.
+          setGraphData(null);
+          setQaData([]);
+          setIsAnswering(false);
+          setShouldStartQuiz(false);
+      }
+  }, [currentChatId, currentChat?.graph_id]); // Dependency array ensures this runs when the chat changes
 
   if (!currentChat) {
     return (
@@ -1172,11 +1241,25 @@ function App() {
                   value={quizLength}
                   onChange={(e) => setQuizLength(Number(e.target.value) as 5 | 10 | 15)}
                   className="text-sm border border-gray-300 rounded px-2 py-1"
+                  disabled={isAnswering}
                 >
                   <option value={5}>5</option>
                   <option value={10}>10</option>
                   <option value={15}>15</option>
                 </select>
+                <button
+                  onClick={() => {
+                    if (currentChat?.graph_id) {
+                      navigate(`/profile?graph_id=${currentChat.graph_id}`);
+                    } else {
+                      // Optionally, handle the case where there is no graph yet
+                      alert("Please upload a document to view progress.");
+                    }
+                  }}
+                  className="p-2 bg-transparent text-teal-600 border border-teal-500 rounded-lg hover:bg-teal-50 transition-colors duration-200 flex items-center justify-center gap-2"
+                >
+                  View Profile
+                </button>
                 <button
                   onClick={() => navigate('/')}
                   className="p-2 bg-transparent text-teal-600 border border-teal-500 rounded-lg hover:bg-teal-50 transition-colors duration-200 flex items-center justify-center gap-2"
@@ -1254,6 +1337,17 @@ function App() {
                       <span className="text-sm">Typing...</span>
                     </div>
                   </div>
+                </div>
+              )}
+              {shouldStartQuiz && !isAnswering && (
+                <div className="flex justify-center py-4">
+                  <button
+                    onClick={startQuiz}
+                    disabled={isGeneratingQuestions}
+                    className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors duration-200 disabled:bg-gray-400"
+                  >
+                    {isGeneratingQuestions ? 'Generating...' : (quizCompleted ? 'Start New Quiz' : 'Start Quiz')}
+                  </button>
                 </div>
               )}
               <div ref={messagesEndRef} />

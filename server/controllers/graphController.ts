@@ -265,3 +265,32 @@ export const generateConversationResponse = async (req: Request, res: Response) 
     });
   }
 };
+
+export const getUserProfile = async (req: Request, res: Response) => {
+  const userId = (req.session as any)?.passport?.user;
+  const graph_id = req.query.graph_id;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'User not authenticated' });
+  }
+
+  if (!graph_id) {
+    return res.status(400).json({ error: 'graph_id is required' });
+  }
+
+  try {
+    const url = `http://localhost:8000/user/${userId}/profile?graph_id=${graph_id}`;
+    console.log(`Fetching user profile from AI server: ${url}`);
+
+    const response = await axios.get(url);
+
+    // Forward the data from the AI server directly to the frontend
+    res.json(response.data);
+
+  } catch (error: any) {
+    const status = error.response?.status || 500;
+    const errorDetail = error.response?.data || 'Failed to fetch user profile from AI service.';
+    console.error(`Error fetching user profile from AI service: Status ${status}`, errorDetail);
+    res.status(status).json({ error: 'Failed to fetch user profile', detail: errorDetail });
+  }
+};
