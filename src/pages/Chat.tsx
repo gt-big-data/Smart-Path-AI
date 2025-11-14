@@ -68,6 +68,7 @@ function App() {
   const navigate = useNavigate();
   
   const [chats, setChats] = useState<Chat[]>([]);
+  const [chatsLoading, setChatsLoading] = useState(true);
 
   const currentChat = chats.find(chat => chat.id === currentChatId) ?? null;
   const [input, setInput] = useState('');
@@ -772,6 +773,7 @@ function App() {
   }, []);
 
   const fetchUserChats = useCallback(async (createIfEmpty = false) => {
+    setChatsLoading(true);
     try {
       const resUser = await axios.get('http://localhost:4000/chat/user', {
         withCredentials: true
@@ -780,6 +782,7 @@ function App() {
 
       if (!userId) {
         console.warn('No user ID returned while fetching chats');
+        setChatsLoading(false);
         return;
       }
 
@@ -795,6 +798,7 @@ function App() {
           setChats([]);
           setCurrentChatId('');
         }
+        setChatsLoading(false);
         return;
       }
 
@@ -821,6 +825,8 @@ function App() {
       });
     } catch (err) {
       console.error('Error fetching chats:', err);
+    } finally {
+      setChatsLoading(false);
     }
   }, [handleNewChat]);
 
@@ -1096,7 +1102,20 @@ function App() {
       }
   }, [currentChatId, currentChat?.graph_id]); // Dependency array ensures this runs when the chat changes
 
-  if (!currentChat) {
+  // Show loading state while fetching chats
+  if (chatsLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-white">
+        <div className="text-center space-y-4">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500"></div>
+          <p className="text-gray-500">Loading chats...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Only show "No chats yet" if loading is complete and there are no chats
+  if (!currentChat && chats.length === 0) {
     return (
       <div className="flex h-screen items-center justify-center bg-white">
         <div className="text-center space-y-4">
