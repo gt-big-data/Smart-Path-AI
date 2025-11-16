@@ -32,25 +32,123 @@ const ProfilePage: React.FC = () => {
 
       try {
         setLoading(true);
-        // Call the backend proxy which forwards the request to the AI service.
-        // The AI service returns { userId, graphId, progress, topicsToReview }
-        const response = await axios.get('http://localhost:4000/api/user/profile', {
-          params: { graph_id: graphId },
-          withCredentials: true,
+        // Fetch user progress (from Mongo via Node) and graph nodes, then join client-side.
+        const [progressRes, graphRes] = await Promise.all([
+          axios.get('http://localhost:4000/progress', { withCredentials: true }),
+          axios.get('http://localhost:4000/api/view-graph', { params: { graph_id: graphId }, withCredentials: true }),
+        ]);
+
+        const progressList: any[] = Array.isArray(progressRes.data) ? progressRes.data : [];
+        const graphData = graphRes.data || {};
+
+        // DEBUG: log raw responses to help diagnose missing labels
+        console.debug('ProfilePage: raw graph response', graphData);
+        console.debug('ProfilePage: raw progress response', progressList);
+
+        // Build a quick map from possible ids to the node's display name
+        const nodeNameById = new Map<string, string>();
+        const nodes = Array.isArray(graphData.graph?.nodes) ? graphData.graph.nodes : [];
+
+        // Helper that mirrors GraphVisualization.getNodeLabel fallback logic
+        const getNodeLabel = (node: any) => {
+          const props = node.properties || {};
+          const labels: string[] = Array.isArray(node.labels) ? node.labels : [];
+          const isTopic = labels.includes('Topic') || labels.includes('Subtopic');
+
+          if (isTopic) {
+            if (props.name && String(props.name).trim()) return String(props.name);
+            const content = props.text || props.description || props.illustration || props.explanation || '';
+            if (content && String(content).trim()) {
+              const words = String(content).split(' ');
+              return words.slice(0, 4).join(' ') + (words.length > 4 ? '...' : '');
+            }
+          }
+
+          // Generic fallback for other labels
+          const content = props.text || props.description || props.illustration || props.explanation || '';
+          if (content && String(content).trim()) {
+            const words = String(content).split(' ');
+            return words.slice(0, 4).join(' ') + (words.length > 4 ? '...' : '');
+          }
+
+          // Last resort: use a readable id form
+          return String(node.id);
+        };
+
+        for (const node of nodes) {
+          const props = node.properties || {};
+          const candidates = [props.conceptId, props.topicID, props.topicId, props.topic_id, props.concept_id, node.id, props.neo4j_id, props.id]
+            .filter(Boolean)
+            .map(String);
+          const display = getNodeLabel(node) || String(node.id);
+          for (const c of candidates) {
+            nodeNameById.set(String(c), display);
+          }
+        }
+
+        // Normalize progress entries into the UI shape and keep the raw concept id for lookups
+        const normalized: Array<any> = progressList.map((p: any) => {
+          const conceptId = String(p.conceptId || p.conceptID || p.topicId || p.topic_id || p.id);
+          // Try map lookup first. If missing, attempt to find node by id and compute a label.
+          let name = nodeNameById.get(conceptId) || p.name || p.topicName;
+          if (!name) {
+            const found = nodes.find((n: any) =>
+              String(n.id) === conceptId ||
+              String(n.properties?.conceptId) === conceptId ||
+              String(n.properties?.topicID) === conceptId ||
+              String(n.properties?.topicId) === conceptId ||
+              String(n.properties?.topic_id) === conceptId ||
+              String(n.properties?.concept_id) === conceptId
+            );
+            if (found) {
+              name = getNodeLabel(found);
+            }
+          }
+          if (!name) name = conceptId;
+          return {
+            concept_id: conceptId,
+            topic_name: name,
+            confidence_score: typeof p.confidenceScore === 'number' ? p.confidenceScore : (p.confidence_score ?? 0),
+            last_practiced: p.lastAttempted || p.last_practiced || p.updatedAt || new Date().toISOString(),
+          };
         });
 
-        const backend = response.data || {};
+        // If any items still show the raw id (no friendly name), try fetching node metadata for those ids
+        const stillMissing = normalized.filter((n: any) => n.topic_name === n.concept_id).map((n: any) => n.concept_id);
+        if (stillMissing.length > 0) {
+          try {
+            const idsParam = Array.from(new Set(stillMissing)).join(',');
+            const metaRes = await axios.get('http://localhost:4000/api/node-metadata', {
+              params: { graph_id: graphId, concept_ids: idsParam },
+              withCredentials: true,
+            });
+            const metaNodes: any[] = metaRes.data?.nodes || [];
+            const metaMap = new Map<string, string>();
+            for (const n of metaNodes) {
+              const props = n.properties || {};
+              const candidates = [props.topicID, props.topicId, props.topic_id, props.conceptId, props.concept_id, n.id]
+                .filter(Boolean)
+                .map(String);
+              const label = props.name || props.topicName || props.title || props.text || props.description || String(n.id);
+              for (const c of candidates) metaMap.set(String(c), label);
+            }
 
-        // Helper to normalize backend topic shape to the UI's expected shape
-        const mapItem = (item: any) => ({
-          topic_name: item.topicName || item.topic_name || item.name || 'Unknown',
-          confidence_score: typeof item.confidenceScore === 'number' ? item.confidenceScore : (item.confidence_score ?? 0),
-          // last_practiced may not be provided by the AI service; fallback to now
-          last_practiced: item.lastPracticed || item.last_practiced || item.updatedAt || new Date().toISOString(),
-        });
+            // Update normalized entries with any found labels
+            for (const item of normalized) {
+              if (metaMap.has(item.concept_id)) {
+                item.topic_name = metaMap.get(item.concept_id);
+              }
+            }
+          } catch (metaErr) {
+            console.warn('Failed to fetch node metadata for missing ids', metaErr);
+          }
+        }
 
-        const full_progress = Array.isArray(backend.progress) ? backend.progress.map(mapItem) : [];
-        const topics_to_review = Array.isArray(backend.topicsToReview) ? backend.topicsToReview.map(mapItem) : [];
+        // Topics to review: simple threshold (confidence < 0.75), sorted ascending
+        const topics_to_review = normalized.filter(i => i.confidence_score < 0.75).sort((a, b) => a.confidence_score - b.confidence_score);
+
+        // Full progress: sort by most recently practiced
+        const full_progress = normalized.sort((a, b) => new Date(b.last_practiced).getTime() - new Date(a.last_practiced).getTime());
 
         setProfileData({ full_progress, topics_to_review });
       } catch (err: any) {
@@ -73,6 +171,20 @@ const ProfilePage: React.FC = () => {
     if (score < 0.4) return 'text-red-500';
     if (score < 0.75) return 'text-yellow-500';
     return 'text-green-500';
+  };
+
+  const isLikelyUUID = (s: string) => {
+    if (!s) return false;
+    // crude UUID v4-ish check (36 chars with hyphens)
+    return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s);
+  };
+
+  const friendlyTopicLabel = (s: string) => {
+    if (!s) return '';
+    if (isLikelyUUID(s)) {
+      return `${s.slice(0, 8)}...${s.slice(-4)}`;
+    }
+    return s;
   };
 
   const renderContent = () => {
@@ -129,7 +241,9 @@ const ProfilePage: React.FC = () => {
                   {profileData.topics_to_review.map((item) => (
                     <li key={item.topic_name} className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
                       <div className="flex justify-between items-center">
-                        <span className="font-medium text-gray-700">{item.topic_name}</span>
+                        <span className="font-medium text-gray-700" title={item.topic_name}>
+                          {friendlyTopicLabel(item.topic_name)}
+                        </span>
                         <span className={`font-bold ${getScoreColor(item.confidence_score)}`}>
                           {Math.round(item.confidence_score * 100)}%
                         </span>
@@ -161,7 +275,9 @@ const ProfilePage: React.FC = () => {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {profileData.full_progress.map((item) => (
                         <tr key={item.topic_name}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{item.topic_name}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" title={item.topic_name}>
+                            {friendlyTopicLabel(item.topic_name)}
+                          </td>
                           <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${getScoreColor(item.confidence_score)}`}>
                             {Math.round(item.confidence_score * 100)}%
                           </td>

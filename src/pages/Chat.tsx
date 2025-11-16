@@ -85,6 +85,35 @@ function App() {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   };
 
+  // Local persistence helpers for quiz state per chat
+  const quizStateKey = (chatId: string) => `quizState:${chatId}`;
+
+  const saveQuizState = (chatId: string, state: any) => {
+    try {
+      localStorage.setItem(quizStateKey(chatId), JSON.stringify(state));
+    } catch (err) {
+      console.warn('Failed to save quiz state', err);
+    }
+  };
+
+  const loadQuizState = (chatId: string) => {
+    try {
+      const raw = localStorage.getItem(quizStateKey(chatId));
+      return raw ? JSON.parse(raw) : null;
+    } catch (err) {
+      console.warn('Failed to load quiz state', err);
+      return null;
+    }
+  };
+
+  const clearQuizState = (chatId: string) => {
+    try {
+      localStorage.removeItem(quizStateKey(chatId));
+    } catch (err) {
+      console.warn('Failed to clear quiz state', err);
+    }
+  };
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -436,6 +465,15 @@ function App() {
         if (verificationResult.isCorrect) {
           // Track this answer
           setUserAnswers(prev => [...prev, trimmedInput]);
+          // Persist updated answers
+          if (currentChatId) {
+            const existing = loadQuizState(currentChatId) || {};
+            const updated = {
+              ...(existing || {}),
+              userAnswers: [...(existing.userAnswers || []), trimmedInput],
+            };
+            saveQuizState(currentChatId, updated);
+          }
           
           // If answer is correct and there are more questions, show the next one
           if (qaData.length > currentQuestionIndex + 1) {
@@ -484,6 +522,12 @@ function App() {
             }, { withCredentials: true });
 
             setCurrentQuestionIndex(prev => prev + 1);
+            // update persisted index
+            if (currentChatId) {
+              const existing = loadQuizState(currentChatId) || {};
+              existing.currentQuestionIndex = (existing.currentQuestionIndex || 0) + 1;
+              saveQuizState(currentChatId, existing);
+            }
             console.log('[Quiz] Advanced to next question index', currentQuestionIndex + 1);
           } else {
             // All questions answered correctly
@@ -545,6 +589,8 @@ function App() {
             // Allow the user to start a new quiz after finishing the previous one
             setShouldStartQuiz(true);
             setQuizCompleted(true);
+            // Clear persisted quiz state when finished
+            if (currentChatId) clearQuizState(currentChatId);
           }
         } else {
           // If answer is incorrect, show feedback and follow-up
@@ -1032,6 +1078,16 @@ function App() {
         setIsAnswering(true);
         setUserAnswers([]); // Reset user answers for new quiz
         setShouldStartQuiz(false); // Hide the start button
+        // Persist quiz state so navigating away doesn't lose it
+        if (currentChatId) {
+          saveQuizState(currentChatId, {
+            qaData: normalizedPairs,
+            currentQuestionIndex: 0,
+            userAnswers: [],
+            isAnswering: true,
+            quizCompleted: false,
+          });
+        }
         const firstQuestionMessage: Message = {
           id: generateMessageId(),
           content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${normalizedPairs.length}:\n\n${normalizedPairs[0].question}`,
@@ -1074,25 +1130,54 @@ function App() {
   // Add useEffect to load graph and restore quiz state when chat changes
   useEffect(() => {
       const currentChat = chats.find(chat => chat.id === currentChatId);
-
       if (currentChat?.graph_id) {
           fetchGraphData(currentChat.graph_id);
 
-          // Check if a quiz is already in progress for this chat
+          // Try to restore persisted quiz state first
+          const persisted = currentChatId ? loadQuizState(currentChatId) : null;
           const hasExistingQuestions = currentChat.messages.some(m => m.isQuestion);
-          if (hasExistingQuestions && qaData.length === 0) {
-              // If there are questions in history but not in state, it means we need to restore the quiz.
-              // We can re-trigger the question generation to get back on track.
-              startQuiz(); 
+
+          if (persisted && persisted.qaData) {
+            // Restore persisted state
+            setQaData(persisted.qaData);
+            setCurrentQuestionIndex(persisted.currentQuestionIndex || 0);
+            setUserAnswers(persisted.userAnswers || []);
+            setIsAnswering(!!persisted.isAnswering);
+            setQuizCompleted(!!persisted.quizCompleted);
+            setShouldStartQuiz(false);
+          } else if (hasExistingQuestions && qaData.length === 0) {
+              // Reconstruct quiz state from chat message history (do not call startQuiz which requests new questions)
+              const reconstructed: QAPair[] = currentChat.messages
+                .filter(m => m.isQuestion && m.questionData)
+                .map(m => ({ question: m.questionData!.question, answer: m.questionData!.correctAnswer, conceptId: m.questionData!.conceptId }));
+
+              if (reconstructed.length > 0) {
+                setQaData(reconstructed);
+                const lastQuestion = currentChat.messages.slice().reverse().find(m => m.isQuestion && m.questionData);
+                const lastIndex = lastQuestion?.questionData?.questionIndex ?? 0;
+                setCurrentQuestionIndex(lastIndex);
+                setIsAnswering(true);
+                setShouldStartQuiz(false);
+                // Persist reconstructed state for durability
+                if (currentChatId) {
+                  saveQuizState(currentChatId, {
+                    qaData: reconstructed,
+                    currentQuestionIndex: lastIndex,
+                    userAnswers: [],
+                    isAnswering: true,
+                    quizCompleted: false,
+                  });
+                }
+              }
       } else if (!hasExistingQuestions) {
         // If there are no questions in history, reset the quiz state and show the Start Quiz button.
         setQaData([]);
         setIsAnswering(false);
         // If this chat has a graph, allow starting a quiz from the UI (e.g. after returning from Profile).
         if (currentChat?.graph_id) {
-        setShouldStartQuiz(true);
+          setShouldStartQuiz(true);
         }
-          }
+      }
       } else {
           // This is a chat without a document/graph, so reset everything.
           setGraphData(null);

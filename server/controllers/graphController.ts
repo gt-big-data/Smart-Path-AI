@@ -294,3 +294,33 @@ export const getUserProfile = async (req: Request, res: Response) => {
     res.status(status).json({ error: 'Failed to fetch user profile', detail: errorDetail });
   }
 };
+
+// Fetch metadata for specific node/concept ids from the AI graph proxy
+export const getNodeMetadata = async (req: Request, res: Response) => {
+  try {
+    const graph_id = req.query.graph_id as string | undefined;
+    const conceptIdsRaw = (req.query.concept_ids || req.query.concept_id) as string | undefined;
+
+    if (!graph_id) return res.status(400).json({ error: 'graph_id is required' });
+    if (!conceptIdsRaw) return res.status(400).json({ error: 'concept_ids or concept_id is required' });
+
+    const wanted = String(conceptIdsRaw).split(',').map(s => s.trim()).filter(Boolean);
+
+    const url = `http://localhost:8000/view-graph?graph_id=${encodeURIComponent(String(graph_id))}`;
+    const response = await axios.get(url);
+    const nodes = response.data?.graph?.nodes || [];
+
+    const matches = nodes.filter((node: any) => {
+      const props = node.properties || {};
+      const candidates = [props.topicID, props.topicId, props.topic_id, props.conceptId, props.concept_id, node.id]
+        .filter(Boolean)
+        .map(String);
+      return candidates.some((c: string) => wanted.includes(c));
+    }).map((n: any) => ({ id: n.id, labels: n.labels, properties: n.properties }));
+
+    res.json({ nodes: matches });
+  } catch (error: any) {
+    console.error('Error fetching node metadata:', error?.message || error);
+    res.status(500).json({ error: 'Failed to fetch node metadata' });
+  }
+};
