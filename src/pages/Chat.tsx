@@ -1356,7 +1356,6 @@ function App() {
                     if (currentChat?.graph_id) {
                       navigate(`/profile?graph_id=${currentChat.graph_id}`);
                     } else {
-                      // Optionally, handle the case where there is no graph yet
                       alert("Please upload a document to view progress.");
                     }
                   }}
@@ -1370,6 +1369,17 @@ function App() {
                 >
                   Return to Homepage
                 </button>
+                {/* Start Quiz button moved to header for better placement */}
+                {shouldStartQuiz && !isAnswering && currentChat?.graph_id && (
+                  <button
+                    onClick={startQuiz}
+                    disabled={isGeneratingQuestions}
+                    className={`ml-2 px-4 py-2 ${isGeneratingQuestions ? 'bg-gray-300 text-gray-700' : 'bg-teal-500 text-white hover:bg-teal-600'} rounded-lg transition-colors duration-200 flex items-center gap-2`}
+                    title={isGeneratingQuestions ? 'Generating questions...' : 'Start quiz based on this document'}
+                  >
+                    {isGeneratingQuestions ? 'Generating...' : (quizCompleted ? 'Start New Quiz' : 'Start Quiz')}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1443,17 +1453,7 @@ function App() {
                   </div>
                 </div>
               )}
-              {shouldStartQuiz && !isAnswering && (
-                <div className="flex justify-center py-4">
-                  <button
-                    onClick={startQuiz}
-                    disabled={isGeneratingQuestions}
-                    className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors duration-200 disabled:bg-gray-400"
-                  >
-                    {isGeneratingQuestions ? 'Generating...' : (quizCompleted ? 'Start New Quiz' : 'Start Quiz')}
-                  </button>
-                </div>
-              )}
+              {/* Start Quiz button is now located in the header for improved UX */}
               <div ref={messagesEndRef} />
             </div>
 
