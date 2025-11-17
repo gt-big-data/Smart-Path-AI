@@ -86,7 +86,7 @@ app.use('/api', graphRoutes);
 app.use('/chat', chatRoutes);
 
 //Progress Routes
-app.use('/progress', progressRoutes);
+app.use('/api', progressRoutes);
 
 // Quiz History Routes
 app.use('/api/quiz-history', quizHistoryRoutes);

@@ -1,3 +1,4 @@
+//Chat.tsx
 import React, { useState, useEffect, useRef, ChangeEvent, useCallback } from 'react';
 import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File, Trash2 } from 'lucide-react';
 import {
@@ -44,6 +45,13 @@ interface QAPair {
   conceptId: string;
 }
 
+// Add interface for concept progress
+interface ConceptProgress {
+  conceptId: string;
+  confidenceScore: number;
+  lastAttempted?: Date;
+}
+
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [currentChatId, setCurrentChatId] = useState('');
@@ -52,10 +60,11 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [graphData, setGraphData] = useState<any>(null);
   const [qaData, setQaData] = useState<QAPair[]>([]);
+  const [conceptProgress, setConceptProgress] = useState<ConceptProgress[]>([]); // Add state for concept progress
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const deletingChatRef = useRef<string | null>(null); // Track which chat is being deleted
+  const deletingChatRef = useRef<string | null>(null);
   const [loadingDots, setLoadingDots] = useState('');
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
   const [isAnswering, setIsAnswering] = useState<boolean>(false);
@@ -89,10 +98,24 @@ function App() {
     return () => clearInterval(interval);
   }, [isProcessingFile]);
 
+  // Add function to fetch concept progress
+  const fetchConceptProgress = useCallback(async () => {
+    try {
+      const response = await axios.get('http://localhost:4000/api/concept-progress', {
+        withCredentials: true
+      });
+      setConceptProgress(response.data);
+      console.log('Fetched concept progress:', response.data);
+    } catch (error) {
+      console.error('Error fetching concept progress:', error);
+      // Set empty array on error to avoid breaking the UI
+      setConceptProgress([]);
+    }
+  }, []);
+
   const generateAIResponse = async (userMessage: string, fileType?: string) => {
     let aiResponse = '';
 
-    // Handle file uploads
     if (fileType) {
       if (fileType.startsWith('image/')) {
         aiResponse = 'I see you\'ve shared an image. What would you like me to help you with regarding this image?';
@@ -102,7 +125,6 @@ function App() {
         aiResponse = 'I\'ve received your file. How can I help you with it?';
       }
     } else {
-      // Simple response logic based on user input
       const lowerMessage = userMessage.toLowerCase();
       if (lowerMessage.includes('hello') || lowerMessage.includes('hi')) {
         aiResponse = 'Hello! It\'s great to meet you. How can I assist you today?';
@@ -131,12 +153,14 @@ function App() {
       const response = await axios.get(`http://localhost:4000/api/view-graph?graph_id=${graphId}`);
       console.log('Graph data response:', response.data);
       setGraphData(response.data);
+      
+      // Fetch concept progress after loading graph
+      await fetchConceptProgress();
     } catch (error) {
       console.error('Error fetching graph:', error);
       setGraphData({ error: 'Failed to load graph data' });
     }
   };
-
 
   const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -160,13 +184,11 @@ function App() {
           size: file.size
         });
 
-        // Get current chat's graph_id if it exists
         const currentChatData = chats.find(chat => chat.id === currentChatId);
         const url = currentChatData?.graph_id 
           ? `http://localhost:4000/upload/process-pdf?graph_id=${currentChatData.graph_id}`
           : 'http://localhost:4000/upload/process-pdf';
 
-        // Send to our backend first
         const response = await fetch(url, {
           method: 'POST',
           body: formData,
@@ -180,7 +202,6 @@ function App() {
           throw new Error(responseData.error || 'Failed to process file');
         }
 
-        // Create file upload message
         const fileUploadMessage: Message = {
           id: Date.now().toString(),
           content: `Uploaded file: ${file.name}`,
@@ -193,14 +214,12 @@ function App() {
           }
         };
 
-        // Save file upload message to backend first
         await axios.post('http://localhost:4000/chat/message', {
           chat_id: currentChatId,
           sender: 'user',
           text: fileUploadMessage.content,
         }, { withCredentials: true });
 
-        // Update local state with file upload message
         setChats(prevChats => prevChats.map(chat =>
           chat.id === currentChatId
             ? {
@@ -212,14 +231,12 @@ function App() {
             : chat
         ));
 
-        // If this is a new graph, update the chat with the graph_id
         if (responseData.graph_id) {
           await axios.post('http://localhost:4000/chat/message', {
             chat_id: currentChatId,
             graph_id: responseData.graph_id,
           }, { withCredentials: true });
 
-          // Update local state
           setChats(prevChats => prevChats.map(chat => 
             chat.id === currentChatId
               ? { ...chat, graph_id: responseData.graph_id }
@@ -227,26 +244,27 @@ function App() {
           ));
         }
 
-        // Fetch graph data with the graph_id
         await fetchGraphData(responseData.graph_id);
         
-        // Fetch QA data
         try {
           const qaResponse = await axios.get(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${responseData.graph_id}`, { withCredentials: true });
           const qaResponseData = qaResponse.data;
           if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
-            // Normalize TF answers: server may return 'T'/'F' for true/false
             const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair) => ({
               question: p.question,
               answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
               conceptId: p.conceptId
             }));
 
+            console.log('📚 Questions loaded with conceptIds:', normalizedPairs.map(p => ({ 
+              question: p.question.substring(0, 50) + '...', 
+              conceptId: p.conceptId 
+            })));
+
             setQaData(normalizedPairs);
             setCurrentQuestionIndex(0);
             setIsAnswering(true);
 
-            // Show the first question
             const firstQuestionMessage: Message = {
               id: Date.now().toString(),
               content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${normalizedPairs.length}:\n\n${normalizedPairs[0].question}`,
@@ -293,7 +311,6 @@ function App() {
           errorMessage = error.message;
         }
         
-        // Create and save error message
         const errorMsg: Message = {
           id: Date.now().toString(),
           content: errorMessage,
@@ -339,7 +356,6 @@ function App() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    
     if (!input.trim()) return;
 
     const userMessage: Message = {
@@ -349,10 +365,8 @@ function App() {
       timestamp: new Date(),
     };
 
-    // Clear input immediately
     setInput('');
 
-    // Always add user message immediately
     setChats(prevChats => prevChats.map(chat => 
       chat.id === currentChatId
         ? {
@@ -364,7 +378,6 @@ function App() {
         : chat
     ));
 
-    // Save user message to backend
     try {
       await axios.post('http://localhost:4000/chat/message', {
         chat_id: currentChatId,
@@ -377,7 +390,6 @@ function App() {
       console.error('Error saving message:', error);
     }
 
-    // Find the last question message
     const currentMessages = currentChat?.messages ?? [];
     const lastQuestion = [...currentMessages].reverse().find(m => m.isQuestion);
 
@@ -386,7 +398,8 @@ function App() {
         setIsTyping(true);
         const isRetry = currentMessages.filter(m => m.questionData?.question === lastQuestion.questionData?.question).length > 1;
 
-        // Send answer for verification
+        console.log('Submitting answer for conceptId:', lastQuestion.questionData.conceptId);
+        
         const response = await axios.post('http://localhost:4000/api/verify-answer', {
           question: lastQuestion.questionData.question,
           userAnswer: input,
@@ -397,15 +410,14 @@ function App() {
 
         const verificationResult = response.data;
         
-        // The backend now handles progress updates.
-        // const conceptId = lastQuestion.questionData.conceptId; 
-        // await updateProgress(conceptId, verificationResult.isCorrect, isRetry);
+        console.log('Verification result:', verificationResult);
+        
+        // Refresh concept progress after answering
+        await fetchConceptProgress();
 
         if (verificationResult.isCorrect) {
-          // Track this answer
           setUserAnswers(prev => [...prev, input]);
           
-          // If answer is correct and there are more questions, show the next one
           if (qaData.length > currentQuestionIndex + 1) {
             const nextQuestionMessage: Message = {
               id: Date.now().toString(),
@@ -438,7 +450,6 @@ function App() {
                 : chat
             ));
 
-            // Save both feedback and next question to backend
             await axios.post('http://localhost:4000/chat/message', {
               chat_id: currentChatId,
               sender: 'ai',
@@ -453,7 +464,6 @@ function App() {
 
             setCurrentQuestionIndex(prev => prev + 1);
           } else {
-            // All questions answered correctly
             const finalMessage: Message = {
               id: Date.now().toString(),
               content: `${verificationResult.feedback}\n\nCongratulations! You've successfully answered all the questions. You have a good understanding of the material.`,
@@ -470,21 +480,18 @@ function App() {
                 : chat
             ));
 
-            // Save final message to backend
             await axios.post('http://localhost:4000/chat/message', {
               chat_id: currentChatId,
               sender: 'ai',
               text: finalMessage.content,
             }, { withCredentials: true });
 
-            // Save quiz history to backend
             try {
-              // Add the final answer to userAnswers
               const allAnswers = [...userAnswers, input];
               
               const quizHistoryData = {
-                concepts: qaData.map((_, index) => ({
-                  conceptID: `concept_${currentChat?.graph_id}_${index}`,
+                concepts: qaData.map((qa, index) => ({
+                  conceptID: qa.conceptId, // Use the actual conceptId from the question
                   name: `Question ${index + 1} Concept`
                 })),
                 questions: qaData.map((qa, index) => ({
@@ -496,7 +503,7 @@ function App() {
                 }))
               };
 
-              console.log('Saving quiz history:', quizHistoryData);
+              console.log('Saving quiz history with conceptIds:', qaData.map(qa => qa.conceptId));
               
               await axios.post('http://localhost:4000/api/quiz-history', quizHistoryData, { 
                 withCredentials: true 
@@ -510,7 +517,6 @@ function App() {
             setIsAnswering(false);
           }
         } else {
-          // If answer is incorrect, show feedback and follow-up
           const feedbackMessage: Message = {
             id: Date.now().toString(),
             content: `${verificationResult.feedback}\n\n${verificationResult.followUpQuestion}\n\nTry answering the original question again:`,
@@ -529,7 +535,6 @@ function App() {
               : chat
           ));
 
-          // Save feedback message to backend
           await axios.post('http://localhost:4000/chat/message', {
             chat_id: currentChatId,
             sender: 'ai',
@@ -554,7 +559,6 @@ function App() {
             : chat
         ));
 
-        // Save error message to backend
         await axios.post('http://localhost:4000/chat/message', {
           chat_id: currentChatId,
           sender: 'ai',
@@ -589,7 +593,6 @@ function App() {
           : chat
       ));
 
-      // Save AI response to backend
       await axios.post('http://localhost:4000/chat/message', {
         chat_id: currentChatId,
         sender: 'ai',
@@ -600,7 +603,6 @@ function App() {
       setIsTyping(false);
     }    
     } else {
-      // Regular chat message handling
       try {
         setIsTyping(true);
         const aiMessage = await generateAIResponse(input);
@@ -616,7 +618,6 @@ function App() {
             : chat
         ));
 
-        // Save AI response to backend
         await axios.post('http://localhost:4000/chat/message', {
           chat_id: currentChatId,
           sender: 'ai',
@@ -640,7 +641,6 @@ function App() {
             : chat
         ));
 
-        // Save error message to backend
         await axios.post('http://localhost:4000/chat/message', {
           chat_id: currentChatId,
           sender: 'ai',
@@ -778,29 +778,22 @@ function App() {
     return <File className="w-5 h-5" />;
   };
 
-  // Format question text for better readability
   const formatQuestion = (text: string): React.ReactNode => {
     if (!text) return text;
 
-    // Split by newlines first to preserve existing line breaks
     const lines = text.split('\n');
     const formattedLines: React.ReactNode[] = [];
 
     lines.forEach((line, lineIndex) => {
-      // Check for multiple choice patterns: A), B), C), D) or A., B., C., D.
-      // Pattern: Letter followed by ) or . followed by space and text, until next letter choice or end
       const multipleChoicePattern = /\b([A-Z])[\)\.]\s+([^A-Z\)\.]+?)(?=\s+[A-Z][\)\.]|$)/g;
       let matches = Array.from(line.matchAll(multipleChoicePattern));
       
-      // If no matches with space after ), try without space requirement
       if (matches.length < 2) {
         const altPattern = /\b([A-Z])[\)\.]([^A-Z\)\.]+?)(?=\s*[A-Z][\)\.]|$)/g;
         matches = Array.from(line.matchAll(altPattern));
       }
       
       if (matches.length >= 2) {
-        // This is a multiple choice question
-        // Extract the question part (before the first choice)
         const firstMatch = matches[0];
         const firstMatchIndex = line.indexOf(firstMatch[0]);
         const questionPart = line.substring(0, firstMatchIndex).trim();
@@ -813,7 +806,6 @@ function App() {
           );
         }
 
-        // Format each choice on a new line
         matches.forEach((match, matchIndex) => {
           const choiceLetter = match[1];
           const choiceText = match[2].trim();
@@ -825,10 +817,7 @@ function App() {
           );
         });
       } else {
-        // Check for numbered lists or other formatting
-        // Regular line, preserve as is but format nicely
         if (line.trim()) {
-          // Check if it's a question number line (e.g., "Question 1 of 5:")
           if (line.match(/Question\s+\d+\s+of\s+\d+/i)) {
             formattedLines.push(
               <div key={`q-header-${lineIndex}`} className="mb-3 font-semibold text-teal-600">
@@ -853,7 +842,6 @@ function App() {
     e.stopPropagation();
     e.preventDefault();
 
-    // Prevent double-deletion
     if (deletingChatRef.current === chatId) {
       console.log('⚠️ Delete already in progress for chat:', chatId);
       return;
@@ -862,14 +850,11 @@ function App() {
     console.log('🗑️ Delete button clicked for chat:', chatId);
     console.log('Current chats:', chats.map(c => c.id));
 
-    // Mark as deleting immediately to prevent double-clicks
     deletingChatRef.current = chatId;
 
-    // Delete immediately - confirmation removed for now due to dialog issues
     console.log('✅ Proceeding with delete...');
     console.log('Sending DELETE request to:', `http://localhost:4000/chat/delete/${chatId}`);
 
-    // Optimistically update UI immediately (before server response)
     console.log('Updating local state optimistically...');
     setChats(prev => {
       const beforeCount = prev.length;
@@ -878,7 +863,6 @@ function App() {
       return filtered;
     });
     
-    // Clear current chat if it was deleted
     if (currentChatId === chatId) {
       console.log('Clearing current chat ID because it was deleted');
       setCurrentChatId('');
@@ -893,15 +877,11 @@ function App() {
       console.log('Response status:', response.status);
       console.log('✅ Chat deleted successfully on server');
       
-      // Clear deletion flag
       deletingChatRef.current = null;
       
-      // Only refresh if the server deletion failed (to restore state)
-      // Otherwise, our optimistic update is already correct
     } catch (error: any) {
       console.error('❌ Error deleting chat on server:', error);
       
-      // Clear deletion flag on error too
       deletingChatRef.current = null;
       console.error('Error details:', {
         message: error?.message,
@@ -910,7 +890,6 @@ function App() {
         data: error?.response?.data
       });
       
-      // Restore the chat since deletion failed
       console.log('Restoring chat in UI since server deletion failed...');
       await fetchUserChats(false);
       
@@ -928,15 +907,12 @@ function App() {
     }
   };
 
-  // ...existing code... (no local helper required)
-
   const ResizeHandle = ({ className = '' }) => (
     <PanelResizeHandle className={`w-2 hover:bg-teal-500/20 transition-colors duration-150 ${className}`}>
       <div className="h-full w-[2px] bg-gray-200 mx-auto" />
     </PanelResizeHandle>
   );
 
-  // Add useEffect to load graph and questions when chat changes
   useEffect(() => {
     let isMounted = true;
     const currentChat = chats.find(chat => chat.id === currentChatId);
@@ -949,7 +925,6 @@ function App() {
         const qaResponse = await axios.get(`http://localhost:4000/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}`, { withCredentials: true });
         const qaResponseData = qaResponse.data;
         
-        // Check if component is still mounted and chat ID hasn't changed
         if (!isMounted || currentChatId !== currentChat.id) return;
 
         if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
@@ -962,7 +937,7 @@ function App() {
           setQaData(normalizedPairs);
           setCurrentQuestionIndex(0);
           setIsAnswering(true);
-          setUserAnswers([]); // Reset user answers for new quiz
+          setUserAnswers([]);
 
           const firstQuestionMessage: Message = {
             id: Date.now().toString(),
@@ -1014,7 +989,6 @@ function App() {
       setIsAnswering(false);
     }
 
-    // Cleanup function
     return () => {
       isMounted = false;
       setIsGeneratingQuestions(false);
@@ -1040,7 +1014,6 @@ function App() {
 
   return (
     <div className="flex h-screen bg-white">
-      {/* Chat History Sidebar */}
       <div
         className={`${
           isSidebarCollapsed ? 'w-12' : 'w-64'
@@ -1062,7 +1035,6 @@ function App() {
           </button>
         </div>
         
-        {/* New Chat Button */}
         <button
           onClick={() => void handleNewChat()}
           className={`m-4 p-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors duration-200 flex items-center justify-center gap-2 ${
@@ -1081,7 +1053,6 @@ function App() {
               <div
                 key={chat.id}
                 onClick={(e) => {
-                  // Don't select chat if clicking on delete button
                   if ((e.target as HTMLElement).closest('button[title="Delete chat"]')) {
                     return;
                   }
@@ -1133,9 +1104,7 @@ function App() {
         )}
       </div>
 
-      {/* Main Content */}
       <PanelGroup direction="horizontal" className="flex-1">
-        {/* Graph Section */}
         <Panel defaultSize={40} minSize={20}>
           <div className="h-full p-6 bg-white">
             <div className="h-full rounded-lg bg-white border-2 border-gray-200">
@@ -1146,7 +1115,7 @@ function App() {
                   </p>
                 </div>
               ) : (
-                <GraphVisualization data={graphData} />
+                <GraphVisualization data={graphData} conceptProgress={conceptProgress} />
               )}
             </div>
           </div>
@@ -1154,10 +1123,8 @@ function App() {
 
         <ResizeHandle className="w-2 hover:bg-teal-500/20 transition-colors duration-150" />
 
-        {/* Chat Section */}
         <Panel minSize={30}>
           <div className="h-full flex flex-col">
-            {/* Chat Header */}
             <div className="bg-white p-4 border-b border-gray-200 flex justify-between items-center">
               <h1 className="text-xl font-semibold text-gray-800">{currentChat?.title || 'Loading...'}</h1>
               <button
@@ -1168,7 +1135,6 @@ function App() {
               </button>
             </div>
 
-            {/* Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
               {currentChat?.messages.map((message) => (
                 <div
@@ -1241,7 +1207,6 @@ function App() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Area */}
             <form onSubmit={handleSubmit} className="p-4 bg-white border-t border-gray-200">
               {selectedFile && !isProcessingFile && (
                 <div className="mb-2 p-2 bg-gray-50 rounded-lg flex items-center justify-between">
