@@ -467,7 +467,6 @@ function App() {
 
     // 6. Now, decide what to do based on whether we are in a quiz.
     // --- End of Fix ---
-    const lastQuestion = [...currentMessages].reverse().find(m => m.isQuestion);
 
     // Prefer authoritative quiz state over inferring from chat history
     const currentQA = qaData[currentQuestionIndex];
