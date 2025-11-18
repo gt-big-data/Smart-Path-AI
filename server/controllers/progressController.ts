@@ -50,15 +50,31 @@ export const updateConceptProgress = async (req: Request, res: Response, next: N
 
 export const getConceptProgress = async (req: Request, res: Response, next: NextFunction) => {
     const userId = (req.session as any)?.passport?.user;
+    
+    console.log('[getConceptProgress] ===== ENDPOINT CALLED =====');
+    console.log('[getConceptProgress] User ID:', userId);
+    
     if (!userId) {
+      console.log('[getConceptProgress] No userId in session, returning 401');
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
     try {
         const progress = await ConceptProgress.find({ user: userId });
+        console.log(`[getConceptProgress] Found ${progress.length} progress records for user ${userId}`);
+        
+        if (progress.length > 0) {
+          console.log('[getConceptProgress] Sample progress records:');
+          progress.slice(0, 3).forEach((p, idx) => {
+            console.log(`  [${idx + 1}] Concept: ${p.conceptId}, Score: ${p.confidenceScore}, Last: ${p.lastAttempted}`);
+          });
+        } else {
+          console.log('[getConceptProgress] No progress records found');
+        }
+        
         res.status(200).json(progress);
     } catch (error) {
-        console.error('Error fetching concept progress:', error);
+        console.error('[getConceptProgress] Error fetching concept progress:', error);
         next(error);
     }
 };

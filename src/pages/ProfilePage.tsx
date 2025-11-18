@@ -26,12 +26,77 @@ const ProfilePage: React.FC = () => {
         setLoading(true);
 
         // Fetch user progress from Mongo
-        const progressRes = await axios.get('http://localhost:4000/progress', { withCredentials: true });
-        const progressList: any[] = Array.isArray(progressRes.data) ? progressRes.data : [];
+        let progressList: any[] = [];
+        try {
+          console.log('[ProfilePage] Fetching progress from /api/concept-progress endpoint...');
+          const progressRes = await axios.get('http://localhost:4000/api/concept-progress', { withCredentials: true });
+          progressList = Array.isArray(progressRes.data) ? progressRes.data : [];
+          console.log(`[ProfilePage] Received ${progressList.length} progress records from backend`);
+          if (progressList.length > 0) {
+            console.log('[ProfilePage] Sample progress records:', progressList.slice(0, 3));
+          } else {
+            console.log('[ProfilePage] No progress records received from backend');
+          }
+        } catch (progressError: any) {
+          console.error('[ProfilePage] Error fetching progress:', progressError);
+          // Continue even if progress fails - we can still show graphs
+          if (progressError.response?.status === 401) {
+            setError('Please log in to view your profile.');
+            setLoading(false);
+            return;
+          }
+        }
 
         // Fetch all graph IDs for the user
-        const graphIdsRes = await axios.get('http://localhost:4000/chat/graph-ids', { withCredentials: true });
-        const graphIds: string[] = graphIdsRes.data.graphIds || [];
+        let graphIds: string[] = [];
+        try {
+          const graphIdsRes = await axios.get('http://localhost:4000/chat/graph-ids', { withCredentials: true });
+          graphIds = graphIdsRes.data?.graphIds || [];
+          console.log('ProfilePage: Successfully fetched graph IDs:', graphIds);
+        } catch (graphIdsError: any) {
+          console.error('ProfilePage: Error fetching graph IDs:', {
+            status: graphIdsError.response?.status,
+            statusText: graphIdsError.response?.statusText,
+            data: graphIdsError.response?.data,
+            message: graphIdsError.message,
+            code: graphIdsError.code
+          });
+          
+          if (graphIdsError.response?.status === 401) {
+            setError('Please log in to view your profile.');
+            setLoading(false);
+            return;
+          }
+          
+          if (graphIdsError.response?.status === 404) {
+            setError('User not found. Please log in again.');
+            setLoading(false);
+            return;
+          }
+          
+          if (graphIdsError.response?.status === 500) {
+            const errorMsg = graphIdsError.response?.data?.error || graphIdsError.response?.data?.message || 'Server error';
+            setError(`Server error: ${errorMsg}. Please try again later.`);
+            setLoading(false);
+            return;
+          }
+          
+          // Network or other errors
+          if (graphIdsError.code === 'ECONNREFUSED' || graphIdsError.code === 'ETIMEDOUT') {
+            setError('Unable to connect to the server. Please check if the server is running.');
+            setLoading(false);
+            return;
+          }
+          
+          // If graph IDs fail, we can't continue
+          const errorMessage = graphIdsError.response?.data?.message || 
+                              graphIdsError.response?.data?.error || 
+                              graphIdsError.message || 
+                              'Failed to load your graph data. Please try again later.';
+          setError(errorMessage);
+          setLoading(false);
+          return;
+        }
 
         // If no graph IDs found, show message
         if (graphIds.length === 0) {
@@ -47,16 +112,42 @@ const ProfilePage: React.FC = () => {
             withCredentials: true
           }).catch(err => {
             console.warn(`Failed to fetch graph ${id}:`, err);
-            return null;
+            // Return error info instead of null so we can check error type
+            return { error: err, graphId: id };
           })
         );
 
         const graphResponses = await Promise.all(graphPromises);
 
-        // Combine all graph data
+        // Check if all graph fetches failed
+        const successfulFetches = graphResponses.filter(res => res && !res.error && res.data);
+        if (successfulFetches.length === 0) {
+          // All graph fetches failed - check error types
+          const hasConnectionError = graphResponses.some((res: any) => {
+            if (res && res.error) {
+              const err = res.error;
+              return err.code === 'ECONNREFUSED' || 
+                     err.code === 'ETIMEDOUT' || 
+                     err.response?.status === 503 ||
+                     (err.response?.data?.error && err.response.data.error.includes('unavailable'));
+            }
+            return false;
+          });
+          
+          if (hasConnectionError) {
+            setError('Could not load graph data. The AI service may be unavailable. Please ensure the Python service is running on port 8000.');
+          } else {
+            setError('Could not load graph data. Please try again later.');
+          }
+          setLoading(false);
+          return;
+        }
+
+        // Combine all graph data (only from successful fetches)
         const allNodes: any[] = [];
-        graphResponses.forEach(graphRes => {
-          if (graphRes && graphRes.data && graphRes.data.graph && graphRes.data.graph.nodes) {
+        graphResponses.forEach((graphRes: any) => {
+          // Skip error responses
+          if (graphRes && !graphRes.error && graphRes.data && graphRes.data.graph && graphRes.data.graph.nodes) {
             allNodes.push(...graphRes.data.graph.nodes);
           }
         });
@@ -124,9 +215,20 @@ const ProfilePage: React.FC = () => {
             );
             if (found) {
               name = getNodeLabel(found);
+            } else {
+              // Log when we can't find a node for debugging
+              console.warn(`[ProfilePage] Could not find node for conceptId: ${conceptId}`);
+              console.warn(`[ProfilePage] Available node IDs (first 5):`, nodes.slice(0, 5).map((n: any) => ({
+                id: n.id,
+                props: Object.keys(n.properties || {})
+              })));
             }
           }
-          if (!name) name = conceptId;
+          // Better fallback display for orphaned concepts
+          if (!name) {
+            // Show truncated ID with ellipsis for better UX
+            name = `Unknown Topic (${conceptId.slice(0, 8)}...)`;
+          }
           return {
             concept_id: conceptId,
             topic_name: name,
@@ -137,9 +239,12 @@ const ProfilePage: React.FC = () => {
 
         // If any items still show the raw id (no friendly name), try fetching node metadata for those ids
         const stillMissing = normalized.filter((n: any) => n.topic_name === n.concept_id).map((n: any) => n.concept_id);
+        console.log(`[ProfilePage] Still missing names for ${stillMissing.length} concepts:`, stillMissing);
+        
         if (stillMissing.length > 0 && graphIds.length > 0) {
           try {
             const idsParam = Array.from(new Set(stillMissing)).join(',');
+            console.log(`[ProfilePage] Fetching node metadata for IDs: ${idsParam}`);
 
             // Fetch metadata from all graphs
             const metaPromises = graphIds.map(id =>
@@ -171,30 +276,57 @@ const ProfilePage: React.FC = () => {
             });
 
             // Update normalized entries with any found labels
+            let resolvedCount = 0;
             for (const item of normalized) {
               if (metaMap.has(item.concept_id)) {
                 item.topic_name = metaMap.get(item.concept_id);
+                resolvedCount++;
               }
             }
+            console.log(`[ProfilePage] Metadata fetch resolved ${resolvedCount} out of ${stillMissing.length} missing names`);
+            console.log(`[ProfilePage] Metadata map entries:`, Array.from(metaMap.entries()).slice(0, 5));
           } catch (metaErr) {
             console.warn('Failed to fetch node metadata for missing ids', metaErr);
           }
         }
 
+        // Filter out orphaned concepts (those without matching nodes in current graphs)
+        const validConcepts = normalized.filter(i => !i.topic_name.startsWith('Unknown Topic'));
+        
+        console.log(`[ProfilePage] Filtered out ${normalized.length - validConcepts.length} orphaned concepts`);
+        
         // Topics to review: simple threshold (confidence < 0.75), sorted ascending
-        const topics_to_review = normalized.filter(i => i.confidence_score < 0.75).sort((a, b) => a.confidence_score - b.confidence_score);
+        const topics_to_review = validConcepts.filter(i => i.confidence_score < 0.75).sort((a, b) => a.confidence_score - b.confidence_score);
 
         // Full progress: sort by most recently practiced
-        const full_progress = normalized.sort((a, b) => new Date(b.last_practiced).getTime() - new Date(a.last_practiced).getTime());
+        const full_progress = validConcepts.sort((a, b) => new Date(b.last_practiced).getTime() - new Date(a.last_practiced).getTime());
 
+        console.log('[ProfilePage] Setting profile data:');
+        console.log(`  - Full progress: ${full_progress.length} items`);
+        console.log(`  - Topics to review: ${topics_to_review.length} items`);
+        if (full_progress.length > 0) {
+          console.log('  - Sample full_progress items:', full_progress.slice(0, 3));
+        }
+        
         setProfileData({ full_progress, topics_to_review });
       } catch (err: any) {
         console.error('Error fetching profile data:', err);
         if (err.response) {
           console.error('Server Response Data:', err.response.data);
-          setError(err.response.data?.error || 'Failed to load profile data. The server returned an unexpected response.');
+          const errorMessage = err.response.data?.error || err.response.data?.message || 'Failed to load profile data. The server returned an unexpected response.';
+          
+          // Check for specific error types
+          if (err.response.status === 401) {
+            setError('Please log in to view your profile.');
+          } else if (err.response.status === 503 || err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT') {
+            setError('The AI service is currently unavailable. Please try again later.');
+          } else {
+            setError(errorMessage);
+          }
+        } else if (err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT') {
+          setError('Unable to connect to the server. Please check if the server is running.');
         } else {
-          setError(err.message || 'Failed to load profile data.');
+          setError(err.message || 'Failed to load profile data. Please try again.');
         }
       } finally {
         setLoading(false);
@@ -338,3 +470,4 @@ const ProfilePage: React.FC = () => {
 };
 
 export default ProfilePage;
+

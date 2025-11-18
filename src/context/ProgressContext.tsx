@@ -32,7 +32,7 @@ export const ProgressProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (isAuthenticated) {
       try {
         setLoading(true);
-        const response = await axios.get('http://localhost:4000/progress', { withCredentials: true });
+        const response = await axios.get('http://localhost:4000/api/concept-progress', { withCredentials: true });
         setProgress(response.data);
       } catch (error) {
         console.error('Failed to fetch progress', error);
@@ -48,7 +48,7 @@ export const ProgressProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateProgress = async (conceptId: string, isCorrect: boolean, isRetry: boolean) => {
     try {
-      await axios.post('http://localhost:4000/progress/update', {
+      await axios.post('http://localhost:4000/api/progress/update', {
         conceptId,
         isCorrect,
         isRetry,

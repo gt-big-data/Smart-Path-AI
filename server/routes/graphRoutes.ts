@@ -1,5 +1,5 @@
 import { Router, RequestHandler } from 'express';
-import { viewGraph, generateQuestionsWithAnswers, verifyAnswer, generateConversationResponse, getUserProfile, getNodeMetadata } from '../controllers/graphController';
+import { viewGraph, generateQuestionsWithAnswers, verifyAnswer, generateConversationResponse, getUserProfile, getNodeMetadata, searchGraph, semanticSearchGraph } from '../controllers/graphController';
 
 const router = Router();
 
@@ -9,5 +9,7 @@ router.get('/generate-questions-with-answers', generateQuestionsWithAnswers as R
 router.post('/verify-answer', verifyAnswer as RequestHandler);
 router.post('/generate-conversation-response', generateConversationResponse as RequestHandler);
 router.get('/user/profile', getUserProfile as RequestHandler);
+router.get('/search-graph', searchGraph as RequestHandler);
+router.get('/semantic-search-graph', semanticSearchGraph as RequestHandler);
 
 export default router;

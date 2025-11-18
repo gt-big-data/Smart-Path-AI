@@ -5,6 +5,7 @@ import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import path from 'path';
 import ConceptProgress from '../models/ConceptProgress';
+import { pythonServiceClient } from '../utils/axiosConfig';
 
 // Load environment variables
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -68,6 +69,11 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
     const parsedLength = Number(rawLength);
     const allowed = [5, 10, 15];
     const length = allowed.includes(parsedLength) ? parsedLength : 5;
+    
+    // Handle format parameter
+    const format = req.query.format as string | undefined;
+    const allowedFormats = ['mixed', 'mcq', 'true-false', 'open-ended'];
+    const questionFormat = format && allowedFormats.includes(format) ? format : 'mixed';
 
     if (!graph_id) {
       return res.status(400).json({ error: 'graph_id is required' });
@@ -82,11 +88,11 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
     }
 
     const id = encodeURIComponent(String(graph_id));
-    const url = `http://localhost:8000/questions/${id}?user_id=${userId}&length=${length}`;
+    const url = `/questions/${id}?user_id=${userId}&length=${length}&format=${questionFormat}`;
 
     console.log(`Requesting questions from AI server: ${url}`);
 
-    const response = await axios.post(url, {});
+    const response = await pythonServiceClient.post(url, {});
 
     // The AI server returns { questions: [ { text, correct_answer, topic_id }, ... ] }
     const questions = response.data?.questions;
@@ -109,6 +115,12 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
     res.json({ status: 'success', qa_pairs, graph_id: graph_id, requested_length: length, actual_length: qa_pairs.length });
   } catch (error: any) {
     console.error('Error generating questions and answers:', error.message);
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({ 
+        error: 'AI service is currently unavailable',
+        message: 'The Python service on port 8000 is not responding. Please ensure it is running.'
+      });
+    }
     res.status(500).json({ error: 'Failed to generate questions and answers' });
   }
 };
@@ -325,5 +337,89 @@ export const getNodeMetadata = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error fetching node metadata:', error?.message || error);
     res.status(500).json({ error: 'Failed to fetch node metadata' });
+  }
+};
+
+export const searchGraph = async (req: Request, res: Response) => {
+  try {
+    const graph_id = req.query.graph_id;
+    const query = req.query.query;
+    
+    if (!graph_id) {
+      return res.status(400).json({ error: 'graph_id is required' });
+    }
+    
+    if (!query) {
+      return res.status(400).json({ error: 'query is required' });
+    }
+
+    // Forward to Python API
+    const response = await pythonServiceClient.get('/search-graph', {
+      params: { 
+        graph_id: String(graph_id), 
+        query: String(query) 
+      }
+    });
+    
+    res.json(response.data);
+  } catch (error: any) {
+    console.error('Error searching graph:', {
+      message: error.message,
+      response_status: error.response?.status,
+      response_data: error.response?.data,
+      code: error.code
+    });
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({ 
+        error: 'AI service is currently unavailable',
+        message: 'The Python service on port 8000 is not responding. Please ensure it is running.'
+      });
+    }
+    // Return the actual error from Python service if available
+    const errorMessage = error.response?.data?.error || error.response?.data?.message || 'Failed to search graph';
+    res.status(error.response?.status || 500).json({ error: errorMessage });
+  }
+};
+
+export const semanticSearchGraph = async (req: Request, res: Response) => {
+  try {
+    const graph_id = req.query.graph_id;
+    const query = req.query.query;
+    const top_k = req.query.top_k || 10;
+    
+    if (!graph_id) {
+      return res.status(400).json({ error: 'graph_id is required' });
+    }
+    
+    if (!query) {
+      return res.status(400).json({ error: 'query is required' });
+    }
+
+    // Forward to Python API
+    const response = await pythonServiceClient.get('/semantic-search-graph', {
+      params: {
+        graph_id: String(graph_id),
+        query: String(query),
+        top_k: Number(top_k)
+      }
+    });
+    
+    res.json(response.data);
+  } catch (error: any) {
+    console.error('Error in semantic search:', {
+      message: error.message,
+      response_status: error.response?.status,
+      response_data: error.response?.data,
+      code: error.code
+    });
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({ 
+        error: 'AI service is currently unavailable',
+        message: 'The Python service on port 8000 is not responding. Please ensure it is running.'
+      });
+    }
+    // Return the actual error from Python service if available
+    const errorMessage = error.response?.data?.error || error.response?.data?.message || 'Failed to perform semantic search';
+    res.status(error.response?.status || 500).json({ error: errorMessage });
   }
 };

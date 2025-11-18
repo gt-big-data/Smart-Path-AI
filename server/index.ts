@@ -85,7 +85,7 @@ app.use('/api', graphRoutes);
 //Chat Routes
 app.use('/chat', chatRoutes);
 
-//Progress Routes
+//Progress Routes (mounted at /api to match existing endpoint usage)
 app.use('/api', progressRoutes);
 
 // Quiz History Routes

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import User from '../models/User';
 import { v4 as uuidv4 } from 'uuid';
+import mongoose from 'mongoose';
 
 /**
  * Get current logged in user's ID
@@ -12,6 +13,7 @@ export const getCurrentUserId = async (req: Request, res: Response) => {
 
     if (!userId) {
       res.status(401).json({ message: 'Unauthorized' });
+      return; // CRITICAL: Stop execution after sending error response
     }
     console.log("userId from backend", userId);
     const idString = typeof userId === 'object' ? userId._id : userId;
@@ -40,6 +42,7 @@ export const createNewChat = async (req: Request, res: Response) => {
       console.log("userid" ,userId);
       console.log("unauthorized");
       res.status(401).json({ message: 'Unauthorized' });
+      return; // CRITICAL: Stop execution after sending error response
     } else {
       const newChat = {
         chat_id: uuidv4(),
@@ -53,6 +56,7 @@ export const createNewChat = async (req: Request, res: Response) => {
       if (!user) {
         console.log("user not found");
         res.status(404).json({ message: 'User not found' });
+        return; // CRITICAL: Stop execution after sending error response
       } else {
         user.chats.push(newChat);
         await user.save();
@@ -85,6 +89,7 @@ export const addMessageToChat = async (req: Request, res: Response) => {
     if (!userId) {
       console.log("unauthorized");
       res.status(401).json({ message: 'Unauthorized' });
+      return; // CRITICAL: Stop execution after sending error response
     }
 
     const user = await User.findById(userId);
@@ -92,9 +97,10 @@ export const addMessageToChat = async (req: Request, res: Response) => {
     if (!user) {
       console.log("user not found");
       res.status(404).json({ message: 'User not found' });
+      return; // CRITICAL: Stop execution after sending error response
     }
 
-    let chat = user?.chats.find((chat) => chat.chat_id === chat_id);
+    let chat = user.chats.find((chat) => chat.chat_id === chat_id);
 
     if (!chat) {
       console.log("chat not found, creating a new chat");
@@ -149,9 +155,10 @@ export const getUserChats = async (req: Request, res: Response) => {
     
     if (!user) {
       res.status(404).json({ message: 'User not found' });
+      return; // CRITICAL: Stop execution after sending error response
     }
 
-    res.status(200).json(user?.chats);  // assuming chats are stored in user.chats
+    res.status(200).json(user.chats);  // assuming chats are stored in user.chats
   } catch (err) {
     res.status(500).json({ message: 'Server Error' });
   }
@@ -163,16 +170,32 @@ export const getUserChats = async (req: Request, res: Response) => {
  */
 export const getUserGraphIds = async (req: Request, res: Response): Promise<void> => {
   try {
+    console.log('[getUserGraphIds] ===== ENDPOINT CALLED =====');
+    console.log('[getUserGraphIds] Session:', req.session);
+    console.log('[getUserGraphIds] Session passport:', (req.session as any)?.passport);
+    
+    // Use the exact same pattern as addMessageToChat which works
     const userId = (req.session as any)?.passport?.user;
 
+    console.log('[getUserGraphIds] Request received, userId:', userId);
+    console.log('[getUserGraphIds] userId type:', typeof userId);
+
     if (!userId) {
+      console.log('[getUserGraphIds] No userId in session, returning 401');
       res.status(401).json({ message: 'Unauthorized' });
       return;
     }
 
+    console.log('[getUserGraphIds] Querying database with userId:', userId);
     const user = await User.findById(userId);
+    
+    console.log('[getUserGraphIds] User query result:', user ? 'Found user' : 'User is null');
 
     if (!user) {
+      console.log('[getUserGraphIds] User not found in database for userId:', userId);
+      // Try to list all users to debug
+      const allUsers = await User.find({}).limit(5).select('_id email');
+      console.log('[getUserGraphIds] Sample users in DB:', allUsers.map(u => ({ id: u._id, email: u.email })));
       res.status(404).json({ message: 'User not found' });
       return;
     }
@@ -184,10 +207,18 @@ export const getUserGraphIds = async (req: Request, res: Response): Promise<void
         .filter(id => id && id.trim() !== '')
     )];
 
+    console.log(`[getUserGraphIds] Found ${graphIds.length} graph IDs for user ${userId}:`, graphIds);
     res.status(200).json({ graphIds });
-  } catch (error) {
-    console.error('Get graph IDs error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+  } catch (error: any) {
+    console.error('[getUserGraphIds] Error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    res.status(500).json({ 
+      message: 'Internal server error',
+      error: error.message 
+    });
   }
 };
 
