@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { BookOpen, Sparkles, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -8,6 +8,7 @@ import Signup from './pages/Signup';
 import Navigation from './components/Navigation';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ProgressProvider } from './context/ProgressContext';
+import ProfilePage from './pages/ProfilePage';
 
 function Home() {
   // Access auth state
@@ -84,14 +85,26 @@ function AppContent() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
-      <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
+      <Route path="/login" element={<Login />} />
       <Route path="/chat" element={<Chat />} />
+      <Route path="/profile" element={<ProfilePage />} />
     </Routes>
   );
 }
 
-function App() {
+const App: React.FC = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const response = await fetch('/api/auth/check');
+      const data = await response.json();
+      setIsAuthenticated(data.isAuthenticated);
+    };
+    checkAuth();
+  }, []);
+
   return (
     <AuthProvider>
       <ProgressProvider>

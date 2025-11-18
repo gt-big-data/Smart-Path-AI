@@ -64,6 +64,10 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
   try {
     const graph_id = req.query.graph_id;
     const userId = (req.session as any)?.passport?.user;
+    const rawLength = req.query.length as string | undefined;
+    const parsedLength = Number(rawLength);
+    const allowed = [5, 10, 15];
+    const length = allowed.includes(parsedLength) ? parsedLength : 5;
 
     if (!graph_id) {
       return res.status(400).json({ error: 'graph_id is required' });
@@ -78,7 +82,7 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
     }
 
     const id = encodeURIComponent(String(graph_id));
-    const url = `http://localhost:8000/questions/${id}?user_id=${userId}`;
+    const url = `http://localhost:8000/questions/${id}?user_id=${userId}&length=${length}`;
 
     console.log(`Requesting questions from AI server: ${url}`);
 
@@ -94,10 +98,15 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
     const qa_pairs = questions.map((q: any) => ({
       question: q.text || '',
       answer: q.correct_answer || '',
-      conceptId: q.topic_id || ''
+      conceptId: q.topic_id || '',
+      // Optional metadata for future UI use
+      id: q.id,
+      explanation: q.explanation,
+      difficulty: q.difficulty,
+      format: q.format,
     }));
 
-    res.json({ status: 'success', qa_pairs, graph_id: graph_id });
+    res.json({ status: 'success', qa_pairs, graph_id: graph_id, requested_length: length, actual_length: qa_pairs.length });
   } catch (error: any) {
     console.error('Error generating questions and answers:', error.message);
     res.status(500).json({ error: 'Failed to generate questions and answers' });
@@ -257,5 +266,64 @@ export const generateConversationResponse = async (req: Request, res: Response) 
       error: 'Failed to generate response',
       response: "I apologize, but I'm having trouble generating a response right now. Please try again."
     });
+  }
+};
+
+export const getUserProfile = async (req: Request, res: Response) => {
+  const userId = (req.session as any)?.passport?.user;
+  const graph_id = req.query.graph_id;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'User not authenticated' });
+  }
+
+  if (!graph_id) {
+    return res.status(400).json({ error: 'graph_id is required' });
+  }
+
+  try {
+    const url = `http://localhost:8000/user/${userId}/profile?graph_id=${graph_id}`;
+    console.log(`Fetching user profile from AI server: ${url}`);
+
+    const response = await axios.get(url);
+
+    // Forward the data from the AI server directly to the frontend
+    res.json(response.data);
+
+  } catch (error: any) {
+    const status = error.response?.status || 500;
+    const errorDetail = error.response?.data || 'Failed to fetch user profile from AI service.';
+    console.error(`Error fetching user profile from AI service: Status ${status}`, errorDetail);
+    res.status(status).json({ error: 'Failed to fetch user profile', detail: errorDetail });
+  }
+};
+
+// Fetch metadata for specific node/concept ids from the AI graph proxy
+export const getNodeMetadata = async (req: Request, res: Response) => {
+  try {
+    const graph_id = req.query.graph_id as string | undefined;
+    const conceptIdsRaw = (req.query.concept_ids || req.query.concept_id) as string | undefined;
+
+    if (!graph_id) return res.status(400).json({ error: 'graph_id is required' });
+    if (!conceptIdsRaw) return res.status(400).json({ error: 'concept_ids or concept_id is required' });
+
+    const wanted = String(conceptIdsRaw).split(',').map(s => s.trim()).filter(Boolean);
+
+    const url = `http://localhost:8000/view-graph?graph_id=${encodeURIComponent(String(graph_id))}`;
+    const response = await axios.get(url);
+    const nodes = response.data?.graph?.nodes || [];
+
+    const matches = nodes.filter((node: any) => {
+      const props = node.properties || {};
+      const candidates = [props.topicID, props.topicId, props.topic_id, props.conceptId, props.concept_id, node.id]
+        .filter(Boolean)
+        .map(String);
+      return candidates.some((c: string) => wanted.includes(c));
+    }).map((n: any) => ({ id: n.id, labels: n.labels, properties: n.properties }));
+
+    res.json({ nodes: matches });
+  } catch (error: any) {
+    console.error('Error fetching node metadata:', error?.message || error);
+    res.status(500).json({ error: 'Failed to fetch node metadata' });
   }
 };
