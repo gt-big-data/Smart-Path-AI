@@ -258,3 +258,54 @@ export const generateConversationResponse = async (req: Request, res: Response) 
     });
   }
 };
+
+export const searchGraph = async (req: Request, res: Response) => {
+  try {
+    const graph_id = req.query.graph_id;
+    const query = req.query.query;
+    
+    if (!graph_id) {
+      return res.status(400).json({ error: 'graph_id is required' });
+    }
+    
+    if (!query) {
+      return res.status(400).json({ error: 'query is required' });
+    }
+
+    // Forward to Python API
+    const response = await axios.get(
+      `http://localhost:8000/search-graph?graph_id=${encodeURIComponent(String(graph_id))}&query=${encodeURIComponent(String(query))}`
+    );
+    
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error searching graph:', error);
+    res.status(500).json({ error: 'Failed to search graph' });
+  }
+};
+
+export const semanticSearchGraph = async (req: Request, res: Response) => {
+  try {
+    const graph_id = req.query.graph_id;
+    const query = req.query.query;
+    const top_k = req.query.top_k || 10;
+    
+    if (!graph_id) {
+      return res.status(400).json({ error: 'graph_id is required' });
+    }
+    
+    if (!query) {
+      return res.status(400).json({ error: 'query is required' });
+    }
+
+    // Forward to Python API
+    const response = await axios.get(
+      `http://localhost:8000/semantic-search-graph?graph_id=${encodeURIComponent(String(graph_id))}&query=${encodeURIComponent(String(query))}&top_k=${top_k}`
+    );
+    
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error in semantic search:', error);
+    res.status(500).json({ error: 'Failed to perform semantic search' });
+  }
+};

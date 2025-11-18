@@ -12,6 +12,7 @@ import ReactFlow, {
   Position,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { Search, X } from 'lucide-react';
 
 interface GraphData {
   status: string;
@@ -253,6 +254,93 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data }) => {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [minimapLocked, setMinimapLocked] = useState(false);
   const [currentSubject, setCurrentSubject] = useState<string>('default');
+  
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword');
+
+  // Search handler function
+  const handleSearch = useCallback(async (query: string) => {
+    if (!query.trim() || !data?.graph) {
+      setSearchResults([]);
+      return;
+    }
+
+    const graphId = (data as any).graph_id;
+    if (!graphId) {
+      console.warn('No graph_id available for search');
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const endpoint = searchMode === 'semantic' 
+        ? 'semantic-search-graph' 
+        : 'search-graph';
+      
+      const response = await fetch(
+        `http://localhost:4000/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`,
+        { credentials: 'include' }
+      );
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        setSearchResults(result.node_ids || []);
+      }
+    } catch (error) {
+      console.error('Search error:', error);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [data, searchMode]);
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchQuery) {
+        handleSearch(searchQuery);
+      } else {
+        setSearchResults([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, handleSearch]);
+
+  // Highlight search results
+  useEffect(() => {
+    if (searchResults.length > 0) {
+      setNodes(prevNodes => 
+        prevNodes.map(node => ({
+          ...node,
+          style: {
+            ...node.style,
+            border: searchResults.includes(node.id) 
+              ? '3px solid #fbbf24' 
+              : '1px solid rgba(255,255,255,0.2)',
+            boxShadow: searchResults.includes(node.id)
+              ? '0 0 15px rgba(251, 191, 36, 0.6)'
+              : 'none',
+          }
+        }))
+      );
+    } else {
+      // Reset borders when no search results
+      setNodes(prevNodes => 
+        prevNodes.map(node => ({
+          ...node,
+          style: {
+            ...node.style,
+            border: '1px solid rgba(255,255,255,0.2)',
+            boxShadow: 'none',
+          }
+        }))
+      );
+    }
+  }, [searchResults, setNodes]);
 
   const getNodeLabel = (node: any) => {
   // List of node types that should use 'name' property
@@ -461,7 +549,106 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data }) => {
   }
 
   return (
-    <div style={{ width: '100%', height: '100%' }}>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      {/* Search Bar */}
+      <div style={{
+        position: 'absolute',
+        top: '16px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 10,
+        width: '90%',
+        maxWidth: '600px',
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          background: 'white',
+          borderRadius: '8px',
+          padding: '8px 12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          border: '1px solid #e5e7eb',
+        }}>
+          <Search className="w-5 h-5 text-gray-400 mr-2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search topics, concepts, definitions..."
+            style={{
+              flex: 1,
+              border: 'none',
+              outline: 'none',
+              fontSize: '14px',
+              color: '#1f2937',
+            }}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              style={{ padding: '4px', cursor: 'pointer', background: 'transparent', border: 'none' }}
+            >
+              <X className="w-4 h-4 text-gray-400 hover:text-gray-600" />
+            </button>
+          )}
+          {isSearching && (
+            <div className="ml-2 text-sm text-gray-500">Searching...</div>
+          )}
+          {/* Search mode toggle */}
+          <div style={{
+            display: 'flex',
+            gap: '4px',
+            marginLeft: '8px',
+            borderLeft: '1px solid #e5e7eb',
+            paddingLeft: '8px',
+          }}>
+            <button
+              onClick={() => setSearchMode('keyword')}
+              style={{
+                padding: '4px 8px',
+                fontSize: '12px',
+                borderRadius: '4px',
+                border: 'none',
+                background: searchMode === 'keyword' ? '#14b8a6' : '#f3f4f6',
+                color: searchMode === 'keyword' ? 'white' : '#6b7280',
+                cursor: 'pointer',
+                fontWeight: searchMode === 'keyword' ? '600' : '400',
+              }}
+            >
+              Keyword
+            </button>
+            <button
+              onClick={() => setSearchMode('semantic')}
+              style={{
+                padding: '4px 8px',
+                fontSize: '12px',
+                borderRadius: '4px',
+                border: 'none',
+                background: searchMode === 'semantic' ? '#14b8a6' : '#f3f4f6',
+                color: searchMode === 'semantic' ? 'white' : '#6b7280',
+                cursor: 'pointer',
+                fontWeight: searchMode === 'semantic' ? '600' : '400',
+              }}
+            >
+              Semantic
+            </button>
+          </div>
+        </div>
+        {searchResults.length > 0 && (
+          <div style={{
+            marginTop: '8px',
+            padding: '8px 12px',
+            background: 'white',
+            borderRadius: '8px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+            fontSize: '12px',
+            color: '#6b7280',
+          }}>
+            Found {searchResults.length} matching node{searchResults.length !== 1 ? 's' : ''}
+          </div>
+        )}
+      </div>
+      
       <ReactFlow
         nodes={nodes}
         edges={edges}
