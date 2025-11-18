@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { BookOpen, TrendingDown, ChevronLeft } from 'lucide-react';
 
 interface ProgressItem {
@@ -19,27 +19,49 @@ const ProfilePage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     const fetchProfileData = async () => {
-      const graphId = searchParams.get('graph_id');
-      if (!graphId) {
-        setError('No graph specified. Please return to a chat and try again.');
-        setLoading(false);
-        return;
-      }
-
       try {
         setLoading(true);
-        // Fetch user progress (from Mongo via Node) and graph nodes, then join client-side.
-        const [progressRes, graphRes] = await Promise.all([
-          axios.get('http://localhost:4000/progress', { withCredentials: true }),
-          axios.get('http://localhost:4000/api/view-graph', { params: { graph_id: graphId }, withCredentials: true }),
-        ]);
 
+        // Fetch user progress from Mongo
+        const progressRes = await axios.get('http://localhost:4000/progress', { withCredentials: true });
         const progressList: any[] = Array.isArray(progressRes.data) ? progressRes.data : [];
-        const graphData = graphRes.data || {};
+
+        // Fetch all graph IDs for the user
+        const graphIdsRes = await axios.get('http://localhost:4000/chat/graph-ids', { withCredentials: true });
+        const graphIds: string[] = graphIdsRes.data.graphIds || [];
+
+        // If no graph IDs found, show message
+        if (graphIds.length === 0) {
+          setError('No graphs found. Please upload a document in a chat to see your progress.');
+          setLoading(false);
+          return;
+        }
+
+        // Fetch all graphs in parallel
+        const graphPromises = graphIds.map(id =>
+          axios.get('http://localhost:4000/api/view-graph', {
+            params: { graph_id: id },
+            withCredentials: true
+          }).catch(err => {
+            console.warn(`Failed to fetch graph ${id}:`, err);
+            return null;
+          })
+        );
+
+        const graphResponses = await Promise.all(graphPromises);
+
+        // Combine all graph data
+        const allNodes: any[] = [];
+        graphResponses.forEach(graphRes => {
+          if (graphRes && graphRes.data && graphRes.data.graph && graphRes.data.graph.nodes) {
+            allNodes.push(...graphRes.data.graph.nodes);
+          }
+        });
+
+        const graphData = { graph: { nodes: allNodes } };
 
         // DEBUG: log raw responses to help diagnose missing labels
         console.debug('ProfilePage: raw graph response', graphData);
@@ -115,23 +137,38 @@ const ProfilePage: React.FC = () => {
 
         // If any items still show the raw id (no friendly name), try fetching node metadata for those ids
         const stillMissing = normalized.filter((n: any) => n.topic_name === n.concept_id).map((n: any) => n.concept_id);
-        if (stillMissing.length > 0) {
+        if (stillMissing.length > 0 && graphIds.length > 0) {
           try {
             const idsParam = Array.from(new Set(stillMissing)).join(',');
-            const metaRes = await axios.get('http://localhost:4000/api/node-metadata', {
-              params: { graph_id: graphId, concept_ids: idsParam },
-              withCredentials: true,
-            });
-            const metaNodes: any[] = metaRes.data?.nodes || [];
+
+            // Fetch metadata from all graphs
+            const metaPromises = graphIds.map(id =>
+              axios.get('http://localhost:4000/api/node-metadata', {
+                params: { graph_id: id, concept_ids: idsParam },
+                withCredentials: true,
+              }).catch(err => {
+                console.warn(`Failed to fetch metadata for graph ${id}:`, err);
+                return null;
+              })
+            );
+
+            const metaResponses = await Promise.all(metaPromises);
             const metaMap = new Map<string, string>();
-            for (const n of metaNodes) {
-              const props = n.properties || {};
-              const candidates = [props.topicID, props.topicId, props.topic_id, props.conceptId, props.concept_id, n.id]
-                .filter(Boolean)
-                .map(String);
-              const label = props.name || props.topicName || props.title || props.text || props.description || String(n.id);
-              for (const c of candidates) metaMap.set(String(c), label);
-            }
+
+            // Process metadata from all graphs
+            metaResponses.forEach(metaRes => {
+              if (metaRes && metaRes.data && metaRes.data.nodes) {
+                const metaNodes: any[] = metaRes.data.nodes;
+                for (const n of metaNodes) {
+                  const props = n.properties || {};
+                  const candidates = [props.topicID, props.topicId, props.topic_id, props.conceptId, props.concept_id, n.id]
+                    .filter(Boolean)
+                    .map(String);
+                  const label = props.name || props.topicName || props.title || props.text || props.description || String(n.id);
+                  for (const c of candidates) metaMap.set(String(c), label);
+                }
+              }
+            });
 
             // Update normalized entries with any found labels
             for (const item of normalized) {
@@ -165,7 +202,7 @@ const ProfilePage: React.FC = () => {
     };
 
     fetchProfileData();
-  }, [searchParams]);
+  }, []); // Empty dependency array - fetch on mount only
 
   const getScoreColor = (score: number) => {
     if (score < 0.4) return 'text-red-500';

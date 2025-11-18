@@ -158,6 +158,40 @@ export const getUserChats = async (req: Request, res: Response) => {
 };
 
 /**
+ * Get all graph IDs for the current user
+ * GET /chat/graph-ids
+ */
+export const getUserGraphIds = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = (req.session as any)?.passport?.user;
+
+    if (!userId) {
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+
+    // Extract all unique graph_ids from chats, filtering out empty strings
+    const graphIds = [...new Set(
+      user.chats
+        .map(chat => chat.graph_id)
+        .filter(id => id && id.trim() !== '')
+    )];
+
+    res.status(200).json({ graphIds });
+  } catch (error) {
+    console.error('Get graph IDs error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+/**
  * Delete a chat for the current user
  * DELETE /chat/delete/:chat_id
  */
