@@ -1370,32 +1370,43 @@ function App() {
           <div className="h-full flex flex-col">
             <div className="bg-white p-4 border-b border-gray-200 flex justify-between items-center" style={{ zIndex: 1000, position: 'relative' }}>
               <h1 className="text-xl font-semibold text-gray-800">{currentChat?.title || 'Loading...'}</h1>
-              <div className="flex items-center gap-3" style={{ zIndex: 100, position: 'relative' }}>
-                <label className="text-sm text-gray-600">Quiz length</label>
-                <select
-                  value={quizLength}
-                  onChange={(e) => setQuizLength(Number(e.target.value) as 5 | 10 | 15)}
-                  className="text-sm border border-gray-300 rounded px-2 py-1 cursor-pointer"
-                  style={{ zIndex: 101, position: 'relative', pointerEvents: 'auto' }}
-                  disabled={isAnswering}
-                >
-                  <option value={5}>5</option>
-                  <option value={10}>10</option>
-                  <option value={15}>15</option>
-                </select>
-                <label className="text-sm text-gray-600">Question type</label>
-                <select
-                  value={questionFormat}
-                  onChange={(e) => setQuestionFormat(e.target.value as 'mixed' | 'mcq' | 'true-false' | 'open-ended')}
-                  className="text-sm border border-gray-300 rounded px-2 py-1 cursor-pointer"
-                  style={{ zIndex: 101, position: 'relative', pointerEvents: 'auto' }}
-                  disabled={isAnswering}
-                >
-                  <option value="mixed">Mixed (Random)</option>
-                  <option value="mcq">Multiple Choice</option>
-                  <option value="true-false">True/False</option>
-                  <option value="open-ended">Open-Ended</option>
-                </select>
+              <div className="flex items-center gap-7" style={{ zIndex: 100, position: 'relative' }}>
+                {/* Quiz Length Control */}
+                <div className="flex items-center gap-3">
+                  <label className="text-sm font-medium text-gray-700">Quiz Length:</label>
+                  <select
+                    value={quizLength}
+                    onChange={(e) => setQuizLength(Number(e.target.value) as 5 | 10 | 15)}
+                    className="text-sm border border-gray-300 rounded-md px-3 py-1.5 cursor-pointer bg-white hover:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                    style={{ zIndex: 101, position: 'relative', pointerEvents: 'auto' }}
+                    disabled={isAnswering}
+                  >
+                    <option value={5}>5 questions</option>
+                    <option value={10}>10 questions</option>
+                    <option value={15}>15 questions</option>
+                  </select>
+                </div>
+                
+                {/* Question Type Control */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700">Question Type:</label>
+                  <select
+                    value={questionFormat}
+                    onChange={(e) => setQuestionFormat(e.target.value as 'mixed' | 'mcq' | 'true-false' | 'open-ended')}
+                    className="text-sm border border-gray-300 rounded-md px-3 py-1.5 cursor-pointer bg-white hover:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                    style={{ zIndex: 101, position: 'relative', pointerEvents: 'auto' }}
+                    disabled={isAnswering}
+                  >
+                    <option value="mixed">Mixed (Random)</option>
+                    <option value="mcq">Multiple Choice</option>
+                    <option value="true-false">True/False</option>
+                    <option value="open-ended">Open-Ended</option>
+                  </select>
+                </div>
+                
+                {/* Divider */}
+                <div className="h-8 w-px bg-gray-300"></div>
+                
                 <button
                   onClick={() => {
                     if (currentChat?.graph_id) {
@@ -1404,27 +1415,30 @@ function App() {
                       alert("Please upload a document to view progress.");
                     }
                   }}
-                  className="p-2 bg-transparent text-teal-600 border border-teal-500 rounded-lg hover:bg-teal-50 transition-colors duration-200 flex items-center justify-center gap-2"
+                  className="px-4 py-2 bg-transparent text-teal-600 border border-teal-500 rounded-lg hover:bg-teal-50 transition-colors duration-200 flex items-center justify-center gap-2 font-medium"
                 >
                   View Profile
                 </button>
-              <button
-                onClick={() => navigate('/')}
-                className="p-2 bg-transparent text-teal-600 border border-teal-500 rounded-lg hover:bg-teal-50 transition-colors duration-200 flex items-center justify-center gap-2"
-              >
-                Return to Homepage
-              </button>
+                
+                <button
+                  onClick={() => navigate('/')}
+                  className="px-4 py-2 bg-transparent text-teal-600 border border-teal-500 rounded-lg hover:bg-teal-50 transition-colors duration-200 flex items-center justify-center gap-2 font-medium"
+                >
+                  Return to Homepage
+                </button>
+                
                 {/* Start Quiz button moved to header for better placement */}
                 {shouldStartQuiz && !isAnswering && currentChat?.graph_id && (
                   <button
                     onClick={startQuiz}
                     disabled={isGeneratingQuestions}
-                    className={`ml-2 px-4 py-2 ${isGeneratingQuestions ? 'bg-gray-300 text-gray-700' : 'bg-teal-500 text-white hover:bg-teal-600'} rounded-lg transition-colors duration-200 flex items-center gap-2`}
+                    className={`px-4 py-2 ${isGeneratingQuestions ? 'bg-gray-300 text-gray-700' : 'bg-teal-500 text-white hover:bg-teal-600'} rounded-lg transition-colors duration-200 flex items-center gap-2 font-medium`}
                     title={isGeneratingQuestions ? 'Generating questions...' : 'Start quiz based on this document'}
                   >
                     {isGeneratingQuestions ? 'Generating...' : (quizCompleted ? 'Start New Quiz' : 'Start Quiz')}
                   </button>
                 )}
+                
                 {/* End Quiz button - shows when quiz is active */}
                 {isAnswering && (
                   <button
@@ -1475,7 +1489,7 @@ function App() {
                         // Don't show error to user since quiz state is already cleared locally
                       }
                     }}
-                    className="ml-2 px-4 py-2 bg-red-500 text-white hover:bg-red-600 rounded-lg transition-colors duration-200 flex items-center gap-2"
+                    className="px-4 py-2 bg-red-500 text-white hover:bg-red-600 rounded-lg transition-colors duration-200 flex items-center gap-2 font-medium"
                     style={{ 
                       zIndex: 9999, 
                       position: 'relative', 

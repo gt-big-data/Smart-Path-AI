@@ -568,25 +568,51 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
         // 1. Direct ID match
         let confidenceScore = confidenceMap.get(node.id) ?? null;
         
-        // 2. If no match, try matching by node name
+        // 2. Check node properties for conceptId, topicId, etc.
+        if (confidenceScore === null) {
+          const possibleIds = [
+            node.properties.conceptId,
+            node.properties.topicId,
+            node.properties.topicID,
+            node.properties.topic_id,
+            node.properties.concept_id,
+            node.properties.id,
+          ].filter(Boolean);
+          
+          for (const possibleId of possibleIds) {
+            confidenceScore = confidenceMap.get(String(possibleId)) ?? null;
+            if (confidenceScore !== null) {
+              console.log(`  ✅ Matched node ${node.id} via property to conceptId ${possibleId} with score ${confidenceScore}`);
+              break;
+            }
+          }
+        }
+        
+        // 3. If no match, try matching by node name
         if (confidenceScore === null && node.properties.name) {
           const nodeName = node.properties.name.toLowerCase();
           confidenceScore = confidenceByName.get(nodeName) ?? null;
+          if (confidenceScore !== null) {
+            console.log(`  ✅ Matched node ${node.id} via name "${node.properties.name}" with score ${confidenceScore}`);
+          }
         }
         
-        // 3. If still no match, try matching ID as substring
+        // 4. If still no match, try matching ID as substring
         if (confidenceScore === null) {
           for (const [conceptId, score] of confidenceMap.entries()) {
             if (conceptId.includes(node.id) || node.id.includes(conceptId)) {
               confidenceScore = score;
-              console.log(`  ✅ Matched node ${node.id} via substring to conceptId ${conceptId}`);
+              console.log(`  ✅ Matched node ${node.id} via substring to conceptId ${conceptId} with score ${confidenceScore}`);
               break;
             }
           }
         }
         
         if (confidenceScore !== null) {
-          console.log(`  ✅ Node "${node.properties.name || node.id}" has confidence: ${confidenceScore}`);
+          console.log(`  🎯 Node "${node.properties.name || node.id}" FINAL CONFIDENCE: ${confidenceScore}`);
+        } else {
+          console.log(`  ⚠️ Node "${node.properties.name || node.id}" (${node.id}) - NO MATCH FOUND`);
+          console.log(`     Node properties:`, Object.keys(node.properties));
         }
         
         return {

@@ -237,21 +237,33 @@ interface GenerateConversationRequest {
 
 export const generateConversationResponse = async (req: Request, res: Response) => {
   try {
-    const message = req.query.user_input as string;
-    const graph_id = req.query.graph_id as string;
+    // Read from request body (frontend sends as POST body)
+    const message = req.body.message as string;
+    const graph_id = req.body.graph_id as string;
 
     if (!message) {
-      return res.status(400).json({ error: 'Message (user_input) is required' });
+      return res.status(400).json({ error: 'Message is required' });
     }
 
     if (!graph_id) {
       return res.status(400).json({ error: 'graph_id is required' });
     }
 
+    console.log(`Generating conversation response for graph ${graph_id}: "${message}"`);
+
     // Forward request to Python/FastAPI backend which handles Neo4j and OpenAI
-    const response = await axios.post(
-      `http://localhost:8000/generate-conversation-response?user_input=${encodeURIComponent(message)}&graph_id=${encodeURIComponent(graph_id)}`
+    const response = await pythonServiceClient.post(
+      `/generate-conversation-response`,
+      {},
+      {
+        params: {
+          user_input: message,
+          graph_id: graph_id
+        }
+      }
     );
+
+    console.log('✅ Conversation response generated successfully');
 
     // Return the response from Python backend
     res.json({
@@ -261,11 +273,25 @@ export const generateConversationResponse = async (req: Request, res: Response) 
       graph_id: response.data.graph_id
     });
 
-  } catch (error) {
-    console.error('Error generating conversation response:', error);
+  } catch (error: any) {
+    console.error('Error generating conversation response:', {
+      message: error.message,
+      response_status: error.response?.status,
+      response_data: error.response?.data,
+      code: error.code
+    });
+    
+    // Handle connection errors
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({
+        success: false,
+        error: 'AI service is currently unavailable',
+        response: 'The AI service on port 8000 is not responding. Please ensure it is running.'
+      });
+    }
     
     // Handle specific error cases
-    if (axios.isAxiosError(error) && error.response) {
+    if (error.response) {
       return res.status(error.response.status).json({
         success: false,
         error: error.response.data.detail || 'Failed to generate response',
