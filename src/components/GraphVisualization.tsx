@@ -498,6 +498,10 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
     const subject = graphData.subject || 'default';
     setCurrentSubject(subject);
+    
+    console.log('🎨 Color Mapping Info:');
+    console.log('  Subject detected:', subject);
+    console.log('  Color scheme:', subjectColorSchemes[subject.toLowerCase()] ? 'Found' : 'Using default');
 
     // Create maps for flexible matching
     const confidenceMap = new Map<string, number>();
@@ -548,11 +552,19 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
              normalizedLabel === '';
     };
 
+    // Track node types and their colors for verification
+    const nodeTypeColorMap = new Map<string, string>();
+    
     const processedNodes: Node[] = graphData.graph.nodes
       .map((node) => {
         const nodeType = node.labels[0];
         const nodeColor = getNodeColor(nodeType, subject);
         const nodeLabel = getNodeLabel(node);
+        
+        // Track this node type and color
+        if (!nodeTypeColorMap.has(nodeType)) {
+          nodeTypeColorMap.set(nodeType, nodeColor);
+        }
         
         // Check if this is a fallback label (just the node type)
         const hasFallbackLabel = isFallbackLabel(nodeLabel, nodeType);
@@ -648,6 +660,32 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     const validEdges = processedEdges.filter(edge => 
       validNodeIds.has(edge.source) && validNodeIds.has(edge.target)
     );
+    
+    // Log color assignments for verification
+    console.log('🎨 Node Type Color Assignments:');
+    const sortedEntries = Array.from(nodeTypeColorMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    sortedEntries.forEach(([type, color]) => {
+      console.log(`  ${type}: ${color}`);
+    });
+    
+    // Check for duplicate colors (should not happen with proper scheme)
+    const colorCounts = new Map<string, string[]>();
+    sortedEntries.forEach(([type, color]) => {
+      if (!colorCounts.has(color)) {
+        colorCounts.set(color, []);
+      }
+      colorCounts.get(color)!.push(type);
+    });
+    
+    const duplicates = Array.from(colorCounts.entries()).filter(([_, types]) => types.length > 1);
+    if (duplicates.length > 0) {
+      console.warn('⚠️ WARNING: Multiple node types share the same color:');
+      duplicates.forEach(([color, types]) => {
+        console.warn(`  Color ${color} used by: ${types.join(', ')}`);
+      });
+    } else {
+      console.log('✅ All node types have unique colors!');
+    }
 
     const nodePositions = forceDirectedLayout(processedNodes, validEdges);
     processedNodes.forEach((node, index) => {
