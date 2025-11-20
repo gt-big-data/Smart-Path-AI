@@ -1105,11 +1105,16 @@ function App() {
         const qaResponseData = qaResponse.data;
 
         if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
+          console.log('🔍 Raw QA Pairs from API:', qaResponseData.qa_pairs);
+          console.log('🔍 First QA Pair structure:', qaResponseData.qa_pairs[0]);
+          
           const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair) => ({
             question: p.question,
             answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
-            conceptId: p.conceptId
+            conceptId: p.conceptId || p.concept_id || p.topicId || p.topic_id || '' // Try multiple field names
           }));
+          
+          console.log('🔍 Normalized pairs with conceptIds:', normalizedPairs.map(p => ({ q: p.question.substring(0, 50), conceptId: p.conceptId })));
 
           setQaData(normalizedPairs);
           setCurrentQuestionIndex(0);

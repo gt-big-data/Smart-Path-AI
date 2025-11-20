@@ -144,6 +144,11 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Scientist: COLOR_PALETTE.VIOLET,
     Concept: COLOR_PALETTE.INDIGO,
     Application: COLOR_PALETTE.ORANGE,
+    GraphMetadata: COLOR_PALETTE.SLATE,
+    MendelianGenetics: COLOR_PALETTE.LIME,
+    CellTheory: COLOR_PALETTE.SKY,
+    Evolution: COLOR_PALETTE.ROSE,
+    Discovery: COLOR_PALETTE.FUCHSIA,
   },
   
   default: {
