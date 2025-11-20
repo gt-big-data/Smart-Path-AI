@@ -1369,15 +1369,15 @@ function App() {
         <Panel minSize={30}>
           <div className="h-full flex flex-col">
             <div className="bg-white p-4 border-b border-gray-200 flex justify-between items-center" style={{ zIndex: 1000, position: 'relative' }}>
-              <h1 className="text-xl font-semibold text-gray-800">{currentChat?.title || 'Loading...'}</h1>
-              <div className="flex items-center gap-7" style={{ zIndex: 100, position: 'relative' }}>
+              <h1 className="text-xl font-semibold text-gray-800 flex-1 min-w-0 truncate">{currentChat?.title || 'Loading...'}</h1>
+              <div className="flex items-center gap-4 flex-wrap max-w-full flex-shrink-0" style={{ zIndex: 100, position: 'relative' }}>
                 {/* Quiz Length Control */}
                 <div className="flex items-center gap-3">
                   <label className="text-sm font-medium text-gray-700">Quiz Length:</label>
                   <select
                     value={quizLength}
                     onChange={(e) => setQuizLength(Number(e.target.value) as 5 | 10 | 15)}
-                    className="text-sm border border-gray-300 rounded-md px-3 py-1.5 cursor-pointer bg-white hover:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                    className="text-sm border border-gray-300 rounded-md px-3 py-1.5 cursor-pointer bg-white hover:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all max-w-[9rem]"
                     style={{ zIndex: 101, position: 'relative', pointerEvents: 'auto' }}
                     disabled={isAnswering}
                   >
@@ -1393,7 +1393,7 @@ function App() {
                   <select
                     value={questionFormat}
                     onChange={(e) => setQuestionFormat(e.target.value as 'mixed' | 'mcq' | 'true-false' | 'open-ended')}
-                    className="text-sm border border-gray-300 rounded-md px-3 py-1.5 cursor-pointer bg-white hover:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                    className="text-sm border border-gray-300 rounded-md px-3 py-1.5 cursor-pointer bg-white hover:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all max-w-[11rem]"
                     style={{ zIndex: 101, position: 'relative', pointerEvents: 'auto' }}
                     disabled={isAnswering}
                   >
