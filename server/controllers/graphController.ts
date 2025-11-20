@@ -101,16 +101,34 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
       return res.status(502).json({ error: 'Invalid response from AI question generation service' });
     }
 
-    const qa_pairs = questions.map((q: any) => ({
-      question: q.text || '',
-      answer: q.correct_answer || '',
-      conceptId: q.topic_id || '',
-      // Optional metadata for future UI use
-      id: q.id,
-      explanation: q.explanation,
-      difficulty: q.difficulty,
-      format: q.format,
-    }));
+    const qa_pairs = questions.map((q: any, idx: number) => {
+      const conceptId = q.conceptId || q.concept_id || q.topic_id || q.topicID || q.id || '';
+      const sourceField = q.conceptId ? 'conceptId' : 
+                         q.concept_id ? 'concept_id' : 
+                         q.topic_id ? 'topic_id' : 
+                         q.topicID ? 'topicID' : 
+                         q.id ? 'id' : 'NONE';
+      
+      console.log(`[Backend] Question ${idx + 1} - conceptId extracted from field: ${sourceField}, value: ${conceptId}`);
+      console.log(`[Backend] Question ${idx + 1} - Available fields:`, {
+        conceptId: q.conceptId,
+        concept_id: q.concept_id,
+        topic_id: q.topic_id,
+        topicID: q.topicID,
+        id: q.id
+      });
+      
+      return {
+        question: q.text || '',
+        answer: q.correct_answer || '',
+        conceptId: conceptId,
+        // Optional metadata for future UI use
+        id: q.id,
+        explanation: q.explanation,
+        difficulty: q.difficulty,
+        format: q.format,
+      };
+    });
 
     res.json({ status: 'success', qa_pairs, graph_id: graph_id, requested_length: length, actual_length: qa_pairs.length });
   } catch (error: any) {
@@ -141,6 +159,18 @@ export const verifyAnswer = async (req: Request, res: Response) => {
 
   try {
     const { question, userAnswer, conceptId, isRetry }: VerifyAnswerRequest = req.body;
+
+    // Handle skipped questions - treat as incorrect
+    if (userAnswer === 'SKIPPED' || userAnswer.trim().toUpperCase() === 'SKIP') {
+      if (userId && conceptId) {
+        await updateConfidenceScore(userId, conceptId, false, false);
+      }
+      return res.json({
+        isCorrect: false,
+        feedback: `You skipped this question. Skipped questions are counted as incorrect for confidence tracking.`,
+        followUpQuestion: ''
+      });
+    }
 
     // Construct the prompt for GPT-4
     const systemPrompt = `You are an educational assistant that evaluates student answers based on conceptual understanding rather than exact wording.

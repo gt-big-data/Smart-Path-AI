@@ -33,7 +33,41 @@ export const ProgressProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       try {
         setLoading(true);
         const response = await axios.get('http://localhost:4000/api/concept-progress', { withCredentials: true });
-        setProgress(response.data);
+        const progressData = response.data;
+        setProgress(progressData);
+        
+        // If no progress records exist, try to process existing quiz history
+        if (Array.isArray(progressData) && progressData.length === 0) {
+          console.log('[Progress] ⚠️ No progress records found, checking for quiz history to process...');
+          try {
+            // First check if there's any quiz history
+            const quizHistoryResponse = await axios.get('http://localhost:4000/api/quiz-history', { withCredentials: true });
+            const quizHistories = quizHistoryResponse.data?.quizHistories || [];
+            console.log(`[Progress] Found ${quizHistories.length} quiz history records`);
+            
+            if (quizHistories.length > 0) {
+              console.log('[Progress] 🔄 Processing quiz history to create progress records...');
+              const processResponse = await axios.post('http://localhost:4000/api/quiz-history/process-all', {}, { withCredentials: true });
+              console.log('[Progress] ✅ Processed quiz history:', processResponse.data);
+              
+              // Refetch progress after processing
+              console.log('[Progress] 🔄 Refetching progress after processing...');
+              const newResponse = await axios.get('http://localhost:4000/api/concept-progress', { withCredentials: true });
+              const newProgressData = newResponse.data;
+              console.log(`[Progress] ✅ Now have ${newProgressData.length} progress records`);
+              setProgress(newProgressData);
+            } else {
+              console.log('[Progress] ℹ️ No quiz history found to process');
+            }
+          } catch (processError: any) {
+            console.error('[Progress] ❌ Failed to process quiz history:', processError);
+            console.error('[Progress] Error details:', {
+              message: processError.message,
+              status: processError.response?.status,
+              data: processError.response?.data
+            });
+          }
+        }
       } catch (error) {
         console.error('Failed to fetch progress', error);
       } finally {

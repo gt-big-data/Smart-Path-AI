@@ -43,6 +43,10 @@ interface QAPair {
   question: string;
   answer: string;
   conceptId: string;
+  concept_id?: string; // Alternative field name from Python AI server
+  topicId?: string; // Alternative field name
+  topic_id?: string; // Alternative field name
+  id?: string; // Generic ID field (used as fallback if conceptId is empty)
 }
 
 // Add interface for concept progress
@@ -574,29 +578,57 @@ function App() {
               // Add the final answer to userAnswers
               const allAnswers = [...userAnswers, trimmedInput];
               
-              const quizHistoryData = {
-                concepts: qaData.map((qa, index) => ({
-                  conceptID: qa.conceptId, // Use the actual conceptId from the question
-                  name: `Question ${index + 1} Concept`
-                })),
-                questions: qaData.map((qa, index) => ({
-                  questionText: qa.question,
-                  userAnswer: allAnswers[index] || 'No answer provided',
-                  correctAnswer: qa.answer,
-                  explanation: `This question tests understanding of the material covered in the graph.`,
-                  timestamp: new Date().toISOString()
-                }))
-              };
-
-              console.log('Saving quiz history with conceptIds:', qaData.map(qa => qa.conceptId));
-              
-              await axios.post('http://localhost:4000/api/quiz-history', quizHistoryData, { 
-                withCredentials: true 
+              // Filter out questions with empty conceptIds
+              const validQaData = qaData.filter((qa, index) => {
+                const hasConceptId = qa.conceptId && qa.conceptId.trim() !== '';
+                if (!hasConceptId) {
+                  console.warn(`⚠️ Skipping question ${index + 1} - empty conceptId:`, qa);
+                }
+                return hasConceptId;
               });
-              
-              console.log('Quiz history saved successfully');
+
+              if (validQaData.length === 0) {
+                console.error('❌ Cannot save quiz history: All questions have empty conceptIds!');
+                console.error('Raw qaData:', qaData);
+              } else {
+                const quizHistoryData = {
+                concepts: validQaData.map((qa, idx) => ({
+                  conceptID: qa.conceptId, // Use the actual conceptId from the question
+                  name: `Question ${idx + 1} Concept`
+                })),
+                  questions: validQaData.map((qa, index) => {
+                    const originalIndex = qaData.indexOf(qa);
+                    return {
+                      questionText: qa.question,
+                      userAnswer: allAnswers[originalIndex] || 'No answer provided',
+                      correctAnswer: qa.answer,
+                      explanation: `This question tests understanding of the material covered in the graph.`,
+                      timestamp: new Date().toISOString()
+                    };
+                  })
+                };
+
+                console.log('💾 Saving quiz history with conceptIds:', validQaData.map(qa => qa.conceptId));
+                console.log(`📊 Valid questions: ${validQaData.length}/${qaData.length}`);
+                
+                try {
+                  const response = await axios.post('http://localhost:4000/api/quiz-history', quizHistoryData, { 
+                    withCredentials: true 
+                  });
+                  
+                  console.log('✅ Quiz history saved successfully:', response.data);
+                  console.log(`✅ Progress records created: ${response.data.progressRecordsCreated || 0}`);
+                } catch (error: any) {
+                  console.error('❌ Error saving quiz history:', error);
+                  console.error('Error details:', {
+                    message: error.message,
+                    status: error.response?.status,
+                    data: error.response?.data
+                  });
+                }
+              }
             } catch (error) {
-              console.error('Error saving quiz history:', error);
+              console.error('❌ Error in quiz completion:', error);
             }
 
             setIsAnswering(false);
@@ -770,6 +802,183 @@ function App() {
       } finally {
         setIsTyping(false);
       }
+    }
+  };
+
+  const handleSkip = async () => {
+    const currentQA = qaData[currentQuestionIndex];
+    if (!isAnswering || !currentQA) return;
+
+    try {
+      setIsTyping(true);
+      console.log('[Quiz] Skipping question', {
+        currentQuestionIndex,
+        totalQuestions: qaData.length,
+        question: currentQA.question,
+        conceptId: currentQA.conceptId
+      });
+
+      // Treat skip as incorrect answer for confidence tracking
+      await axios.post('http://localhost:4000/api/verify-answer', {
+        question: currentQA.question,
+        userAnswer: 'SKIPPED',
+        correctAnswer: currentQA.answer,
+        conceptId: currentQA.conceptId,
+        isRetry: false,
+        graph_id: currentChat?.graph_id
+      }, { withCredentials: true });
+
+      // Track skipped answer
+      setUserAnswers(prev => [...prev, 'SKIPPED']);
+      if (currentChatId) {
+        const existing = loadQuizState(currentChatId) || {};
+        const updated = {
+          ...existing,
+          userAnswers: [...(existing.userAnswers || []), 'SKIPPED'],
+        };
+        saveQuizState(currentChatId, updated);
+      }
+
+      // Refresh concept progress after skipping
+      await fetchConceptProgress();
+
+      // Add skip message
+      const skipMessage: Message = {
+        id: generateMessageId(),
+        content: `You skipped this question. The correct answer was: ${currentQA.answer}\n\nLet's move on to the next question.`,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+
+      if (qaData.length > currentQuestionIndex + 1) {
+        const nextQuestionMessage: Message = {
+          id: generateMessageId(),
+          content: `Question ${currentQuestionIndex + 2} of ${qaData.length}:\n\n${qaData[currentQuestionIndex + 1].question}`,
+          sender: 'ai',
+          timestamp: new Date(),
+          isQuestion: true,
+          questionData: {
+            question: qaData[currentQuestionIndex + 1].question,
+            correctAnswer: qaData[currentQuestionIndex + 1].answer,
+            conceptId: qaData[currentQuestionIndex + 1].conceptId,
+            questionIndex: currentQuestionIndex + 1,
+            totalQuestions: qaData.length
+          }
+        };
+
+        setChats(prevChats => prevChats.map(chat =>
+          chat.id === currentChatId
+            ? {
+                ...chat,
+                messages: [...chat.messages, skipMessage, nextQuestionMessage],
+              }
+            : chat
+        ));
+
+        await axios.post('http://localhost:4000/chat/message', {
+          chat_id: currentChatId,
+          sender: 'ai',
+          text: skipMessage.content,
+        }, { withCredentials: true });
+
+        await axios.post('http://localhost:4000/chat/message', {
+          chat_id: currentChatId,
+          sender: 'ai',
+          text: nextQuestionMessage.content,
+        }, { withCredentials: true });
+
+        setCurrentQuestionIndex(prev => prev + 1);
+        if (currentChatId) {
+          const existing = loadQuizState(currentChatId) || {};
+          existing.currentQuestionIndex = (existing.currentQuestionIndex || 0) + 1;
+          saveQuizState(currentChatId, existing);
+        }
+      } else {
+        // Quiz completed
+        const finalMessage: Message = {
+          id: generateMessageId(),
+          content: `${skipMessage.content}\n\nYou've completed all the questions.`,
+          sender: 'ai',
+          timestamp: new Date(),
+        };
+
+        setChats(prevChats => prevChats.map(chat =>
+          chat.id === currentChatId
+            ? {
+                ...chat,
+                messages: [...chat.messages, finalMessage],
+              }
+            : chat
+        ));
+
+        await axios.post('http://localhost:4000/chat/message', {
+          chat_id: currentChatId,
+          sender: 'ai',
+          text: finalMessage.content,
+        }, { withCredentials: true });
+
+        // Save quiz history
+        try {
+          const allAnswers = [...userAnswers, 'SKIPPED'];
+          const validQaData = qaData.filter((qa) => qa.conceptId && qa.conceptId.trim() !== '');
+          
+          if (validQaData.length > 0) {
+            const quizHistoryData = {
+              concepts: validQaData.map((qa, idx) => ({
+                conceptID: qa.conceptId,
+                name: `Question ${idx + 1} Concept`
+              })),
+              questions: validQaData.map((qa, index) => {
+                const originalIndex = qaData.indexOf(qa);
+                return {
+                  questionText: qa.question,
+                  userAnswer: allAnswers[originalIndex] || 'SKIPPED',
+                  correctAnswer: qa.answer,
+                  explanation: `This question tests understanding of the material covered in the graph.`,
+                  timestamp: new Date().toISOString()
+                };
+              })
+            };
+
+            await axios.post('http://localhost:4000/api/quiz-history', quizHistoryData, { 
+              withCredentials: true 
+            });
+            console.log('✅ Quiz history saved with skipped question');
+          }
+        } catch (error) {
+          console.error('❌ Error saving quiz history:', error);
+        }
+
+        setIsAnswering(false);
+        setShouldStartQuiz(true);
+        setQuizCompleted(true);
+        if (currentChatId) clearQuizState(currentChatId);
+      }
+    } catch (error: any) {
+      console.error('[Quiz] Error skipping question:', error);
+      const errorMessage: Message = {
+        id: generateMessageId(),
+        content: 'Sorry, there was an error processing your skip. Please try again.',
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+
+      setChats(prevChats => prevChats.map(chat =>
+        chat.id === currentChatId
+          ? {
+              ...chat,
+              messages: [...chat.messages, errorMessage],
+            }
+          : chat
+      ));
+
+      await axios.post('http://localhost:4000/chat/message', {
+        chat_id: currentChatId,
+        sender: 'ai',
+        text: errorMessage.content,
+      }, { withCredentials: true });
+    } finally {
+      setIsTyping(false);
     }
   };
 
@@ -1107,14 +1316,27 @@ function App() {
         if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
           console.log('🔍 Raw QA Pairs from API:', qaResponseData.qa_pairs);
           console.log('🔍 First QA Pair structure:', qaResponseData.qa_pairs[0]);
+          console.log('🔍 COMPLETE First QA Pair (JSON):', JSON.stringify(qaResponseData.qa_pairs[0], null, 2));
+          console.log('🔍 All keys in first QA pair:', Object.keys(qaResponseData.qa_pairs[0]));
           
-          const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair) => ({
-            question: p.question,
-            answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
-            conceptId: p.conceptId || p.concept_id || p.topicId || p.topic_id || '' // Try multiple field names
-          }));
+          const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair, idx: number) => {
+            const conceptId = p.conceptId || p.concept_id || p.topicId || p.topic_id || p.id || '';
+            const sourceField = p.conceptId ? 'conceptId' : 
+                               p.concept_id ? 'concept_id' : 
+                               p.topicId ? 'topicId' : 
+                               p.topic_id ? 'topic_id' : 
+                               p.id ? 'id' : 'NONE';
+            
+            console.log(`📝 Question ${idx + 1} - conceptId extracted from field: ${sourceField}, value: ${conceptId}`);
+            
+            return {
+              question: p.question,
+              answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
+              conceptId: conceptId
+            };
+          });
           
-          console.log('🔍 Normalized pairs with conceptIds:', normalizedPairs.map(p => ({ q: p.question.substring(0, 50), conceptId: p.conceptId })));
+          console.log('🔍 Normalized pairs with conceptIds:', normalizedPairs.map((p: QAPair) => ({ q: p.question.substring(0, 50), conceptId: p.conceptId })));
 
           setQaData(normalizedPairs);
           setCurrentQuestionIndex(0);
@@ -1603,7 +1825,7 @@ function App() {
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Type your message..."
+                  placeholder={isAnswering ? "Type your answer..." : "Type your message..."}
                   className="flex-1 px-4 py-2 bg-white text-gray-900 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent placeholder-gray-400"
                 />
                 <input
@@ -1612,16 +1834,30 @@ function App() {
                   onChange={handleFileSelect}
                   className="hidden"
                 />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500 flex items-center transition-colors duration-200"
-                >
-                  <Paperclip className="w-5 h-5" />
-                </button>
+                {!isAnswering && (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500 flex items-center transition-colors duration-200"
+                  >
+                    <Paperclip className="w-5 h-5" />
+                  </button>
+                )}
+                {isAnswering && (
+                  <button
+                    type="button"
+                    onClick={handleSkip}
+                    disabled={isTyping}
+                    className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 flex items-center transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                    title="Skip this question (counts as incorrect)"
+                  >
+                    Skip
+                  </button>
+                )}
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-500 flex items-center transition-colors duration-200"
+                  disabled={isTyping}
+                  className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-500 flex items-center transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Send className="w-5 h-5" />
                 </button>

@@ -198,31 +198,51 @@ const ProfilePage: React.FC = () => {
             nodeNameById.set(String(c), display);
           }
         }
+        
+        console.log(`[ProfilePage] Built nodeNameById map with ${nodeNameById.size} entries`);
+        console.log(`[ProfilePage] Sample node IDs from graph:`, nodes.slice(0, 3).map((n: any) => ({
+          id: n.id,
+          topicID: n.properties?.topicID,
+          conceptId: n.properties?.conceptId,
+          name: getNodeLabel(n)
+        })));
 
         // Normalize progress entries into the UI shape and keep the raw concept id for lookups
+        console.log(`[ProfilePage] Trying to match ${progressList.length} progress records against ${nodes.length} nodes`);
+        console.log(`[ProfilePage] Progress conceptIds:`, progressList.map((p: any) => p.conceptId || p.conceptID).slice(0, 5));
+        console.log(`[ProfilePage] Sample node topicIDs:`, nodes.slice(0, 5).map((n: any) => n.properties?.topicID).filter(Boolean));
+        
         const normalized: Array<any> = progressList.map((p: any) => {
           const conceptId = String(p.conceptId || p.conceptID || p.topicId || p.topic_id || p.id);
           // Try map lookup first. If missing, attempt to find node by id and compute a label.
           let name = nodeNameById.get(conceptId) || p.name || p.topicName;
           if (!name) {
-            const found = nodes.find((n: any) =>
-              String(n.id) === conceptId ||
-              String(n.properties?.conceptId) === conceptId ||
-              String(n.properties?.topicID) === conceptId ||
-              String(n.properties?.topicId) === conceptId ||
-              String(n.properties?.topic_id) === conceptId ||
-              String(n.properties?.concept_id) === conceptId
-            );
+            const found = nodes.find((n: any) => {
+              const props = n.properties || {};
+              return String(n.id) === conceptId ||
+                     String(props.conceptId) === conceptId ||
+                     String(props.topicID) === conceptId ||
+                     String(props.topicId) === conceptId ||
+                     String(props.topic_id) === conceptId ||
+                     String(props.concept_id) === conceptId ||
+                     String(props.id) === conceptId;
+            });
             if (found) {
               name = getNodeLabel(found);
+              console.log(`[ProfilePage] ✅ Found node for conceptId ${conceptId}: ${name}`);
             } else {
               // Log when we can't find a node for debugging
-              console.warn(`[ProfilePage] Could not find node for conceptId: ${conceptId}`);
-              console.warn(`[ProfilePage] Available node IDs (first 5):`, nodes.slice(0, 5).map((n: any) => ({
-                id: n.id,
-                props: Object.keys(n.properties || {})
-              })));
+              console.warn(`[ProfilePage] ❌ Could not find node for conceptId: ${conceptId}`);
+              // Show what topicIDs are actually available
+              const availableTopicIDs = nodes
+                .map((n: any) => n.properties?.topicID)
+                .filter(Boolean)
+                .slice(0, 10);
+              console.warn(`[ProfilePage] Available topicIDs (first 10):`, availableTopicIDs);
+              console.warn(`[ProfilePage] Does conceptId match any topicID?`, availableTopicIDs.includes(conceptId));
             }
+          } else {
+            console.log(`[ProfilePage] ✅ Found name via map for conceptId ${conceptId}: ${name}`);
           }
           // Better fallback display for orphaned concepts
           if (!name) {
@@ -290,10 +310,92 @@ const ProfilePage: React.FC = () => {
           }
         }
 
-        // Filter out orphaned concepts (those without matching nodes in current graphs)
-        const validConcepts = normalized.filter(i => !i.topic_name.startsWith('Unknown Topic'));
+        // Final fallback: Try to get topic names from quiz history
+        const stillUnknown = normalized.filter((n: any) => 
+          n.topic_name.startsWith('Unknown Topic') || n.topic_name === n.concept_id
+        );
+        if (stillUnknown.length > 0) {
+          try {
+            console.log(`[ProfilePage] Attempting to find topic names from quiz history for ${stillUnknown.length} concepts...`);
+            const quizHistoryRes = await axios.get('http://localhost:4000/api/quiz-history', { withCredentials: true });
+            const quizHistories = Array.isArray(quizHistoryRes.data?.quizHistories) 
+              ? quizHistoryRes.data.quizHistories 
+              : [];
+            
+            // Build a map of conceptId -> question text (first question we find for each conceptId)
+            const conceptIdToQuestion = new Map<string, string>();
+            for (const quiz of quizHistories) {
+              if (quiz.concepts && quiz.questions) {
+                for (let i = 0; i < Math.min(quiz.concepts.length, quiz.questions.length); i++) {
+                  const conceptId = String(quiz.concepts[i]?.conceptID || '');
+                  const questionText = quiz.questions[i]?.questionText || '';
+                  if (conceptId && questionText && !conceptIdToQuestion.has(conceptId)) {
+                    conceptIdToQuestion.set(conceptId, questionText);
+                  }
+                }
+              }
+            }
+            
+            // Try to extract a topic name from question text
+            const extractTopicName = (questionText: string): string | null => {
+              // Try to find topic mentions in the question
+              // Look for patterns like "What is X?", "Which of the following best describes X?", etc.
+              const patterns = [
+                /(?:What|Which|Who|Where|When|How) (?:is|are|was|were|does|do|did|can|could|should|would|will) (.+?)[\?\.]/i,
+                /(?:about|regarding|concerning|related to) (.+?)[\?\.]/i,
+                /(?:the|a|an) (.+?) (?:is|are|was|were|refers|means|describes)/i,
+              ];
+              
+              for (const pattern of patterns) {
+                const match = questionText.match(pattern);
+                if (match && match[1]) {
+                  const topic = match[1].trim();
+                  // Clean up the topic name
+                  if (topic.length > 3 && topic.length < 50) {
+                    return topic;
+                  }
+                }
+              }
+              
+              // Fallback: use first few words of the question
+              const words = questionText.split(/\s+/).slice(0, 5).join(' ');
+              if (words.length > 10 && words.length < 60) {
+                return words + '...';
+              }
+              
+              return null;
+            };
+            
+            // Update normalized entries with question-based names
+            let questionBasedCount = 0;
+            for (const item of stillUnknown) {
+              const questionText = conceptIdToQuestion.get(item.concept_id);
+              if (questionText) {
+                const extractedName = extractTopicName(questionText);
+                if (extractedName) {
+                  item.topic_name = extractedName;
+                  questionBasedCount++;
+                  console.log(`[ProfilePage] ✅ Extracted topic name from question for ${item.concept_id}: ${extractedName}`);
+                }
+              }
+            }
+            
+            if (questionBasedCount > 0) {
+              console.log(`[ProfilePage] ✅ Extracted ${questionBasedCount} topic names from quiz history questions`);
+            }
+          } catch (quizHistoryErr) {
+            console.warn('[ProfilePage] Failed to fetch quiz history for topic name extraction:', quizHistoryErr);
+          }
+        }
+
+        // Don't filter out orphaned concepts - show them with fallback names
+        // They might be from deleted graphs or graphs that haven't loaded yet
+        const validConcepts = normalized; // Keep all concepts, even if we can't find the node name
         
-        console.log(`[ProfilePage] Filtered out ${normalized.length - validConcepts.length} orphaned concepts`);
+        const orphanedCount = normalized.filter(i => i.topic_name.startsWith('Unknown Topic')).length;
+        if (orphanedCount > 0) {
+          console.log(`[ProfilePage] ${orphanedCount} concepts have unknown names (may be from deleted/changed graphs)`);
+        }
         
         // Topics to review: simple threshold (confidence < 0.75), sorted ascending
         const topics_to_review = validConcepts.filter(i => i.confidence_score < 0.75).sort((a, b) => a.confidence_score - b.confidence_score);
