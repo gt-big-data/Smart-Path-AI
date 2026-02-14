@@ -6,7 +6,7 @@ const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8
 
 export const pythonServiceClient = axios.create({
   baseURL: PYTHON_SERVICE_URL,
-  timeout: 30000, // 30 seconds timeout
+  timeout: 50000, // 50 seconds timeout
   headers: {
     'Content-Type': 'application/json',
   },
