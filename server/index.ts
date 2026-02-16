@@ -1,8 +1,18 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 
 // Load environment variables before any other imports
-dotenv.config({ path: path.resolve(__dirname, '.env') });
+const envCandidates = [
+    path.resolve(__dirname, '.env'),
+    path.resolve(__dirname, '../.env'),
+];
+const resolvedEnvPath = envCandidates.find((candidate) => fs.existsSync(candidate));
+if (resolvedEnvPath) {
+    dotenv.config({ path: resolvedEnvPath });
+} else {
+    dotenv.config();
+}
 
 import mongoose from 'mongoose';
 import express from 'express';
@@ -19,9 +29,11 @@ import axios from 'axios';
 import User from './models/User';
 
 import './config/passport';
-import router from './auth/routes'
 
 const app = express();
+const port = Number(process.env.PORT || 4000);
+const corsOriginConfig = process.env.CORS_ORIGINS || process.env.CLIENT_URL || 'http://localhost:5173';
+const corsOrigins = corsOriginConfig.split(',').map((origin) => origin.trim()).filter(Boolean);
 
 // Connect to Mongo
 const connectDB = async () => {
@@ -37,7 +49,7 @@ connectDB();
 
 // CORS
 app.use(cors({
-    origin: 'http://localhost:5173',
+    origin: corsOrigins.length <= 1 ? corsOrigins[0] : corsOrigins,
     credentials: true,
 }));
 
@@ -109,6 +121,6 @@ app.get('/flask/hi', async (req, res) => {
 });
 
 // Start server
-app.listen(4000, () => {
-    console.log('Server running on http://localhost:4000');
+app.listen(port, () => {
+    console.log(`Server running on http://localhost:${port}`);
 });

@@ -2,6 +2,7 @@ import { Request, Response, RequestHandler } from 'express';
 import axios from 'axios';
 import multer from 'multer';
 import FormData from 'form-data';
+import { pythonServiceClient } from '../utils/axiosConfig';
 
 // Configure multer for handling file uploads
 export const upload = multer({
@@ -47,7 +48,8 @@ export const processPdf: RequestHandler = async (req, res) => {
 
     console.log('Sending request to processing server...');
     // Send to processing server
-    const response = await axios.post('http://localhost:8000/process-pdf', formData, {
+    const response = await pythonServiceClient.post('/process-pdf', formData, {
+      params: req.query,
       headers: {
         ...formData.getHeaders()
       },

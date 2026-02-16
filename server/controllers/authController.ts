@@ -152,7 +152,8 @@ export const login = async (req: Request, res: Response) => {
  * Redirect the user to your frontend app.
  */
 export const googleAuthCallback = (res: Response) => {
-    return res.redirect('http://localhost:5173');
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    return res.redirect(clientUrl);
 };
 
 export const checkAuth = async (req: Request, res: Response) => {
