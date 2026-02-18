@@ -1579,10 +1579,19 @@ function App() {
           <div className="h-full p-6 bg-white">
             <div className="h-full rounded-lg bg-white border-2 border-gray-200">
               {isProcessingFile ? (
-                <div className="h-full flex items-center justify-center">
-                  <p className="text-gray-600 text-lg">
-                    Processing your file{loadingDots}
+                <div className="h-full flex flex-col items-center justify-center px-8">
+                  <FileText className="w-12 h-12 text-teal-500 mb-4 animate-pulse" />
+                  <p className="text-gray-800 text-lg font-semibold mb-1">
+                    Processing your PDF{loadingDots}
                   </p>
+                  <p className="text-gray-500 text-sm mb-6">
+                    Extracting concepts and building your knowledge graph
+                  </p>
+                  <div className="w-full max-w-xs">
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div className="h-full bg-teal-500 rounded-full animate-[progressIndeterminate_1.5s_ease-in-out_infinite]" />
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <GraphVisualization data={graphData} conceptProgress={conceptProgress} />
@@ -1805,6 +1814,12 @@ function App() {
             </div>
 
             <form onSubmit={handleSubmit} className="p-4 bg-white border-t border-gray-200">
+              {isProcessingFile && (
+                <div className="mb-2 p-3 bg-teal-50 border border-teal-200 rounded-lg flex items-center space-x-3">
+                  <div className="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-sm font-medium text-teal-700">Processing PDF — this may take a moment{loadingDots}</span>
+                </div>
+              )}
               {selectedFile && !isProcessingFile && (
                 <div className="mb-2 p-2 bg-gray-50 rounded-lg flex items-center justify-between">
                   <div className="flex items-center space-x-2">
@@ -1838,7 +1853,8 @@ function App() {
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500 flex items-center transition-colors duration-200"
+                    disabled={isProcessingFile}
+                    className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500 flex items-center transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Paperclip className="w-5 h-5" />
                   </button>
