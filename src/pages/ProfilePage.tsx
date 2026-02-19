@@ -461,20 +461,20 @@ const ProfilePage: React.FC = () => {
   const renderContent = () => {
     if (loading) {
       return (
-        <div className="flex h-screen items-center justify-center bg-gray-50">
-          <p className="text-lg text-gray-600">Loading your profile...</p>
+        <div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
+          <p className="text-lg text-slate-600">Loading your profile...</p>
         </div>
       );
     }
   
     if (error) {
       return (
-        <div className="flex h-screen items-center justify-center bg-gray-50 text-center">
+        <div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50 text-center">
           <div>
             <p className="text-lg text-red-600">{error}</p>
             <button
               onClick={() => navigate(-1)}
-              className="mt-4 px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600"
+              className="mt-4 px-4 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 shadow-md shadow-teal-500/20 transition-all"
             >
               Go Back
             </button>
@@ -484,16 +484,16 @@ const ProfilePage: React.FC = () => {
     }
 
     return (
-      <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
+      <div className="min-h-screen bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50 p-4 sm:p-6 lg:p-8">
         <div className="max-w-4xl mx-auto">
           <header className="mb-8 flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Your Learning Profile</h1>
-              <p className="text-md text-gray-600 mt-1">Track your progress and find topics to review.</p>
+              <h1 className="text-3xl font-bold text-slate-800">Your Learning Profile</h1>
+              <p className="text-md text-slate-500 mt-1">Track your progress and find topics to review.</p>
             </div>
             <button
               onClick={() => navigate(-1)}
-              className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm text-slate-700 border border-slate-200/60 rounded-lg hover:bg-white transition-all shadow-sm"
             >
               <ChevronLeft className="w-5 h-5" />
               Back
@@ -502,10 +502,10 @@ const ProfilePage: React.FC = () => {
   
           <main className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Topics to Review */}
-            <section className="lg:col-span-1 bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+            <section className="lg:col-span-1 bg-white/80 backdrop-blur-sm p-6 rounded-xl border border-slate-200/60 shadow-sm">
               <div className="flex items-center gap-3 mb-4">
                 <TrendingDown className="w-6 h-6 text-yellow-500" />
-                <h2 className="text-xl font-semibold text-gray-800">Topics to Review</h2>
+                <h2 className="text-xl font-semibold text-slate-800">Topics to Review</h2>
               </div>
               {profileData?.topics_to_review && profileData.topics_to_review.length > 0 ? (
                 <ul className="space-y-4">
@@ -528,10 +528,10 @@ const ProfilePage: React.FC = () => {
             </section>
   
             {/* Full Progress */}
-            <section className="lg:col-span-2 bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+            <section className="lg:col-span-2 bg-white/80 backdrop-blur-sm p-6 rounded-xl border border-slate-200/60 shadow-sm">
               <div className="flex items-center gap-3 mb-4">
                 <BookOpen className="w-6 h-6 text-teal-500" />
-                <h2 className="text-xl font-semibold text-gray-800">All Practiced Topics</h2>
+                <h2 className="text-xl font-semibold text-slate-800">All Practiced Topics</h2>
               </div>
               {profileData?.full_progress && profileData.full_progress.length > 0 ? (
                 <div className="overflow-x-auto">
