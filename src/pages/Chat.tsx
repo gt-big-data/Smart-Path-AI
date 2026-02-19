@@ -61,6 +61,8 @@ function App() {
   const [currentChatId, setCurrentChatId] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [progressMessage, setProgressMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [graphData, setGraphData] = useState<any>(null);
   const [qaData, setQaData] = useState<QAPair[]>([]);
@@ -240,35 +242,62 @@ function App() {
           ? `http://localhost:4000/upload/process-pdf?graph_id=${currentChatData.graph_id}`
           : 'http://localhost:4000/upload/process-pdf';
 
+        setUploadProgress(0);
+        setProgressMessage('Uploading PDF...');
+
         const response = await fetch(url, {
           method: 'POST',
           body: formData,
         });
 
-        const status = response.status;
-        const contentType = response.headers.get('content-type') || '';
-        console.log('[Upload] Response status:', status, 'content-type:', contentType);
+        // Read the SSE stream for progress updates
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let responseData: any = null;
+        let buffer = '';
 
-        let responseData: any;
-        if (contentType.includes('application/json')) {
-          try {
-            responseData = await response.json();
-          } catch (parseErr) {
-            console.error('[Upload] Failed to parse JSON', parseErr);
-            const rawText = await response.text();
-            console.error('[Upload] Raw non-JSON response snippet:', rawText.slice(0, 300));
-            throw new Error('Upload returned malformed JSON');
-          }
-        } else {
-          // Likely an HTML error page (hence Unexpected token '<')
-          const rawText = await response.text();
-          console.error('[Upload] Non-JSON response (first 300 chars):', rawText.slice(0, 300));
-          throw new Error(`Unexpected non-JSON response (status ${status}).`);
+        if (!reader) {
+          throw new Error('Failed to read response stream');
         }
-        console.log('[Upload] Parsed response JSON:', responseData);
 
-        if (!response.ok) {
-          throw new Error(responseData.error || 'Failed to process file');
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          // Keep the last potentially incomplete line in the buffer
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const event = JSON.parse(line.slice(6));
+                if (event.type === 'progress') {
+                  setUploadProgress(event.percent);
+                  setProgressMessage(event.message);
+                } else if (event.type === 'complete') {
+                  responseData = event.data;
+                  setUploadProgress(100);
+                  setProgressMessage('Processing complete!');
+                } else if (event.type === 'error') {
+                  throw new Error(event.error || 'Failed to process file');
+                }
+              } catch (parseErr) {
+                if (parseErr instanceof SyntaxError) {
+                  console.warn('[Upload] Skipping malformed SSE line:', line);
+                } else {
+                  throw parseErr;
+                }
+              }
+            }
+          }
+        }
+
+        console.log('[Upload] Parsed response data:', responseData);
+
+        if (!responseData) {
+          throw new Error('No response data received from server');
         }
 
         const fileUploadMessage: Message = {
@@ -362,6 +391,8 @@ function App() {
           fileInputRef.current.value = '';
         }
         setIsProcessingFile(false);
+        setUploadProgress(0);
+        setProgressMessage('');
       }
     }
   };
@@ -1167,10 +1198,10 @@ function App() {
         matches.forEach((match, matchIndex) => {
           const choiceLetter = match[1];
           const choiceText = match[2].trim();
-          const separator = match[0].includes('.') ? '.' : ')';
           formattedLines.push(
-            <div key={`choice-${lineIndex}-${matchIndex}`} className="ml-4 mb-2 pl-2 border-l-2 border-gray-300">
-              <span className="font-semibold text-teal-600">{choiceLetter}{separator}</span> {choiceText}
+            <div key={`choice-${lineIndex}-${matchIndex}`} className="ml-1 mb-2 px-3 py-2 rounded-lg border border-slate-200/80 bg-slate-50/50 hover:bg-teal-50 hover:border-teal-300 transition-all duration-150 cursor-default flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-bold flex-shrink-0">{choiceLetter}</span>
+              <span className="text-sm">{choiceText}</span>
             </div>
           );
         });
@@ -1455,10 +1486,10 @@ function App() {
   // Show loading state while fetching chats
   if (chatsLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-white">
+      <div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50 via-slate-50 to-blue-50">
         <div className="text-center space-y-4">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500"></div>
-          <p className="text-gray-500">Loading chats...</p>
+          <p className="text-slate-500">Loading chats...</p>
         </div>
       </div>
     );
@@ -1467,13 +1498,13 @@ function App() {
   // Only show "No chats yet" if loading is complete and there are no chats
   if (!currentChat && chats.length === 0) {
     return (
-      <div className="flex h-screen items-center justify-center bg-white">
+      <div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50 via-slate-50 to-blue-50">
         <div className="text-center space-y-4">
-          <h2 className="text-2xl font-semibold text-gray-800">No chats yet</h2>
-          <p className="text-gray-500">Start a new conversation to begin chatting with your study assistant.</p>
+          <h2 className="text-2xl font-semibold text-slate-800">No chats yet</h2>
+          <p className="text-slate-500">Start a new conversation to begin chatting with your study assistant.</p>
           <button
             onClick={() => void handleNewChat()}
-            className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors duration-200"
+            className="px-6 py-2.5 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all duration-200 shadow-md shadow-teal-500/20 btn-lift"
           >
             Start a New Chat
           </button>
@@ -1483,31 +1514,31 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex h-screen bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
       <div
         className={`${
           isSidebarCollapsed ? 'w-12' : 'w-64'
-        } bg-white border-r border-gray-200 flex flex-col transition-all duration-300`}
+        } bg-slate-900 flex flex-col transition-all duration-300`}
       >
-        <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+        <div className="p-4 border-b border-slate-700/50 flex justify-between items-center">
           {!isSidebarCollapsed && (
-            <h2 className="text-lg font-semibold text-gray-800">Chat History</h2>
+            <h2 className="text-lg font-semibold text-slate-100">Chat History</h2>
           )}
           <button
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="p-1 hover:bg-gray-100 rounded-lg transition-colors duration-150"
+            className="p-1 hover:bg-slate-700/50 rounded-lg transition-colors duration-150"
           >
             {isSidebarCollapsed ? (
-              <ChevronRight className="w-5 h-5 text-gray-600" />
+              <ChevronRight className="w-5 h-5 text-slate-400" />
             ) : (
-              <ChevronLeft className="w-5 h-5 text-gray-600" />
+              <ChevronLeft className="w-5 h-5 text-slate-400" />
             )}
           </button>
         </div>
         
         <button
           onClick={() => void handleNewChat()}
-          className={`m-4 p-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors duration-200 flex items-center justify-center gap-2 ${
+          className={`m-4 p-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all duration-200 flex items-center justify-center gap-2 shadow-md shadow-teal-500/20 btn-lift ${
             isSidebarCollapsed ? 'p-2' : ''
           }`}
         >
@@ -1528,17 +1559,17 @@ function App() {
                   }
                   handleChatSelect(chat.id);
                 }}
-                className={`p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-200 transition-colors duration-150 relative group ${
-                  currentChatId === chat.id ? 'bg-gray-50' : ''
+                className={`p-3 hover:bg-slate-800/70 cursor-pointer border-b border-slate-700/30 transition-colors duration-150 relative group ${
+                  currentChatId === chat.id ? 'bg-slate-800 border-l-2 border-l-teal-400' : ''
                 }`}
               >
                 <div className="flex items-center space-x-3">
-                  <MessageSquare className="w-5 h-5 text-teal-500" />
+                  <MessageSquare className="w-5 h-5 text-teal-400" />
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-medium text-gray-800 truncate">
+                    <h3 className="text-sm font-medium text-slate-200 truncate">
                       {chat.title}
                     </h3>
-                    <p className="text-xs text-gray-500 truncate">{chat.lastMessage}</p>
+                    <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
                   </div>
                   <div 
                     onClick={(e) => {
@@ -1557,16 +1588,28 @@ function App() {
                         console.log('Delete button onClick triggered for chat:', chat.id);
                         handleDeleteChat(chat.id, e);
                       }}
-                      className="opacity-70 group-hover:opacity-100 p-1.5 hover:bg-red-100 rounded transition-all duration-150 z-50 relative flex-shrink-0"
+                      className="opacity-70 group-hover:opacity-100 p-1.5 hover:bg-red-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
                       title="Delete chat"
                       type="button"
                     >
-                      <Trash2 className="w-4 h-4 text-red-500 hover:text-red-700" />
+                      <Trash2 className="w-4 h-4 text-red-400 hover:text-red-300" />
                     </button>
                   </div>
                 </div>
-                <div className="mt-1 text-xs text-gray-400">
-                  {chat.timestamp.toLocaleTimeString()}
+                <div className="mt-1 text-xs text-slate-500">
+                  {(() => {
+                    const now = new Date();
+                    const diff = now.getTime() - chat.timestamp.getTime();
+                    const mins = Math.floor(diff / 60000);
+                    const hrs = Math.floor(diff / 3600000);
+                    const days = Math.floor(diff / 86400000);
+                    if (mins < 1) return 'Just now';
+                    if (mins < 60) return `${mins}m ago`;
+                    if (hrs < 24) return `${hrs}h ago`;
+                    if (days === 1) return 'Yesterday';
+                    if (days < 7) return `${days}d ago`;
+                    return chat.timestamp.toLocaleDateString();
+                  })()}
                 </div>
               </div>
             ))}
@@ -1576,13 +1619,26 @@ function App() {
 
       <PanelGroup direction="horizontal" className="flex-1">
         <Panel defaultSize={40} minSize={20}>
-          <div className="h-full p-6 bg-white">
-            <div className="h-full rounded-lg bg-white border-2 border-gray-200">
+          <div className="h-full p-4 bg-transparent">
+            <div className="h-full rounded-xl bg-white/80 backdrop-blur-sm border border-slate-200/60 shadow-sm">
               {isProcessingFile ? (
-                <div className="h-full flex items-center justify-center">
-                  <p className="text-gray-600 text-lg">
-                    Processing your file{loadingDots}
+                <div className="h-full flex flex-col items-center justify-center px-8">
+                  <FileText className="w-12 h-12 text-teal-500 mb-4 animate-pulse" />
+                  <p className="text-gray-800 text-lg font-semibold mb-1">
+                    Processing your PDF{loadingDots}
                   </p>
+                  <p className="text-gray-500 text-sm mb-6">
+                    {progressMessage || 'Extracting concepts and building your knowledge graph'}
+                  </p>
+                  <div className="w-full max-w-xs">
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-teal-500 rounded-full transition-all duration-700 ease-out"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                    <p className="text-center text-xs text-gray-400 mt-2">{uploadProgress}%</p>
+                  </div>
                 </div>
               ) : (
                 <GraphVisualization data={graphData} conceptProgress={conceptProgress} />
@@ -1591,20 +1647,20 @@ function App() {
           </div>
         </Panel>
 
-        <ResizeHandle className="w-2 hover:bg-teal-500/20 transition-colors duration-150" />
+        <ResizeHandle className="w-2 hover:bg-teal-400/20 transition-colors duration-150" />
 
         <Panel minSize={30}>
           <div className="h-full flex flex-col">
-            <div className="bg-white p-4 border-b border-gray-200 flex justify-between items-center" style={{ zIndex: 1000, position: 'relative' }}>
-              <h1 className="text-xl font-semibold text-gray-800 flex-1 min-w-0 truncate">{currentChat?.title || 'Loading...'}</h1>
+            <div className="bg-white/80 backdrop-blur-sm p-4 border-b border-slate-200/60 flex justify-between items-center" style={{ zIndex: 1000, position: 'relative' }}>
+              <h1 className="text-xl font-semibold text-slate-800 flex-1 min-w-0 truncate">{currentChat?.title || 'Loading...'}</h1>
               <div className="flex items-center gap-4 flex-wrap max-w-full flex-shrink-0" style={{ zIndex: 100, position: 'relative' }}>
                 {/* Quiz Length Control */}
                 <div className="flex items-center gap-3">
-                  <label className="text-sm font-medium text-gray-700">Quiz Length:</label>
+                  <label className="text-sm font-medium text-slate-600">Quiz Length:</label>
                   <select
                     value={quizLength}
                     onChange={(e) => setQuizLength(Number(e.target.value) as 5 | 10 | 15)}
-                    className="text-sm border border-gray-300 rounded-md px-3 py-1.5 cursor-pointer bg-white hover:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all max-w-[9rem]"
+                    className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 cursor-pointer bg-white hover:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 transition-all max-w-[9rem]"
                     style={{ zIndex: 101, position: 'relative', pointerEvents: 'auto' }}
                     disabled={isAnswering}
                   >
@@ -1616,11 +1672,11 @@ function App() {
                 
                 {/* Question Type Control */}
                 <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-700">Question Type:</label>
+                  <label className="text-sm font-medium text-slate-600">Question Type:</label>
                   <select
                     value={questionFormat}
                     onChange={(e) => setQuestionFormat(e.target.value as 'mixed' | 'mcq' | 'true-false' | 'open-ended')}
-                    className="text-sm border border-gray-300 rounded-md px-3 py-1.5 cursor-pointer bg-white hover:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all max-w-[11rem]"
+                    className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 cursor-pointer bg-white hover:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 transition-all max-w-[11rem]"
                     style={{ zIndex: 101, position: 'relative', pointerEvents: 'auto' }}
                     disabled={isAnswering}
                   >
@@ -1632,7 +1688,7 @@ function App() {
                 </div>
                 
                 {/* Divider */}
-                <div className="h-8 w-px bg-gray-300"></div>
+                <div className="h-8 w-px bg-slate-200"></div>
                 
                 <button
                   onClick={() => {
@@ -1642,14 +1698,14 @@ function App() {
                       alert("Please upload a document to view progress.");
                     }
                   }}
-                  className="px-4 py-2 bg-transparent text-teal-600 border border-teal-500 rounded-lg hover:bg-teal-50 transition-colors duration-200 flex items-center justify-center gap-2 font-medium"
+                  className="px-4 py-2 bg-white text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 hover:border-teal-300 transition-all duration-200 flex items-center justify-center gap-2 font-medium shadow-sm btn-lift"
                 >
                   View Profile
                 </button>
                 
                 <button
                   onClick={() => navigate('/')}
-                  className="px-4 py-2 bg-transparent text-teal-600 border border-teal-500 rounded-lg hover:bg-teal-50 transition-colors duration-200 flex items-center justify-center gap-2 font-medium"
+                  className="px-4 py-2 bg-white text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 hover:border-teal-300 transition-all duration-200 flex items-center justify-center gap-2 font-medium shadow-sm btn-lift"
                 >
                   Return to Homepage
                 </button>
@@ -1659,7 +1715,7 @@ function App() {
                   <button
                     onClick={startQuiz}
                     disabled={isGeneratingQuestions}
-                    className={`px-4 py-2 ${isGeneratingQuestions ? 'bg-gray-300 text-gray-700' : 'bg-teal-500 text-white hover:bg-teal-600'} rounded-lg transition-colors duration-200 flex items-center gap-2 font-medium`}
+                    className={`px-4 py-2 ${isGeneratingQuestions ? 'bg-slate-200 text-slate-500' : 'bg-gradient-to-r from-teal-500 to-teal-600 text-white hover:from-teal-600 hover:to-teal-700 shadow-md shadow-teal-500/20 animate-gentle-pulse'} rounded-lg transition-all duration-200 flex items-center gap-2 font-medium btn-lift`}
                     title={isGeneratingQuestions ? 'Generating questions...' : 'Start quiz based on this document'}
                   >
                     {isGeneratingQuestions ? 'Generating...' : (quizCompleted ? 'Start New Quiz' : 'Start Quiz')}
@@ -1731,37 +1787,62 @@ function App() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+            {/* Quiz progress step bar */}
+            {isAnswering && qaData.length > 0 && (
+              <div className="px-4 py-2.5 bg-white/60 backdrop-blur-sm border-b border-slate-200/60">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-xs font-semibold text-slate-600">Question {currentQuestionIndex + 1} of {qaData.length}</span>
+                  <span className="text-xs text-slate-400">({Math.round(((currentQuestionIndex) / qaData.length) * 100)}% complete)</span>
+                </div>
+                <div className="flex gap-1">
+                  {qaData.map((_, idx) => (
+                    <div
+                      key={idx}
+                      className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
+                        idx < currentQuestionIndex
+                          ? 'bg-teal-500'
+                          : idx === currentQuestionIndex
+                          ? 'bg-teal-400 animate-pulse'
+                          : 'bg-slate-200'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-slate-50/80 to-slate-100/50">
               {currentChat?.messages.map((message) => (
                 <div
                   key={message.id}
-                  className={`flex ${
-                    message.sender === 'user' ? 'justify-end' : 'justify-start'
-                  }`}
+                  className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} ${message.sender === 'user' ? 'animate-slide-in-right' : 'animate-slide-in-left'} group/msg`}
                 >
                   <div
-                    className={`flex items-start space-x-2 max-w-[80%] ${
-                      message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''
+                    className={`flex items-end gap-2 max-w-[75%] ${
+                      message.sender === 'user' ? 'flex-row-reverse' : ''
                     }`}
                   >
+                    {/* Avatar */}
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      message.sender === 'user'
+                        ? 'bg-gradient-to-br from-teal-400 to-teal-600'
+                        : 'bg-gradient-to-br from-slate-200 to-slate-300'
+                    }`}>
+                      {message.sender === 'user' ? (
+                        <User className="w-3.5 h-3.5 text-white" />
+                      ) : (
+                        <Bot className="w-3.5 h-3.5 text-slate-600" />
+                      )}
+                    </div>
+                    {/* Bubble */}
                     <div
-                      className={`p-2 rounded-lg ${
+                      className={`px-3.5 py-2.5 ${
                         message.sender === 'user'
-                          ? 'bg-teal-500 text-white'
-                          : 'bg-white text-gray-800 border border-gray-200'
+                          ? 'bg-gradient-to-br from-teal-500 to-teal-600 text-white rounded-2xl rounded-br-md shadow-md shadow-teal-500/15'
+                          : 'bg-white text-slate-800 rounded-2xl rounded-bl-md border border-slate-200/60 shadow-sm'
                       }`}
                     >
-                      <div className="flex items-center space-x-2 mb-1">
-                        {message.sender === 'user' ? (
-                          <User className="w-4 h-4" />
-                        ) : (
-                          <Bot className="w-4 h-4" />
-                        )}
-                        <span className="text-xs text-gray-300">
-                          {message.timestamp.toLocaleTimeString()}
-                        </span>
-                      </div>
-                      <div className="text-sm whitespace-pre-wrap">
+                      <div className="text-sm whitespace-pre-wrap leading-relaxed">
                         {message.isQuestion ? formatQuestion(message.content) : message.content}
                       </div>
                       {message.file && (
@@ -1786,16 +1867,28 @@ function App() {
                           )}
                         </div>
                       )}
+                      {/* Hover timestamp */}
+                      <div className={`text-[10px] mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200 ${
+                        message.sender === 'user' ? 'text-teal-100' : 'text-slate-400'
+                      }`}>
+                        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
                     </div>
                   </div>
                 </div>
               ))}
               {isTyping && (
-                <div className="flex justify-start">
-                  <div className="bg-white text-gray-800 p-3 rounded-lg border border-gray-200">
-                    <div className="flex items-center space-x-2">
-                      <Bot className="w-4 h-4" />
-                      <span className="text-sm">Typing...</span>
+                <div className="flex justify-start animate-slide-in-left">
+                  <div className="flex items-end gap-2">
+                    <div className="w-7 h-7 rounded-full flex items-center justify-center bg-gradient-to-br from-slate-200 to-slate-300 flex-shrink-0">
+                      <Bot className="w-3.5 h-3.5 text-slate-600" />
+                    </div>
+                    <div className="bg-white px-4 py-3 rounded-2xl rounded-bl-md border border-slate-200/60 shadow-sm">
+                      <div className="flex items-center gap-1">
+                        <span className="w-2 h-2 bg-slate-400 rounded-full typing-dot"></span>
+                        <span className="w-2 h-2 bg-slate-400 rounded-full typing-dot"></span>
+                        <span className="w-2 h-2 bg-slate-400 rounded-full typing-dot"></span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1804,17 +1897,33 @@ function App() {
               <div ref={messagesEndRef} />
             </div>
 
-            <form onSubmit={handleSubmit} className="p-4 bg-white border-t border-gray-200">
+            <form onSubmit={handleSubmit} className="p-4 bg-white/80 backdrop-blur-sm border-t border-slate-200/60">
+              {isProcessingFile && (
+                <div className="mb-2 p-3 bg-teal-50 border border-teal-200 rounded-lg">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-medium text-teal-700">
+                      {progressMessage || 'Processing PDF...'}
+                    </span>
+                    <span className="text-xs font-semibold text-teal-600">{uploadProgress}%</span>
+                  </div>
+                  <div className="h-1.5 bg-teal-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-teal-500 rounded-full transition-all duration-700 ease-out"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
               {selectedFile && !isProcessingFile && (
-                <div className="mb-2 p-2 bg-gray-50 rounded-lg flex items-center justify-between">
+                <div className="mb-2 p-2 bg-slate-50 rounded-lg flex items-center justify-between border border-slate-200/60">
                   <div className="flex items-center space-x-2">
                     {getFileIcon(selectedFile.type)}
-                    <span className="text-sm text-gray-600 truncate">{selectedFile.name}</span>
+                    <span className="text-sm text-slate-600 truncate">{selectedFile.name}</span>
                   </div>
                   <button
                     type="button"
                     onClick={handleRemoveFile}
-                    className="text-gray-400 hover:text-gray-600"
+                    className="text-slate-400 hover:text-slate-600"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -1826,7 +1935,7 @@ function App() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder={isAnswering ? "Type your answer..." : "Type your message..."}
-                  className="flex-1 px-4 py-2 bg-white text-gray-900 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent placeholder-gray-400"
+                  className="flex-1 px-4 py-2 bg-white text-slate-900 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 placeholder-slate-400 transition-all"
                 />
                 <input
                   type="file"
@@ -1838,7 +1947,8 @@ function App() {
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500 flex items-center transition-colors duration-200"
+                    disabled={isProcessingFile}
+                    className="px-4 py-2 bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500/30 flex items-center transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Paperclip className="w-5 h-5" />
                   </button>
@@ -1857,7 +1967,7 @@ function App() {
                 <button
                   type="submit"
                   disabled={isTyping}
-                  className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-500 flex items-center transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30 flex items-center transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-teal-500/20 btn-lift"
                 >
                   <Send className="w-5 h-5" />
                 </button>

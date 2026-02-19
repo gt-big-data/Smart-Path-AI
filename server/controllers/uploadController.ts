@@ -21,12 +21,36 @@ export const upload = multer({
   }
 });
 
+// Helper to get a human-readable progress message
+function getProgressMessage(percent: number): string {
+  if (percent < 10) return 'Uploading PDF...';
+  if (percent < 20) return 'PDF received, starting analysis...';
+  if (percent < 35) return 'Extracting text from pages...';
+  if (percent < 50) return 'Identifying key concepts...';
+  if (percent < 65) return 'Building knowledge connections...';
+  if (percent < 80) return 'Constructing knowledge graph...';
+  if (percent < 95) return 'Finalizing your learning path...';
+  return 'Processing complete!';
+}
+
 export const processPdf: RequestHandler = async (req, res) => {
+  // Set up SSE headers for streaming progress
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering if present
+  res.flushHeaders();
+
+  const sendEvent = (data: object) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
   try {
     console.log('Processing PDF request received');
     if (!req.file) {
       console.log('No file found in request');
-      res.status(400).json({ error: 'No file uploaded' });
+      sendEvent({ type: 'error', error: 'No file uploaded' });
+      res.end();
       return;
     }
 
@@ -35,6 +59,8 @@ export const processPdf: RequestHandler = async (req, res) => {
       size: req.file.size,
       mimetype: req.file.mimetype
     });
+
+    sendEvent({ type: 'progress', percent: 5, message: 'Uploading PDF...' });
 
     // Create FormData instance for Node.js
     const formData = new FormData();
@@ -45,7 +71,22 @@ export const processPdf: RequestHandler = async (req, res) => {
       contentType: 'application/pdf'
     });
 
+    sendEvent({ type: 'progress', percent: 15, message: 'PDF received, starting analysis...' });
+
     console.log('Sending request to processing server...');
+
+    // Simulate incremental progress while waiting for the Python server
+    let currentProgress = 15;
+    const progressInterval = setInterval(() => {
+      if (currentProgress < 90) {
+        // Gradually slow down as we approach 90%
+        const increment = Math.max(1, (90 - currentProgress) * 0.08);
+        currentProgress = Math.min(90, currentProgress + increment);
+        const rounded = Math.round(currentProgress);
+        sendEvent({ type: 'progress', percent: rounded, message: getProgressMessage(rounded) });
+      }
+    }, 1500);
+
     // Send to processing server
     const response = await axios.post('http://localhost:8000/process-pdf', formData, {
       headers: {
@@ -55,9 +96,14 @@ export const processPdf: RequestHandler = async (req, res) => {
       maxContentLength: Infinity
     });
 
+    clearInterval(progressInterval);
+
     console.log('Received response from processing server');
-    // Send the processing result
-    res.json(response.data);
+
+    sendEvent({ type: 'progress', percent: 95, message: 'Finalizing your learning path...' });
+    sendEvent({ type: 'progress', percent: 100, message: 'Processing complete!' });
+    sendEvent({ type: 'complete', data: response.data });
+    res.end();
   } catch (error) {
     console.error('Detailed error information:');
     if (axios.isAxiosError(error)) {
@@ -67,16 +113,19 @@ export const processPdf: RequestHandler = async (req, res) => {
         status: error.response?.status,
         headers: error.response?.headers
       });
-      res.status(500).json({ 
+      sendEvent({
+        type: 'error',
         error: error.response?.data?.error || 'Failed to process PDF',
         details: `${error.message} - Status: ${error.response?.status}`
       });
     } else {
       console.error('Non-Axios Error:', error);
-      res.status(500).json({ 
+      sendEvent({
+        type: 'error',
         error: 'Failed to process PDF',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
+    res.end();
   }
 }; 

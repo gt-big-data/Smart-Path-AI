@@ -33,7 +33,7 @@ export default function Login() {
   };
 
   return (
-      <div className="min-h-screen bg-white flex flex-col">
+      <div className="min-h-screen bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50 flex flex-col">
         <div className="container mx-auto px-6 py-4">
           <Link to="/" className="inline-flex items-center text-teal-600 hover:text-teal-700">
             <ArrowLeft className="h-5 w-5 mr-2" />
@@ -42,14 +42,14 @@ export default function Login() {
         </div>
 
         <div className="flex-1 flex items-center justify-center px-6">
-          <div className="w-full max-w-md">
+          <div className="w-full max-w-md bg-white/80 backdrop-blur-sm rounded-2xl border border-slate-200/60 shadow-lg shadow-slate-200/50 p-8">
             <div className="text-center mb-8">
               <div className="inline-flex items-center justify-center space-x-2 mb-4">
                 <Brain className="h-10 w-10 text-teal-500" />
-                <span className="text-2xl font-bold text-gray-800">SmartPathAI</span>
+                <span className="text-2xl font-bold text-slate-800">SmartPathAI</span>
               </div>
-              <h2 className="text-3xl font-bold text-gray-800">Welcome back</h2>
-              <p className="text-gray-600 mt-2">Please enter your details to sign in</p>
+              <h2 className="text-3xl font-bold text-slate-800">Welcome back</h2>
+              <p className="text-slate-500 mt-2">Please enter your details to sign in</p>
             </div>
 
             {/* Google Login */}
@@ -127,7 +127,7 @@ export default function Login() {
 
               <button
                   type="submit"
-                  className="w-full bg-teal-500 text-white rounded-lg px-4 py-2.5 font-medium hover:bg-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2"
+                  className="w-full bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg px-4 py-2.5 font-medium hover:from-teal-600 hover:to-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 shadow-md shadow-teal-500/20 transition-all btn-lift"
               >
                 Sign in
               </button>
