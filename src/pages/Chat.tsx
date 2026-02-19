@@ -61,6 +61,8 @@ function App() {
   const [currentChatId, setCurrentChatId] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [progressMessage, setProgressMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [graphData, setGraphData] = useState<any>(null);
   const [qaData, setQaData] = useState<QAPair[]>([]);
@@ -240,35 +242,62 @@ function App() {
           ? `http://localhost:4000/upload/process-pdf?graph_id=${currentChatData.graph_id}`
           : 'http://localhost:4000/upload/process-pdf';
 
+        setUploadProgress(0);
+        setProgressMessage('Uploading PDF...');
+
         const response = await fetch(url, {
           method: 'POST',
           body: formData,
         });
 
-        const status = response.status;
-        const contentType = response.headers.get('content-type') || '';
-        console.log('[Upload] Response status:', status, 'content-type:', contentType);
+        // Read the SSE stream for progress updates
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let responseData: any = null;
+        let buffer = '';
 
-        let responseData: any;
-        if (contentType.includes('application/json')) {
-          try {
-            responseData = await response.json();
-          } catch (parseErr) {
-            console.error('[Upload] Failed to parse JSON', parseErr);
-            const rawText = await response.text();
-            console.error('[Upload] Raw non-JSON response snippet:', rawText.slice(0, 300));
-            throw new Error('Upload returned malformed JSON');
-          }
-        } else {
-          // Likely an HTML error page (hence Unexpected token '<')
-          const rawText = await response.text();
-          console.error('[Upload] Non-JSON response (first 300 chars):', rawText.slice(0, 300));
-          throw new Error(`Unexpected non-JSON response (status ${status}).`);
+        if (!reader) {
+          throw new Error('Failed to read response stream');
         }
-        console.log('[Upload] Parsed response JSON:', responseData);
 
-        if (!response.ok) {
-          throw new Error(responseData.error || 'Failed to process file');
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          // Keep the last potentially incomplete line in the buffer
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const event = JSON.parse(line.slice(6));
+                if (event.type === 'progress') {
+                  setUploadProgress(event.percent);
+                  setProgressMessage(event.message);
+                } else if (event.type === 'complete') {
+                  responseData = event.data;
+                  setUploadProgress(100);
+                  setProgressMessage('Processing complete!');
+                } else if (event.type === 'error') {
+                  throw new Error(event.error || 'Failed to process file');
+                }
+              } catch (parseErr) {
+                if (parseErr instanceof SyntaxError) {
+                  console.warn('[Upload] Skipping malformed SSE line:', line);
+                } else {
+                  throw parseErr;
+                }
+              }
+            }
+          }
+        }
+
+        console.log('[Upload] Parsed response data:', responseData);
+
+        if (!responseData) {
+          throw new Error('No response data received from server');
         }
 
         const fileUploadMessage: Message = {
@@ -362,6 +391,8 @@ function App() {
           fileInputRef.current.value = '';
         }
         setIsProcessingFile(false);
+        setUploadProgress(0);
+        setProgressMessage('');
       }
     }
   };
@@ -1585,12 +1616,16 @@ function App() {
                     Processing your PDF{loadingDots}
                   </p>
                   <p className="text-gray-500 text-sm mb-6">
-                    Extracting concepts and building your knowledge graph
+                    {progressMessage || 'Extracting concepts and building your knowledge graph'}
                   </p>
                   <div className="w-full max-w-xs">
                     <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-teal-500 rounded-full animate-[progressIndeterminate_1.5s_ease-in-out_infinite]" />
+                      <div
+                        className="h-full bg-teal-500 rounded-full transition-all duration-700 ease-out"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
                     </div>
+                    <p className="text-center text-xs text-gray-400 mt-2">{uploadProgress}%</p>
                   </div>
                 </div>
               ) : (
@@ -1815,9 +1850,19 @@ function App() {
 
             <form onSubmit={handleSubmit} className="p-4 bg-white border-t border-gray-200">
               {isProcessingFile && (
-                <div className="mb-2 p-3 bg-teal-50 border border-teal-200 rounded-lg flex items-center space-x-3">
-                  <div className="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
-                  <span className="text-sm font-medium text-teal-700">Processing PDF — this may take a moment{loadingDots}</span>
+                <div className="mb-2 p-3 bg-teal-50 border border-teal-200 rounded-lg">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-medium text-teal-700">
+                      {progressMessage || 'Processing PDF...'}
+                    </span>
+                    <span className="text-xs font-semibold text-teal-600">{uploadProgress}%</span>
+                  </div>
+                  <div className="h-1.5 bg-teal-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-teal-500 rounded-full transition-all duration-700 ease-out"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
                 </div>
               )}
               {selectedFile && !isProcessingFile && (
