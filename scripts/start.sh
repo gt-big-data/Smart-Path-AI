@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# NOTE FOR DEPLOYMENT:
+# This entrypoint currently runs the backend with `npm run dev` (ts-node), which is
+# convenient for local docker development but not ideal for production containers.
+# For deployment images, build the server at Docker build time and run compiled
+# output (or `npm run start`) for faster startup, smaller images, and non-dev behavior.
+# Keep `npm run dev` in development-only flows such as docker-compose.dev.yml.
 set -euo pipefail
 
 CLIENT_PORT="${CLIENT_PORT:-5173}"
