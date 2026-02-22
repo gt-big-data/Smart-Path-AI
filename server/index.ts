@@ -31,7 +31,9 @@ import User from './models/User';
 import './config/passport';
 
 const app = express();
-const port = Number(process.env.PORT || 4000);
+const rawPort = process.env.PORT;
+const parsedPort = rawPort ? parseInt(rawPort, 10) : 4000;
+const port = Number.isNaN(parsedPort) ? 4000 : parsedPort;
 const corsOriginConfig = process.env.CORS_ORIGINS || process.env.CLIENT_URL || 'http://localhost:5173';
 const corsOrigins = corsOriginConfig.split(',').map((origin) => origin.trim()).filter(Boolean);
 
