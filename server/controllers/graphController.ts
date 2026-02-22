@@ -1,14 +1,8 @@
 //graphController.ts
 import { Request, Response } from 'express';
-import axios from 'axios';
 import OpenAI from 'openai';
-import dotenv from 'dotenv';
-import path from 'path';
 import ConceptProgress from '../models/ConceptProgress';
 import { pythonServiceClient } from '../utils/axiosConfig';
-
-// Load environment variables
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 // Initialize OpenAI with explicit API key
 const openai = new OpenAI({
@@ -53,7 +47,9 @@ export const viewGraph = async (req: Request, res: Response) => {
     if (!graph_id) {
       return res.status(400).json({ error: 'graph_id is required' });
     }
-    const response = await axios.get(`http://localhost:8000/view-graph?graph_id=${graph_id}`);
+    const response = await pythonServiceClient.get('/view-graph', {
+      params: { graph_id: String(graph_id) }
+    });
     res.json(response.data);
   } catch (error) {
     console.error('Error fetching graph data:', error);
@@ -350,10 +346,11 @@ export const getUserProfile = async (req: Request, res: Response) => {
   }
 
   try {
-    const url = `http://localhost:8000/user/${userId}/profile?graph_id=${graph_id}`;
+    const url = `/user/${userId}/profile`;
     console.log(`Fetching user profile from AI server: ${url}`);
-
-    const response = await axios.get(url);
+    const response = await pythonServiceClient.get(url, {
+      params: { graph_id: String(graph_id) }
+    });
 
     // Forward the data from the AI server directly to the frontend
     res.json(response.data);
@@ -377,8 +374,9 @@ export const getNodeMetadata = async (req: Request, res: Response) => {
 
     const wanted = String(conceptIdsRaw).split(',').map(s => s.trim()).filter(Boolean);
 
-    const url = `http://localhost:8000/view-graph?graph_id=${encodeURIComponent(String(graph_id))}`;
-    const response = await axios.get(url);
+    const response = await pythonServiceClient.get('/view-graph', {
+      params: { graph_id: String(graph_id) }
+    });
     const nodes = response.data?.graph?.nodes || [];
 
     const matches = nodes.filter((node: any) => {
