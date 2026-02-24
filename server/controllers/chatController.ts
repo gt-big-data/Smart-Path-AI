@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import User from '../models/User';
+import User, { IChat } from '../models/User';
 import { v4 as uuidv4 } from 'uuid';
 import mongoose from 'mongoose';
 
@@ -46,6 +46,7 @@ export const createNewChat = async (req: Request, res: Response) => {
     } else {
       const newChat = {
         chat_id: uuidv4(),
+        title: 'New Chat',
         date_created: new Date(),
         graph_id: '',
         messages: [],
@@ -104,22 +105,24 @@ export const addMessageToChat = async (req: Request, res: Response) => {
 
     if (!chat) {
       console.log("chat not found, creating a new chat");
-      chat = {
+      const newChat: IChat = {
         chat_id,
+        title: 'New Chat',
         date_created: new Date(),
-        graph_id: graph_id || '', // Initialize with empty string if no graph_id
+        graph_id: graph_id || '',
         messages: [],
       };
-      user?.chats.push(chat);
+      user.chats.push(newChat);
+      chat = user.chats[user.chats.length - 1];
     }
 
     // If graph_id is provided, update it
-    if (graph_id) {
+    if (graph_id && chat) {
       chat.graph_id = graph_id;
     }
 
     // Only add message if text is provided (allows for graph_id only updates)
-    if (text) {
+    if (text && chat) {
       const newMessage = {
         sender,
         text,
@@ -286,6 +289,51 @@ export const deleteChat = async (req: Request, res: Response): Promise<void> => 
 
   } catch (error) {
     console.error('❌ Delete chat error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+/**
+ * Rename a chat
+ * PATCH /chat/rename/:chat_id
+ */
+export const renameChat = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = (req.session as any)?.passport?.user;
+    const { chat_id } = req.params;
+    const { title } = req.body;
+
+    if (!userId) {
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
+    }
+
+    if (!chat_id || !title || !title.trim()) {
+      res.status(400).json({ message: 'Chat ID and title are required' });
+      return;
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+
+    const chat = user.chats.find((c) => c.chat_id === chat_id);
+
+    if (!chat) {
+      res.status(404).json({ message: 'Chat not found' });
+      return;
+    }
+
+    chat.title = title.trim();
+    user.markModified('chats');
+    await user.save();
+
+    res.status(200).json({ message: 'Chat renamed', chat_id, title: chat.title });
+  } catch (error) {
+    console.error('Rename chat error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
