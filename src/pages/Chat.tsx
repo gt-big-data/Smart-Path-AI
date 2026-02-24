@@ -75,6 +75,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const deletingChatRef = useRef<string | null>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [loadingDots, setLoadingDots] = useState('');
@@ -247,9 +248,13 @@ function App() {
         setUploadProgress(0);
         setProgressMessage('Uploading PDF...');
 
+        const abortController = new AbortController();
+        uploadAbortRef.current = abortController;
+
         const response = await fetch(url, {
           method: 'POST',
           body: formData,
+          signal: abortController.signal,
         });
 
         // Read the SSE stream for progress updates
@@ -351,6 +356,23 @@ function App() {
         setShouldStartQuiz(true);
 
       } catch (error) {
+        // If the user cancelled, just silently exit — no error message needed
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          console.log('PDF upload cancelled by user');
+          const cancelMsg: Message = {
+            id: generateMessageId(),
+            content: 'Upload cancelled.',
+            sender: 'ai',
+            timestamp: new Date(),
+          };
+          setChats(prevChats => prevChats.map(chat =>
+            chat.id === currentChatId
+              ? { ...chat, lastMessage: cancelMsg.content, timestamp: new Date(), messages: [...chat.messages, cancelMsg] }
+              : chat
+          ));
+          return;
+        }
+
         console.error('Detailed upload error:', error);
         let errorMessage = 'Failed to upload file. Please try again.';
         
@@ -388,6 +410,7 @@ function App() {
         
         alert(errorMessage);
       } finally {
+        uploadAbortRef.current = null;
         setSelectedFile(null);
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
@@ -1692,6 +1715,19 @@ function App() {
                     </div>
                     <p className="text-center text-xs text-gray-400 mt-2">{uploadProgress}%</p>
                   </div>
+                  <button
+                    onClick={() => {
+                      uploadAbortRef.current?.abort();
+                      setIsProcessingFile(false);
+                      setSelectedFile(null);
+                      setUploadProgress(0);
+                      setProgressMessage('');
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }}
+                    className="mt-6 px-4 py-2 text-sm text-red-500 border border-red-300 rounded-lg hover:bg-red-50 transition-colors duration-150"
+                  >
+                    Cancel
+                  </button>
                 </div>
               ) : (
                 <GraphVisualization data={graphData} conceptProgress={conceptProgress} />
@@ -1899,14 +1935,18 @@ function App() {
                         {message.isQuestion ? formatQuestion(message.content) : message.content}
                       </div>
                       {message.file && (
-                        <div className="mt-2 p-2 bg-white/10 rounded-lg">
+                        <div className={`mt-2 p-2 rounded-lg ${
+                          message.sender === 'user' ? 'bg-white/20' : 'bg-slate-100'
+                        }`}>
                           <div className="flex items-center space-x-2">
                             {getFileIcon(message.file.type)}
                             <a
                               href={message.file.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-sm text-blue-400 hover:text-blue-300 truncate"
+                              className={`text-sm truncate underline ${
+                                message.sender === 'user' ? 'text-white hover:text-teal-100' : 'text-teal-600 hover:text-teal-500'
+                              }`}
                             >
                               {message.file.name}
                             </a>
