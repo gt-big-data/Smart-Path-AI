@@ -8,6 +8,7 @@ export interface IMessage {
 
 export interface IChat {
   chat_id: string;
+  title: string;
   date_created: Date;
   graph_id: string;
   messages: IMessage[];
@@ -30,6 +31,7 @@ const messageSchema = new mongoose.Schema<IMessage>({
 
 const chatSchema = new mongoose.Schema<IChat>({
   chat_id: { type: String, required: true },
+  title: { type: String, default: 'New Chat' },
   date_created: { type: Date, default: Date.now },
   graph_id: { type: String, default: ''},
   messages: [messageSchema],

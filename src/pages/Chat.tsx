@@ -1,6 +1,6 @@
 //Chat.tsx
 import React, { useState, useEffect, useRef, ChangeEvent, useCallback } from 'react';
-import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File, Trash2 } from 'lucide-react';
+import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File, Trash2, Pencil, Check } from 'lucide-react';
 import {
   Panel,
   PanelGroup,
@@ -75,6 +75,8 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const deletingChatRef = useRef<string | null>(null);
+  const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [loadingDots, setLoadingDots] = useState('');
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
   const [isAnswering, setIsAnswering] = useState<boolean>(false);
@@ -1227,6 +1229,22 @@ function App() {
     return formattedLines.length > 0 ? <div className="space-y-1">{formattedLines}</div> : text;
   };
 
+  const handleRenameChat = async (chatId: string) => {
+    if (!renamingChatId) return; // Already handled (prevents double-fire from blur+submit)
+    const trimmed = renameValue.trim();
+    setRenamingChatId(null);
+    if (!trimmed) return;
+    // Optimistic update
+    setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: trimmed } : c));
+    try {
+      await axios.patch(`http://localhost:4000/chat/rename/${chatId}`, { title: trimmed }, { withCredentials: true });
+    } catch (err) {
+      console.error('Error renaming chat:', err);
+      // Revert on failure by refetching
+      fetchUserChats(false);
+    }
+  };
+
   const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -1554,7 +1572,7 @@ function App() {
               <div
                 key={chat.id}
                 onClick={(e) => {
-                  if ((e.target as HTMLElement).closest('button[title="Delete chat"]')) {
+                  if ((e.target as HTMLElement).closest('button[title="Delete chat"]') || (e.target as HTMLElement).closest('button[title="Rename chat"]') || renamingChatId === chat.id) {
                     return;
                   }
                   handleChatSelect(chat.id);
@@ -1564,14 +1582,36 @@ function App() {
                 }`}
               >
                 <div className="flex items-center space-x-3">
-                  <MessageSquare className="w-5 h-5 text-teal-400" />
+                  <MessageSquare className="w-5 h-5 text-teal-400 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-medium text-slate-200 truncate">
-                      {chat.title}
-                    </h3>
-                    <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
+                    {renamingChatId === chat.id ? (
+                      <form
+                        onSubmit={(e) => { e.preventDefault(); handleRenameChat(chat.id); }}
+                        className="flex items-center gap-1"
+                      >
+                        <input
+                          autoFocus
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onBlur={() => handleRenameChat(chat.id)}
+                          onKeyDown={(e) => { if (e.key === 'Escape') { setRenamingChatId(null); } }}
+                          className="w-full bg-slate-700 text-slate-200 text-sm rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-teal-400"
+                          maxLength={60}
+                        />
+                        <button type="submit" className="p-0.5 hover:bg-teal-500/20 rounded flex-shrink-0" title="Confirm rename">
+                          <Check className="w-3.5 h-3.5 text-teal-400" />
+                        </button>
+                      </form>
+                    ) : (
+                      <>
+                        <h3 className="text-sm font-medium text-slate-200 truncate">
+                          {chat.title}
+                        </h3>
+                        <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
+                      </>
+                    )}
                   </div>
-                  <div 
+                  <div className="flex items-center gap-0.5"
                     onClick={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
@@ -1585,14 +1625,27 @@ function App() {
                       onClick={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
+                        setRenamingChatId(chat.id);
+                        setRenameValue(chat.title);
+                      }}
+                      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-teal-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
+                      title="Rename chat"
+                      type="button"
+                    >
+                      <Pencil className="w-3.5 h-3.5 text-teal-400 hover:text-teal-300" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
                         console.log('Delete button onClick triggered for chat:', chat.id);
                         handleDeleteChat(chat.id, e);
                       }}
-                      className="opacity-70 group-hover:opacity-100 p-1.5 hover:bg-red-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
+                      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-red-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
                       title="Delete chat"
                       type="button"
                     >
-                      <Trash2 className="w-4 h-4 text-red-400 hover:text-red-300" />
+                      <Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-300" />
                     </button>
                   </div>
                 </div>
