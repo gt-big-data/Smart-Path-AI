@@ -461,8 +461,14 @@ const ProfilePage: React.FC = () => {
   const renderContent = () => {
     if (loading) {
       return (
-        <div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
-          <p className="text-lg text-slate-600">Loading your profile...</p>
+        <div className="flex h-screen flex-col items-center justify-center bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
+          {/* Animated spinner */}
+          <div className="relative mb-6">
+            <div className="h-16 w-16 rounded-full border-4 border-teal-100" />
+            <div className="absolute inset-0 h-16 w-16 animate-spin rounded-full border-4 border-transparent border-t-teal-500" />
+          </div>
+          <p className="text-lg font-medium text-slate-700">Loading your profile</p>
+          <p className="mt-1 text-sm text-slate-400 animate-pulse">Gathering your progress data...</p>
         </div>
       );
     }
