@@ -53,6 +53,7 @@ export const processPdf: RequestHandler = async (req, res) => {
 
   let progressInterval: ReturnType<typeof setInterval> | null = null;
   let clientDisconnected = false;
+  let responseCompleted = false;
 
   const sendEvent = (data: object) => {
     if (!clientDisconnected) {
@@ -66,6 +67,12 @@ export const processPdf: RequestHandler = async (req, res) => {
 
   // Listen for client disconnect (e.g. when the browser aborts the fetch)
   res.on('close', () => {
+    // `close` also fires after normal completion; only treat as disconnect
+    // while the streaming response is still in progress.
+    if (responseCompleted) {
+      return;
+    }
+
     if (!clientDisconnected) {
       clientDisconnected = true;
       console.log(`[Upload ${uploadId}] Client disconnected — aborting AI server request`);
@@ -157,6 +164,7 @@ export const processPdf: RequestHandler = async (req, res) => {
     sendEvent({ type: 'progress', percent: 95, message: 'Finalizing your learning path...' });
     sendEvent({ type: 'progress', percent: 100, message: 'Processing complete!' });
     sendEvent({ type: 'complete', data: response.data });
+    responseCompleted = true;
     res.end();
   } catch (error) {
     if (progressInterval) {
@@ -169,6 +177,18 @@ export const processPdf: RequestHandler = async (req, res) => {
       console.log(`[Upload ${uploadId}] Request was cancelled`);
       if (!clientDisconnected) {
         sendEvent({ type: 'error', error: 'Processing was cancelled' });
+        responseCompleted = true;
+        res.end();
+      }
+      return;
+    }
+
+    // AI server intentionally returns 499 when cancellation is acknowledged.
+    if (axios.isAxiosError(error) && error.response?.status === 499) {
+      console.log(`[Upload ${uploadId}] AI server returned cancellation (499)`);
+      if (!clientDisconnected) {
+        sendEvent({ type: 'error', error: 'Processing was cancelled' });
+        responseCompleted = true;
         res.end();
       }
       return;
@@ -196,6 +216,7 @@ export const processPdf: RequestHandler = async (req, res) => {
       });
     }
     if (!clientDisconnected) {
+      responseCompleted = true;
       res.end();
     }
   } finally {
