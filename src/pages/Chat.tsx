@@ -1716,8 +1716,16 @@ function App() {
                     <p className="text-center text-xs text-gray-400 mt-2">{uploadProgress}%</p>
                   </div>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
+                      // 1. Abort the client-side fetch (closes SSE connection)
                       uploadAbortRef.current?.abort();
+                      // 2. Tell the server to cancel the AI processing
+                      try {
+                        await fetch('http://localhost:4000/upload/cancel-processing', { method: 'POST' });
+                      } catch {
+                        // Best-effort — server may already have cleaned up
+                      }
+                      // 3. Reset client UI state
                       setIsProcessingFile(false);
                       setSelectedFile(null);
                       setUploadProgress(0);
