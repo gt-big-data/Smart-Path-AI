@@ -537,6 +537,42 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       animated: true,
     }));
 
+    // Count connections per node
+    const connectionCount = new Map<string, number>();
+
+    processedEdges.forEach(edge => {
+      connectionCount.set(edge.source, (connectionCount.get(edge.source) || 0) + 1);
+      connectionCount.set(edge.target, (connectionCount.get(edge.target) || 0) + 1);
+    });
+
+    // find min and max connections
+    const counts = Array.from(connectionCount.values());
+    const minConnections = Math.min(...counts, 1);
+    const maxConnections = Math.max(...counts, 1);
+
+    const getNodeSize = (nodeId: string) => {
+      const count = connectionCount.get(nodeId) || 1;
+    
+      const MIN_WIDTH = 140;
+      const MAX_WIDTH = 320;
+    
+      const MIN_HEIGHT = 50;
+      const MAX_HEIGHT = 120;
+    
+      if (maxConnections === minConnections) {
+        return { width: 200, height: 70 };
+      }
+    
+      const ratio =
+        (count - minConnections) /
+        (maxConnections - minConnections);
+    
+      return {
+        width: MIN_WIDTH + ratio * (MAX_WIDTH - MIN_WIDTH),
+        height: MIN_HEIGHT + ratio * (MAX_HEIGHT - MIN_HEIGHT),
+      };
+    };
+
     // Create a set of node IDs that have connections
     const connectedNodeIds = new Set<string>();
     processedEdges.forEach(edge => {
@@ -632,23 +668,26 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
           console.log(`     Node properties:`, Object.keys(node.properties));
         }
         
+        const size = getNodeSize(node.id);
+
         return {
           id: node.id,
           type: 'default',
-          data: { 
+          data: {
             label: nodeLabel,
             description: node.properties.description || node.properties.text,
             type: nodeType,
             subject: subject,
-            confidenceScore: confidenceScore, // Add confidence score to node data
+            confidenceScore: confidenceScore,
+            connections: connectionCount.get(node.id) || 0,
           },
           position: { x: 0, y: 0 },
           style: {
             background: nodeColor,
             color: '#ffffff',
             border: '1px solid rgba(255,255,255,0.2)',
-            width: '200px',
-            height: '70px',
+            width: `${size.width}px`,
+            height: `${size.height}px`,
             padding: 0,
             display: 'flex',
             alignItems: 'center',
