@@ -9,6 +9,7 @@
     { "src": "/api/(.*)",    "dest": "server/index.ts" },
     { "src": "/upload/(.*)", "dest": "server/index.ts" },
     { "src": "/chat/(.*)",   "dest": "server/index.ts" },
+    { "handle": "filesystem" },
     { "src": "/(.*)",        "dest": "/index.html"     }
   ]
 }
