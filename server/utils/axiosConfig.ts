@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Configure axios instance for Python service with proper timeouts
 // Using 127.0.0.1 instead of localhost to avoid IPv6 issues
-const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'https://smartpath-backend-361386464842.us-east1.run.app';
 
 export const pythonServiceClient = axios.create({
   baseURL: PYTHON_SERVICE_URL,
