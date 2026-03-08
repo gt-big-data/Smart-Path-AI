@@ -49,4 +49,14 @@ router.get('/me', (req: Request, res: Response) => {
 });
 
 
+router.get('/gcp-token-test', async (req, res) => {
+  try {
+    const { getGcpAccessToken } = await import('../utils/gcpAuth');
+    const token = await getGcpAccessToken();
+    res.json({ ok: true, tokenPrefix: token.slice(0, 10) + '...' });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 export default router;
