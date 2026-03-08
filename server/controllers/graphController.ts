@@ -132,7 +132,7 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
     if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
       return res.status(503).json({ 
         error: 'AI service is currently unavailable',
-        message: 'The Python service on port 8000 is not responding. Please ensure it is running.'
+        message: 'The AI service is not responding. Please try again later.'
       });
     }
     res.status(500).json({ error: 'Failed to generate questions and answers' });
@@ -426,7 +426,7 @@ export const searchGraph = async (req: Request, res: Response) => {
     if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
       return res.status(503).json({ 
         error: 'AI service is currently unavailable',
-        message: 'The Python service on port 8000 is not responding. Please ensure it is running.'
+        message: 'The AI service is not responding. Please try again later.'
       });
     }
     // Return the actual error from Python service if available
@@ -469,7 +469,7 @@ export const semanticSearchGraph = async (req: Request, res: Response) => {
     if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
       return res.status(503).json({ 
         error: 'AI service is currently unavailable',
-        message: 'The Python service on port 8000 is not responding. Please ensure it is running.'
+        message: 'The AI service is not responding. Please try again later.'
       });
     }
     // Return the actual error from Python service if available

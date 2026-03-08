@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Brain, ArrowLeft, Check, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { API_BASE } from '../config';
 
 
 const validatePassword = (password: string): { isValid: boolean; error: string } => {
@@ -88,7 +89,7 @@ export default function Signup() {
   };
 
   const handleGoogleSignup = () => {
-    window.location.href = 'http://localhost:4000/auth/google';
+    window.location.href = `${API_BASE}/auth/google`;
   };
 
   // Add password check on input change

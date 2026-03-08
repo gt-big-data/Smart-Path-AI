@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from './AuthContext';
+import { API_BASE } from '../config';
 
 interface IConceptProgress {
   conceptId: string;
@@ -32,27 +33,27 @@ export const ProgressProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (isAuthenticated) {
       try {
         setLoading(true);
-        const response = await axios.get('http://localhost:4000/api/concept-progress', { withCredentials: true });
+        const response = await axios.get(`${API_BASE}/api/concept-progress`, { withCredentials: true });
         const progressData = response.data;
         setProgress(progressData);
-        
+
         // If no progress records exist, try to process existing quiz history
         if (Array.isArray(progressData) && progressData.length === 0) {
           console.log('[Progress] ⚠️ No progress records found, checking for quiz history to process...');
           try {
             // First check if there's any quiz history
-            const quizHistoryResponse = await axios.get('http://localhost:4000/api/quiz-history', { withCredentials: true });
+            const quizHistoryResponse = await axios.get(`${API_BASE}/api/quiz-history`, { withCredentials: true });
             const quizHistories = quizHistoryResponse.data?.quizHistories || [];
             console.log(`[Progress] Found ${quizHistories.length} quiz history records`);
-            
+
             if (quizHistories.length > 0) {
               console.log('[Progress] 🔄 Processing quiz history to create progress records...');
-              const processResponse = await axios.post('http://localhost:4000/api/quiz-history/process-all', {}, { withCredentials: true });
+              const processResponse = await axios.post(`${API_BASE}/api/quiz-history/process-all`, {}, { withCredentials: true });
               console.log('[Progress] ✅ Processed quiz history:', processResponse.data);
-              
+
               // Refetch progress after processing
               console.log('[Progress] 🔄 Refetching progress after processing...');
-              const newResponse = await axios.get('http://localhost:4000/api/concept-progress', { withCredentials: true });
+              const newResponse = await axios.get(`${API_BASE}/api/concept-progress`, { withCredentials: true });
               const newProgressData = newResponse.data;
               console.log(`[Progress] ✅ Now have ${newProgressData.length} progress records`);
               setProgress(newProgressData);
@@ -82,7 +83,7 @@ export const ProgressProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateProgress = async (conceptId: string, isCorrect: boolean, isRetry: boolean) => {
     try {
-      await axios.post('http://localhost:4000/api/progress/update', {
+      await axios.post(`${API_BASE}/api/progress/update`, {
         conceptId,
         isCorrect,
         isRetry,

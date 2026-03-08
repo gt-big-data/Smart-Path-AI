@@ -14,6 +14,13 @@ if (resolvedEnvPath) {
     dotenv.config();
 }
 
+const REQUIRED_ENV = ['MONGO_URI', 'SESSION_SECRET', 'OPENAI_API_KEY'];
+const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
+if (missing.length > 0) {
+    console.error(`Missing required environment variables: ${missing.join(', ')}`);
+    process.exit(1);
+}
+
 import mongoose from 'mongoose';
 import express from 'express';
 import passport from 'passport';
@@ -59,12 +66,13 @@ app.use(express.json());
 
 // Session middleware (before passport middleware)
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'your-secret-key',
+    secret: process.env.SESSION_SECRET!,
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: process.env.NODE_ENV === 'production', // Only use secure in production
+        secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
+        sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
 }));
@@ -105,21 +113,27 @@ app.use('/api', progressRoutes);
 // Quiz History Routes
 app.use('/api/quiz-history', quizHistoryRoutes);
 
-app.get('/', (req, res) => {
-    res.send('API is running');
-  });
-
 // New route: Calls the Flask server and returns its response
 app.get('/flask/hi', async (req, res) => {
     try {
         // Call the Flask server on port 5000 (make sure Flask is running)
-        const flaskResponse = await axios.get('http://localhost:5000/');
+        const flaskUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:5000';
+        const flaskResponse = await axios.get(`${flaskUrl}/`);
         // Return the HTML/template response from Flask
         res.send(flaskResponse.data);
     } catch (error) {
         console.error(error);
         res.status(500).send('Error calling Flask server');
     }
+});
+
+// Serve static files from the React app build directory
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// The "catchall" handler: for any request that doesn't
+// match one above, send back React's index.html file.
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
 
 // Start server

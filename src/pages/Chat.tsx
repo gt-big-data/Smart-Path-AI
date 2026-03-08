@@ -153,7 +153,7 @@ function App() {
   // Add function to fetch concept progress
   const fetchConceptProgress = useCallback(async () => {
     try {
-      const response = await axios.get('http://localhost:4000/api/concept-progress', {
+      const response = await axios.get('/api/concept-progress', {
         withCredentials: true
       });
       setConceptProgress(response.data);
@@ -202,7 +202,7 @@ function App() {
   const fetchGraphData = async (graphId?: string) => {
     if (!graphId) return;
     try {
-      const response = await axios.get(`http://localhost:4000/api/view-graph?graph_id=${graphId}`);
+      const response = await axios.get(`/api/view-graph?graph_id=${graphId}`);
       console.log('Graph data response:', response.data);
       // Add graph_id to the response data so search can use it
       setGraphData({ ...response.data, graph_id: graphId });
@@ -239,8 +239,8 @@ function App() {
 
         const currentChatData = chats.find(chat => chat.id === currentChatId);
         const url = currentChatData?.graph_id 
-          ? `http://localhost:4000/upload/process-pdf?graph_id=${currentChatData.graph_id}`
-          : 'http://localhost:4000/upload/process-pdf';
+          ? `/upload/process-pdf?graph_id=${currentChatData.graph_id}`
+          : '/upload/process-pdf';
 
         setUploadProgress(0);
         setProgressMessage('Uploading PDF...');
@@ -312,7 +312,7 @@ function App() {
           }
         };
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post('/chat/message', {
           chat_id: currentChatId,
           sender: 'user',
           text: fileUploadMessage.content,
@@ -330,7 +330,7 @@ function App() {
         ));
 
         if (responseData.graph_id) {
-          await axios.post('http://localhost:4000/chat/message', {
+          await axios.post('/chat/message', {
             chat_id: currentChatId,
             graph_id: responseData.graph_id,
           }, { withCredentials: true });
@@ -378,7 +378,7 @@ function App() {
             : chat
         ));
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post('/chat/message', {
           chat_id: currentChatId,
           sender: 'ai',
           text: errorMessage,
@@ -442,7 +442,7 @@ function App() {
 
     // 5. Save the user message to the backend.
     try {
-      await axios.post('http://localhost:4000/chat/message', {
+      await axios.post('/chat/message', {
         chat_id: currentChatId,
         sender: 'user',
         text: trimmedInput,
@@ -472,7 +472,7 @@ function App() {
 
         console.log('Submitting answer for conceptId:', currentQA.conceptId);
         
-        const response = await axios.post('http://localhost:4000/api/verify-answer', {
+        const response = await axios.post('/api/verify-answer', {
           question: currentQA.question,
           userAnswer: trimmedInput,
           correctAnswer: currentQA.answer,
@@ -501,7 +501,7 @@ function App() {
               : chat
           ));
           try {
-            await axios.post('http://localhost:4000/chat/message', {
+            await axios.post('/chat/message', {
               chat_id: currentChatId,
               sender: 'ai',
               text: diagnosticMessage.content,
@@ -562,13 +562,13 @@ function App() {
                 : chat
             ));
 
-            await axios.post('http://localhost:4000/chat/message', {
+            await axios.post('/chat/message', {
               chat_id: currentChatId,
               sender: 'ai',
               text: feedbackMessage.content,
             }, { withCredentials: true });
 
-            await axios.post('http://localhost:4000/chat/message', {
+            await axios.post('/chat/message', {
               chat_id: currentChatId,
               sender: 'ai',
               text: nextQuestionMessage.content,
@@ -599,7 +599,7 @@ function App() {
                 : chat
             ));
 
-            await axios.post('http://localhost:4000/chat/message', {
+            await axios.post('/chat/message', {
               chat_id: currentChatId,
               sender: 'ai',
               text: finalMessage.content,
@@ -643,7 +643,7 @@ function App() {
                 console.log(`📊 Valid questions: ${validQaData.length}/${qaData.length}`);
                 
                 try {
-                  const response = await axios.post('http://localhost:4000/api/quiz-history', quizHistoryData, { 
+                  const response = await axios.post('/api/quiz-history', quizHistoryData, { 
                     withCredentials: true 
                   });
                   
@@ -695,7 +695,7 @@ function App() {
               : chat
           ));
 
-          await axios.post('http://localhost:4000/chat/message', {
+          await axios.post('/chat/message', {
             chat_id: currentChatId,
             sender: 'ai',
             text: feedbackMessage.content,
@@ -719,7 +719,7 @@ function App() {
             : chat
         ));
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post('/chat/message', {
           chat_id: currentChatId,
           sender: 'ai',
           text: errorMessage.content,
@@ -732,7 +732,7 @@ function App() {
       setIsTyping(true);
         console.log('[Conversation] Sending request', { message: trimmedInput, graph_id: currentChat.graph_id });
       const response = await axios.post(
-          'http://localhost:4000/api/generate-conversation-response',
+          '/api/generate-conversation-response',
           { message: trimmedInput, graph_id: currentChat.graph_id },
         { withCredentials: true }
       );
@@ -756,7 +756,7 @@ function App() {
       ));
 
       // Save AI response to backend
-      await axios.post('http://localhost:4000/chat/message', {
+      await axios.post('/chat/message', {
         chat_id: currentChatId,
         sender: 'ai',
         text: aiMessage.content,
@@ -775,7 +775,7 @@ function App() {
             : chat
         ));
         try {
-          await axios.post('http://localhost:4000/chat/message', {
+          await axios.post('/chat/message', {
             chat_id: currentChatId,
             sender: 'ai',
             text: errorMessage.content,
@@ -802,7 +802,7 @@ function App() {
             : chat
         ));
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post('/chat/message', {
           chat_id: currentChatId,
           sender: 'ai',
           text: aiMessage.content,
@@ -825,7 +825,7 @@ function App() {
             : chat
         ));
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post('/chat/message', {
           chat_id: currentChatId,
           sender: 'ai',
           text: errorMessage.content,
@@ -850,7 +850,7 @@ function App() {
       });
 
       // Treat skip as incorrect answer for confidence tracking
-      await axios.post('http://localhost:4000/api/verify-answer', {
+      await axios.post('/api/verify-answer', {
         question: currentQA.question,
         userAnswer: 'SKIPPED',
         correctAnswer: currentQA.answer,
@@ -906,13 +906,13 @@ function App() {
             : chat
         ));
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post('/chat/message', {
           chat_id: currentChatId,
           sender: 'ai',
           text: skipMessage.content,
         }, { withCredentials: true });
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post('/chat/message', {
           chat_id: currentChatId,
           sender: 'ai',
           text: nextQuestionMessage.content,
@@ -942,7 +942,7 @@ function App() {
             : chat
         ));
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post('/chat/message', {
           chat_id: currentChatId,
           sender: 'ai',
           text: finalMessage.content,
@@ -971,7 +971,7 @@ function App() {
               })
             };
 
-            await axios.post('http://localhost:4000/api/quiz-history', quizHistoryData, { 
+            await axios.post('/api/quiz-history', quizHistoryData, { 
               withCredentials: true 
             });
             console.log('✅ Quiz history saved with skipped question');
@@ -1003,7 +1003,7 @@ function App() {
           : chat
       ));
 
-      await axios.post('http://localhost:4000/chat/message', {
+      await axios.post('/chat/message', {
         chat_id: currentChatId,
         sender: 'ai',
         text: errorMessage.content,
@@ -1037,7 +1037,7 @@ function App() {
       setQuizCompleted(false);
       setIsGeneratingQuestions(false);
   
-      const response = await axios.post('http://localhost:4000/chat/new', {}, { withCredentials: true });
+      const response = await axios.post('/chat/new', {}, { withCredentials: true });
 
       console.log('Create chat response:', response.data);
   
@@ -1065,7 +1065,7 @@ function App() {
 
       const welcomeMessage = 'Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.';
 
-      await axios.post('http://localhost:4000/chat/message', {
+      await axios.post('/chat/message', {
         chat_id: newChat.id,
         sender: 'ai',
         text: welcomeMessage,
@@ -1086,7 +1086,7 @@ function App() {
   const fetchUserChats = useCallback(async (createIfEmpty = false) => {
     setChatsLoading(true);
     try {
-      const resUser = await axios.get('http://localhost:4000/chat/user', {
+      const resUser = await axios.get('/chat/user', {
         withCredentials: true
       });
       const userId = resUser.data;
@@ -1097,7 +1097,7 @@ function App() {
         return;
       }
 
-      const resChats = await axios.get(`http://localhost:4000/chat/${userId}/chats`, {
+      const resChats = await axios.get(`/chat/${userId}/chats`, {
         withCredentials: true
       });
       const userChats = Array.isArray(resChats.data) ? resChats.data : [];
@@ -1242,7 +1242,7 @@ function App() {
     deletingChatRef.current = chatId;
 
     console.log('✅ Proceeding with delete...');
-    console.log('Sending DELETE request to:', `http://localhost:4000/chat/delete/${chatId}`);
+    console.log('Sending DELETE request to:', `/chat/delete/${chatId}`);
 
     console.log('Updating local state optimistically...');
     setChats(prev => {
@@ -1258,7 +1258,7 @@ function App() {
     }
 
     try {
-      const response = await axios.delete(`http://localhost:4000/chat/delete/${chatId}`, {
+      const response = await axios.delete(`/chat/delete/${chatId}`, {
         withCredentials: true,
       });
 
@@ -1339,7 +1339,7 @@ function App() {
       try {
         setIsGeneratingQuestions(true);
       const qaResponse = await axios.get(
-        `http://localhost:4000/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}&length=${quizLength}&format=${questionFormat}`,
+        `/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}&length=${quizLength}&format=${questionFormat}`,
         { withCredentials: true }
       );
         const qaResponseData = qaResponse.data;
@@ -1409,7 +1409,7 @@ function App() {
                 : chat
             ));
 
-            await axios.post('http://localhost:4000/chat/message', {
+            await axios.post('/chat/message', {
               chat_id: currentChatId,
               sender: 'ai',
               text: firstQuestionMessage.content,
@@ -1761,7 +1761,7 @@ function App() {
 
                       // Save the end message to backend (consistent with other messages)
                       try {
-                        await axios.post('http://localhost:4000/chat/message', {
+                        await axios.post('/chat/message', {
                           chat_id: currentChatId,
                           sender: 'ai',
                           text: endMessage.content,

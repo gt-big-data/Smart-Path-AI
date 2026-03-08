@@ -29,7 +29,7 @@ const ProfilePage: React.FC = () => {
         let progressList: any[] = [];
         try {
           console.log('[ProfilePage] Fetching progress from /api/concept-progress endpoint...');
-          const progressRes = await axios.get('http://localhost:4000/api/concept-progress', { withCredentials: true });
+          const progressRes = await axios.get('/api/concept-progress', { withCredentials: true });
           progressList = Array.isArray(progressRes.data) ? progressRes.data : [];
           console.log(`[ProfilePage] Received ${progressList.length} progress records from backend`);
           if (progressList.length > 0) {
@@ -50,7 +50,7 @@ const ProfilePage: React.FC = () => {
         // Fetch all graph IDs for the user
         let graphIds: string[] = [];
         try {
-          const graphIdsRes = await axios.get('http://localhost:4000/chat/graph-ids', { withCredentials: true });
+          const graphIdsRes = await axios.get('/chat/graph-ids', { withCredentials: true });
           graphIds = graphIdsRes.data?.graphIds || [];
           console.log('ProfilePage: Successfully fetched graph IDs:', graphIds);
         } catch (graphIdsError: any) {
@@ -107,7 +107,7 @@ const ProfilePage: React.FC = () => {
 
         // Fetch all graphs in parallel
         const graphPromises = graphIds.map(id =>
-          axios.get('http://localhost:4000/api/view-graph', {
+          axios.get('/api/view-graph', {
             params: { graph_id: id },
             withCredentials: true
           }).catch(err => {
@@ -268,7 +268,7 @@ const ProfilePage: React.FC = () => {
 
             // Fetch metadata from all graphs
             const metaPromises = graphIds.map(id =>
-              axios.get('http://localhost:4000/api/node-metadata', {
+              axios.get('/api/node-metadata', {
                 params: { graph_id: id, concept_ids: idsParam },
                 withCredentials: true,
               }).catch(err => {
@@ -317,7 +317,7 @@ const ProfilePage: React.FC = () => {
         if (stillUnknown.length > 0) {
           try {
             console.log(`[ProfilePage] Attempting to find topic names from quiz history for ${stillUnknown.length} concepts...`);
-            const quizHistoryRes = await axios.get('http://localhost:4000/api/quiz-history', { withCredentials: true });
+            const quizHistoryRes = await axios.get('/api/quiz-history', { withCredentials: true });
             const quizHistories = Array.isArray(quizHistoryRes.data?.quizHistories) 
               ? quizHistoryRes.data.quizHistories 
               : [];
@@ -572,4 +572,3 @@ const ProfilePage: React.FC = () => {
 };
 
 export default ProfilePage;
-

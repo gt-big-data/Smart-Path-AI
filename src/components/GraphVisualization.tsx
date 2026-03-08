@@ -1,5 +1,6 @@
 //GraphVisualization.tsx
 import React, { useCallback, useEffect, memo, useState } from 'react';
+import { API_BASE } from '../config';
 import ReactFlow, {
   Node,
   Edge,
@@ -430,7 +431,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
         ? 'semantic-search-graph' 
         : 'search-graph';
       
-      const url = `http://localhost:4000/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
+      const url = `${API_BASE}/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
       console.log('[Graph Search] Fetching:', url);
       
       const response = await fetch(url, { credentials: 'include' });
