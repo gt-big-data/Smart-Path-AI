@@ -18,7 +18,7 @@ export async function getGcpAccessToken(): Promise<string> {
   }
 
   // Vercel runtime: exchange OIDC token with GCP STS
-  const { getVercelOidcToken } = await import('@vercel/functions');
+  const { getVercelOidcToken } = await import('@vercel/functions/oidc');
   const oidcToken = await getVercelOidcToken();
 
   const stsRes = await fetch('https://sts.googleapis.com/v1/token', {
