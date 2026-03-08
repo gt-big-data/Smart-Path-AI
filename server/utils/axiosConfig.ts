@@ -12,10 +12,15 @@ export const pythonServiceClient = axios.create({
   },
 });
 
-// Add request interceptor for logging
+// Add request interceptor for logging and Cloud Run auth
 pythonServiceClient.interceptors.request.use(
-  (config) => {
+  async (config) => {
     console.log(`[Python Service] ${config.method?.toUpperCase()} ${config.url}`);
+    if (process.env.VERCEL === '1' && process.env.GCP_CLOUD_RUN_URL && config.baseURL === process.env.GCP_CLOUD_RUN_URL) {
+      const { getGcpAccessToken } = await import('./gcpAuth');
+      const token = await getGcpAccessToken();
+      config.headers.set('Authorization', `Bearer ${token}`);
+    }
     return config;
   },
   (error) => {

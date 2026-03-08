@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "server/index.ts", "use": "@vercel/node" },
+    { "src": "package.json",    "use": "@vercel/static-build", "config": { "distDir": "dist" } }
+  ],
+  "routes": [
+    { "src": "/auth/(.*)",   "dest": "server/index.ts" },
+    { "src": "/api/(.*)",    "dest": "server/index.ts" },
+    { "src": "/upload/(.*)", "dest": "server/index.ts" },
+    { "src": "/chat/(.*)",   "dest": "server/index.ts" },
+    { "src": "/(.*)",        "dest": "/index.html"     }
+  ]
+}
