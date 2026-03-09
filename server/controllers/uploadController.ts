@@ -3,6 +3,7 @@ import axios from 'axios';
 import multer from 'multer';
 import FormData from 'form-data';
 import { randomUUID } from 'crypto';
+import { pythonServiceClient } from '../utils/axiosConfig';
 
 // Configure multer for handling file uploads
 export const upload = multer({
@@ -173,8 +174,9 @@ export const processPdf: RequestHandler = async (req, res) => {
       }
     }, 1500);
 
-    // Send to processing server, passing the abort signal so we can cancel mid-flight
-    const response = await axios.post(`${PYTHON_SERVICE_URL}/process-pdf`, formData, {
+    // Send to processing server
+    const response = await pythonServiceClient.post('/process-pdf', formData, {
+      params: req.query,
       headers: {
         ...formData.getHeaders()
       },

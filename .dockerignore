@@ -1,0 +1,13 @@
+node_modules
+server/node_modules
+dist
+build
+.git
+.gitignore
+.vscode
+.idea
+*.log
+.env
+.env.*
+server/.env
+coverage

@@ -1,0 +1,29 @@
+services:
+  app:
+    volumes:
+      - ./Smart-Path-AI:/app
+      - /app/node_modules
+      - /app/server/node_modules
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+    command: >
+      bash -lc "
+      npx concurrently
+      \"cd /app/server && npx ts-node-dev --respawn --transpile-only --project tsconfig.json index.ts\"
+      \"cd /app && npm run dev:client -- --host 0.0.0.0 --port ${CLIENT_PORT:-5173} --strictPort\"
+      "
+
+  ai-server:
+    volumes:
+      - ./smartpathai-aiserver:/app
+    command:
+      [
+        "uvicorn",
+        "api:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+      ]
