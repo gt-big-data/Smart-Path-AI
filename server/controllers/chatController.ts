@@ -117,12 +117,12 @@ export const addMessageToChat = async (req: Request, res: Response) => {
     }
 
     // If graph_id is provided, update it
-    if (graph_id && chat) {
+    if (graph_id) {
       chat.graph_id = graph_id;
     }
 
     // Only add message if text is provided (allows for graph_id only updates)
-    if (text && chat) {
+    if (text) {
       const newMessage = {
         sender,
         text,

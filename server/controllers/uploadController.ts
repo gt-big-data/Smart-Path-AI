@@ -2,6 +2,7 @@ import { Request, Response, RequestHandler } from 'express';
 import axios from 'axios';
 import multer from 'multer';
 import FormData from 'form-data';
+import { randomUUID } from 'crypto';
 
 // Configure multer for handling file uploads
 export const upload = multer({
@@ -21,10 +22,41 @@ export const upload = multer({
   }
 });
 
+type ActiveUpload = {
+  controller: AbortController;
+  ownerKey: string;
+};
+
 // Track active upload AbortControllers so they can be cancelled externally
-// Key: a unique upload session id (we use a counter for simplicity)
-const activeUploads = new Map<string, AbortController>();
-let uploadCounter = 0;
+// Key: a unique upload session id
+const activeUploads = new Map<string, ActiveUpload>();
+
+const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8000';
+
+const getRequestOwnerKey = (req: Request): string => {
+  const passportUser = (req.session as any)?.passport?.user;
+  if (passportUser) {
+    const userId = typeof passportUser === 'object' && passportUser._id
+      ? passportUser._id
+      : passportUser;
+    return `user:${String(userId)}`;
+  }
+  return `session:${req.sessionID}`;
+};
+
+const notifyPythonCancelIfNoActiveUploads = async () => {
+  if (activeUploads.size !== 0) {
+    return;
+  }
+
+  try {
+    await axios.post(`${PYTHON_SERVICE_URL}/cancel-processing`, {}, { timeout: 3000 });
+    console.log('[Cancel] AI server cancel endpoint called successfully');
+  } catch {
+    // AI server may not have a cancel endpoint — that's fine
+    console.log('[Cancel] AI server cancel endpoint not available (this is OK)');
+  }
+};
 
 // Helper to get a human-readable progress message
 function getProgressMessage(percent: number): string {
@@ -39,6 +71,8 @@ function getProgressMessage(percent: number): string {
 }
 
 export const processPdf: RequestHandler = async (req, res) => {
+  const ownerKey = getRequestOwnerKey(req);
+
   // Set up SSE headers for streaming progress
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -48,12 +82,18 @@ export const processPdf: RequestHandler = async (req, res) => {
 
   // Create an AbortController to cancel the request to the AI server
   const abortController = new AbortController();
-  const uploadId = String(++uploadCounter);
-  activeUploads.set(uploadId, abortController);
+  const uploadId = randomUUID();
+  activeUploads.set(uploadId, { controller: abortController, ownerKey });
 
   let progressInterval: ReturnType<typeof setInterval> | null = null;
   let clientDisconnected = false;
   let responseCompleted = false;
+  const clearProgressInterval = () => {
+    if (progressInterval) {
+      clearInterval(progressInterval);
+      progressInterval = null;
+    }
+  };
 
   const sendEvent = (data: object) => {
     if (!clientDisconnected) {
@@ -81,18 +121,13 @@ export const processPdf: RequestHandler = async (req, res) => {
       abortController.abort();
 
       // Clear progress interval
-      if (progressInterval) {
-        clearInterval(progressInterval);
-        progressInterval = null;
-      }
+      clearProgressInterval();
 
       // Clean up active upload tracking
       activeUploads.delete(uploadId);
 
       // Also try to tell the AI server to cancel (fire-and-forget)
-      axios.post('http://localhost:8000/cancel-processing', {}, { timeout: 3000 }).catch(() => {
-        // AI server may not have a cancel endpoint — that's fine
-      });
+      void notifyPythonCancelIfNoActiveUploads();
     }
   });
 
@@ -139,7 +174,7 @@ export const processPdf: RequestHandler = async (req, res) => {
     }, 1500);
 
     // Send to processing server, passing the abort signal so we can cancel mid-flight
-    const response = await axios.post('http://localhost:8000/process-pdf', formData, {
+    const response = await axios.post(`${PYTHON_SERVICE_URL}/process-pdf`, formData, {
       headers: {
         ...formData.getHeaders()
       },
@@ -148,10 +183,7 @@ export const processPdf: RequestHandler = async (req, res) => {
       signal: abortController.signal,
     });
 
-    if (progressInterval) {
-      clearInterval(progressInterval);
-      progressInterval = null;
-    }
+    clearProgressInterval();
 
     // If client already disconnected while we were waiting, don't bother sending events
     if (clientDisconnected) {
@@ -167,10 +199,7 @@ export const processPdf: RequestHandler = async (req, res) => {
     responseCompleted = true;
     res.end();
   } catch (error) {
-    if (progressInterval) {
-      clearInterval(progressInterval);
-      progressInterval = null;
-    }
+    clearProgressInterval();
 
     // If the request was cancelled (client disconnect or explicit cancel), don't send error events
     if (axios.isCancel(error) || abortController.signal.aborted) {
@@ -220,29 +249,34 @@ export const processPdf: RequestHandler = async (req, res) => {
       res.end();
     }
   } finally {
+    clearProgressInterval();
     activeUploads.delete(uploadId);
   }
 };
 
 // Cancel endpoint: explicitly aborts all active upload processing
 export const cancelProcessing: RequestHandler = async (req, res) => {
-  console.log(`[Cancel] Cancelling ${activeUploads.size} active upload(s)`);
+  const userId = (req.session as any)?.passport?.user;
+  if (!userId) {
+    res.status(401).json({ success: false, message: 'Unauthorized' });
+    return;
+  }
 
-  // Abort all active uploads
-  for (const [id, controller] of activeUploads) {
+  const ownerKey = getRequestOwnerKey(req);
+  console.log(`[Cancel] Cancelling uploads for ${ownerKey}`);
+
+  let cancelled = 0;
+  for (const [id, activeUpload] of activeUploads) {
+    if (activeUpload.ownerKey !== ownerKey) {
+      continue;
+    }
     console.log(`[Cancel] Aborting upload ${id}`);
-    controller.abort();
+    activeUpload.controller.abort();
     activeUploads.delete(id);
+    cancelled += 1;
   }
 
-  // Also try to tell the AI server to cancel (fire-and-forget)
-  try {
-    await axios.post('http://localhost:8000/cancel-processing', {}, { timeout: 3000 });
-    console.log('[Cancel] AI server cancel endpoint called successfully');
-  } catch {
-    // AI server may not have a cancel endpoint — that's fine
-    console.log('[Cancel] AI server cancel endpoint not available (this is OK)');
-  }
+  await notifyPythonCancelIfNoActiveUploads();
 
-  res.json({ success: true, message: 'Processing cancelled' });
+  res.json({ success: true, message: 'Processing cancelled', cancelled });
 };

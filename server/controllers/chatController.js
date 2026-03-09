@@ -120,11 +120,11 @@ const addMessageToChat = (req, res) => __awaiter(void 0, void 0, void 0, functio
             chat = user.chats[user.chats.length - 1];
         }
         // If graph_id is provided, update it
-        if (graph_id && chat) {
+        if (graph_id) {
             chat.graph_id = graph_id;
         }
         // Only add message if text is provided (allows for graph_id only updates)
-        if (text && chat) {
+        if (text) {
             const newMessage = {
                 sender,
                 text,
@@ -289,7 +289,7 @@ const renameChat = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             return;
         }
         if (!chat_id || !title || !title.trim()) {
-            res.status(400).json({ message: 'Chat ID and title are required' });
+            res.status(400).json({ message: 'Chat ID is required and title cannot be empty or contain only whitespace' });
             return;
         }
         const user = yield User_1.default.findById(userId);
