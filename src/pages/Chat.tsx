@@ -1,6 +1,6 @@
 //Chat.tsx
 import React, { useState, useEffect, useRef, ChangeEvent, useCallback } from 'react';
-import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File, Trash2 } from 'lucide-react';
+import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File, Trash2, Pencil, Check } from 'lucide-react';
 import {
   Panel,
   PanelGroup,
@@ -56,6 +56,8 @@ interface ConceptProgress {
   lastAttempted?: Date;
 }
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
+
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [currentChatId, setCurrentChatId] = useState('');
@@ -75,6 +77,10 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const deletingChatRef = useRef<string | null>(null);
+  const renameInFlightRef = useRef<string | null>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
+  const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [loadingDots, setLoadingDots] = useState('');
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
   const [isAnswering, setIsAnswering] = useState<boolean>(false);
@@ -153,7 +159,7 @@ function App() {
   // Add function to fetch concept progress
   const fetchConceptProgress = useCallback(async () => {
     try {
-      const response = await axios.get('http://localhost:4000/api/concept-progress', {
+      const response = await axios.get(`${API_BASE_URL}/api/concept-progress`, {
         withCredentials: true
       });
       setConceptProgress(response.data);
@@ -202,7 +208,7 @@ function App() {
   const fetchGraphData = async (graphId?: string) => {
     if (!graphId) return;
     try {
-      const response = await axios.get(`http://localhost:4000/api/view-graph?graph_id=${graphId}`);
+      const response = await axios.get(`${API_BASE_URL}/api/view-graph?graph_id=${graphId}`);
       console.log('Graph data response:', response.data);
       // Add graph_id to the response data so search can use it
       setGraphData({ ...response.data, graph_id: graphId });
@@ -239,15 +245,19 @@ function App() {
 
         const currentChatData = chats.find(chat => chat.id === currentChatId);
         const url = currentChatData?.graph_id 
-          ? `http://localhost:4000/upload/process-pdf?graph_id=${currentChatData.graph_id}`
-          : 'http://localhost:4000/upload/process-pdf';
+          ? `${API_BASE_URL}/upload/process-pdf?graph_id=${currentChatData.graph_id}`
+          : `${API_BASE_URL}/upload/process-pdf`;
 
         setUploadProgress(0);
         setProgressMessage('Uploading PDF...');
 
+        const abortController = new AbortController();
+        uploadAbortRef.current = abortController;
+
         const response = await fetch(url, {
           method: 'POST',
           body: formData,
+          signal: abortController.signal,
         });
 
         // Read the SSE stream for progress updates
@@ -312,7 +322,7 @@ function App() {
           }
         };
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post(`${API_BASE_URL}/chat/message`, {
           chat_id: currentChatId,
           sender: 'user',
           text: fileUploadMessage.content,
@@ -330,7 +340,7 @@ function App() {
         ));
 
         if (responseData.graph_id) {
-          await axios.post('http://localhost:4000/chat/message', {
+          await axios.post(`${API_BASE_URL}/chat/message`, {
             chat_id: currentChatId,
             graph_id: responseData.graph_id,
           }, { withCredentials: true });
@@ -349,6 +359,23 @@ function App() {
         setShouldStartQuiz(true);
 
       } catch (error) {
+        // If the user cancelled, just silently exit — no error message needed
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          console.log('PDF upload cancelled by user');
+          const cancelMsg: Message = {
+            id: generateMessageId(),
+            content: 'Upload cancelled.',
+            sender: 'ai',
+            timestamp: new Date(),
+          };
+          setChats(prevChats => prevChats.map(chat =>
+            chat.id === currentChatId
+              ? { ...chat, lastMessage: cancelMsg.content, timestamp: new Date(), messages: [...chat.messages, cancelMsg] }
+              : chat
+          ));
+          return;
+        }
+
         console.error('Detailed upload error:', error);
         let errorMessage = 'Failed to upload file. Please try again.';
         
@@ -378,7 +405,7 @@ function App() {
             : chat
         ));
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post(`${API_BASE_URL}/chat/message`, {
           chat_id: currentChatId,
           sender: 'ai',
           text: errorMessage,
@@ -386,6 +413,7 @@ function App() {
         
         alert(errorMessage);
       } finally {
+        uploadAbortRef.current = null;
         setSelectedFile(null);
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
@@ -442,7 +470,7 @@ function App() {
 
     // 5. Save the user message to the backend.
     try {
-      await axios.post('http://localhost:4000/chat/message', {
+      await axios.post(`${API_BASE_URL}/chat/message`, {
         chat_id: currentChatId,
         sender: 'user',
         text: trimmedInput,
@@ -472,7 +500,7 @@ function App() {
 
         console.log('Submitting answer for conceptId:', currentQA.conceptId);
         
-        const response = await axios.post('http://localhost:4000/api/verify-answer', {
+        const response = await axios.post(`${API_BASE_URL}/api/verify-answer`, {
           question: currentQA.question,
           userAnswer: trimmedInput,
           correctAnswer: currentQA.answer,
@@ -501,7 +529,7 @@ function App() {
               : chat
           ));
           try {
-            await axios.post('http://localhost:4000/chat/message', {
+            await axios.post(`${API_BASE_URL}/chat/message`, {
               chat_id: currentChatId,
               sender: 'ai',
               text: diagnosticMessage.content,
@@ -562,13 +590,13 @@ function App() {
                 : chat
             ));
 
-            await axios.post('http://localhost:4000/chat/message', {
+            await axios.post(`${API_BASE_URL}/chat/message`, {
               chat_id: currentChatId,
               sender: 'ai',
               text: feedbackMessage.content,
             }, { withCredentials: true });
 
-            await axios.post('http://localhost:4000/chat/message', {
+            await axios.post(`${API_BASE_URL}/chat/message`, {
               chat_id: currentChatId,
               sender: 'ai',
               text: nextQuestionMessage.content,
@@ -599,7 +627,7 @@ function App() {
                 : chat
             ));
 
-            await axios.post('http://localhost:4000/chat/message', {
+            await axios.post(`${API_BASE_URL}/chat/message`, {
               chat_id: currentChatId,
               sender: 'ai',
               text: finalMessage.content,
@@ -643,7 +671,7 @@ function App() {
                 console.log(`📊 Valid questions: ${validQaData.length}/${qaData.length}`);
                 
                 try {
-                  const response = await axios.post('http://localhost:4000/api/quiz-history', quizHistoryData, { 
+                  const response = await axios.post(`${API_BASE_URL}/api/quiz-history`, quizHistoryData, { 
                     withCredentials: true 
                   });
                   
@@ -695,7 +723,7 @@ function App() {
               : chat
           ));
 
-          await axios.post('http://localhost:4000/chat/message', {
+          await axios.post(`${API_BASE_URL}/chat/message`, {
             chat_id: currentChatId,
             sender: 'ai',
             text: feedbackMessage.content,
@@ -719,7 +747,7 @@ function App() {
             : chat
         ));
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post(`${API_BASE_URL}/chat/message`, {
           chat_id: currentChatId,
           sender: 'ai',
           text: errorMessage.content,
@@ -732,7 +760,7 @@ function App() {
       setIsTyping(true);
         console.log('[Conversation] Sending request', { message: trimmedInput, graph_id: currentChat.graph_id });
       const response = await axios.post(
-          'http://localhost:4000/api/generate-conversation-response',
+          `${API_BASE_URL}/api/generate-conversation-response`,
           { message: trimmedInput, graph_id: currentChat.graph_id },
         { withCredentials: true }
       );
@@ -756,7 +784,7 @@ function App() {
       ));
 
       // Save AI response to backend
-      await axios.post('http://localhost:4000/chat/message', {
+      await axios.post(`${API_BASE_URL}/chat/message`, {
         chat_id: currentChatId,
         sender: 'ai',
         text: aiMessage.content,
@@ -775,7 +803,7 @@ function App() {
             : chat
         ));
         try {
-          await axios.post('http://localhost:4000/chat/message', {
+          await axios.post(`${API_BASE_URL}/chat/message`, {
             chat_id: currentChatId,
             sender: 'ai',
             text: errorMessage.content,
@@ -802,7 +830,7 @@ function App() {
             : chat
         ));
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post(`${API_BASE_URL}/chat/message`, {
           chat_id: currentChatId,
           sender: 'ai',
           text: aiMessage.content,
@@ -825,7 +853,7 @@ function App() {
             : chat
         ));
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post(`${API_BASE_URL}/chat/message`, {
           chat_id: currentChatId,
           sender: 'ai',
           text: errorMessage.content,
@@ -850,7 +878,7 @@ function App() {
       });
 
       // Treat skip as incorrect answer for confidence tracking
-      await axios.post('http://localhost:4000/api/verify-answer', {
+      await axios.post(`${API_BASE_URL}/api/verify-answer`, {
         question: currentQA.question,
         userAnswer: 'SKIPPED',
         correctAnswer: currentQA.answer,
@@ -906,13 +934,13 @@ function App() {
             : chat
         ));
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post(`${API_BASE_URL}/chat/message`, {
           chat_id: currentChatId,
           sender: 'ai',
           text: skipMessage.content,
         }, { withCredentials: true });
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post(`${API_BASE_URL}/chat/message`, {
           chat_id: currentChatId,
           sender: 'ai',
           text: nextQuestionMessage.content,
@@ -942,7 +970,7 @@ function App() {
             : chat
         ));
 
-        await axios.post('http://localhost:4000/chat/message', {
+        await axios.post(`${API_BASE_URL}/chat/message`, {
           chat_id: currentChatId,
           sender: 'ai',
           text: finalMessage.content,
@@ -971,7 +999,7 @@ function App() {
               })
             };
 
-            await axios.post('http://localhost:4000/api/quiz-history', quizHistoryData, { 
+            await axios.post(`${API_BASE_URL}/api/quiz-history`, quizHistoryData, { 
               withCredentials: true 
             });
             console.log('✅ Quiz history saved with skipped question');
@@ -1003,7 +1031,7 @@ function App() {
           : chat
       ));
 
-      await axios.post('http://localhost:4000/chat/message', {
+      await axios.post(`${API_BASE_URL}/chat/message`, {
         chat_id: currentChatId,
         sender: 'ai',
         text: errorMessage.content,
@@ -1037,7 +1065,7 @@ function App() {
       setQuizCompleted(false);
       setIsGeneratingQuestions(false);
   
-      const response = await axios.post('http://localhost:4000/chat/new', {}, { withCredentials: true });
+      const response = await axios.post(`${API_BASE_URL}/chat/new`, {}, { withCredentials: true });
 
       console.log('Create chat response:', response.data);
   
@@ -1065,7 +1093,7 @@ function App() {
 
       const welcomeMessage = 'Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.';
 
-      await axios.post('http://localhost:4000/chat/message', {
+      await axios.post(`${API_BASE_URL}/chat/message`, {
         chat_id: newChat.id,
         sender: 'ai',
         text: welcomeMessage,
@@ -1086,7 +1114,7 @@ function App() {
   const fetchUserChats = useCallback(async (createIfEmpty = false) => {
     setChatsLoading(true);
     try {
-      const resUser = await axios.get('http://localhost:4000/chat/user', {
+      const resUser = await axios.get(`${API_BASE_URL}/chat/user`, {
         withCredentials: true
       });
       const userId = resUser.data;
@@ -1097,7 +1125,7 @@ function App() {
         return;
       }
 
-      const resChats = await axios.get(`http://localhost:4000/chat/${userId}/chats`, {
+      const resChats = await axios.get(`${API_BASE_URL}/chat/${userId}/chats`, {
         withCredentials: true
       });
       const userChats = Array.isArray(resChats.data) ? resChats.data : [];
@@ -1227,6 +1255,32 @@ function App() {
     return formattedLines.length > 0 ? <div className="space-y-1">{formattedLines}</div> : text;
   };
 
+  const handleRenameChat = async (chatId: string) => {
+    if (renamingChatId !== chatId) return;
+    if (renameInFlightRef.current === chatId) return;
+
+    const trimmed = renameValue.trim();
+    const currentTitle = chats.find(c => c.id === chatId)?.title ?? '';
+    renameInFlightRef.current = chatId;
+    setRenamingChatId(null);
+    if (!trimmed || trimmed === currentTitle) {
+      renameInFlightRef.current = null;
+      return;
+    }
+
+    // Optimistic update
+    setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: trimmed } : c));
+    try {
+      await axios.patch(`${API_BASE_URL}/chat/rename/${chatId}`, { title: trimmed }, { withCredentials: true });
+    } catch (err) {
+      console.error('Error renaming chat:', err);
+      // Revert on failure by refetching
+      fetchUserChats(false);
+    } finally {
+      renameInFlightRef.current = null;
+    }
+  };
+
   const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -1242,7 +1296,7 @@ function App() {
     deletingChatRef.current = chatId;
 
     console.log('✅ Proceeding with delete...');
-    console.log('Sending DELETE request to:', `http://localhost:4000/chat/delete/${chatId}`);
+    console.log('Sending DELETE request to:', `${API_BASE_URL}/chat/delete/${chatId}`);
 
     console.log('Updating local state optimistically...');
     setChats(prev => {
@@ -1258,7 +1312,7 @@ function App() {
     }
 
     try {
-      const response = await axios.delete(`http://localhost:4000/chat/delete/${chatId}`, {
+      const response = await axios.delete(`${API_BASE_URL}/chat/delete/${chatId}`, {
         withCredentials: true,
       });
 
@@ -1339,7 +1393,7 @@ function App() {
       try {
         setIsGeneratingQuestions(true);
       const qaResponse = await axios.get(
-        `http://localhost:4000/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}&length=${quizLength}&format=${questionFormat}`,
+        `${API_BASE_URL}/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}&length=${quizLength}&format=${questionFormat}`,
         { withCredentials: true }
       );
         const qaResponseData = qaResponse.data;
@@ -1409,7 +1463,7 @@ function App() {
                 : chat
             ));
 
-            await axios.post('http://localhost:4000/chat/message', {
+            await axios.post(`${API_BASE_URL}/chat/message`, {
               chat_id: currentChatId,
               sender: 'ai',
               text: firstQuestionMessage.content,
@@ -1554,7 +1608,7 @@ function App() {
               <div
                 key={chat.id}
                 onClick={(e) => {
-                  if ((e.target as HTMLElement).closest('button[title="Delete chat"]')) {
+                  if ((e.target as HTMLElement).closest('button[title="Delete chat"]') || (e.target as HTMLElement).closest('button[title="Rename chat"]') || renamingChatId === chat.id) {
                     return;
                   }
                   handleChatSelect(chat.id);
@@ -1564,14 +1618,40 @@ function App() {
                 }`}
               >
                 <div className="flex items-center space-x-3">
-                  <MessageSquare className="w-5 h-5 text-teal-400" />
+                  <MessageSquare className="w-5 h-5 text-teal-400 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-medium text-slate-200 truncate">
-                      {chat.title}
-                    </h3>
-                    <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
+                    {renamingChatId === chat.id ? (
+                      <form
+                        onSubmit={(e) => { e.preventDefault(); handleRenameChat(chat.id); }}
+                        className="flex items-center gap-1"
+                      >
+                        <input
+                          autoFocus
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onBlur={() => handleRenameChat(chat.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setRenamingChatId(null);
+                              setRenameValue(chat.title);
+                            }
+                          }}
+                          className="w-full bg-slate-700 text-slate-200 text-sm rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-teal-400"
+                        />
+                        <button type="submit" className="p-0.5 hover:bg-teal-500/20 rounded flex-shrink-0" title="Confirm rename">
+                          <Check className="w-3.5 h-3.5 text-teal-400" />
+                        </button>
+                      </form>
+                    ) : (
+                      <>
+                        <h3 className="text-sm font-medium text-slate-200 truncate">
+                          {chat.title}
+                        </h3>
+                        <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
+                      </>
+                    )}
                   </div>
-                  <div 
+                  <div className="flex items-center gap-0.5"
                     onClick={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
@@ -1585,14 +1665,27 @@ function App() {
                       onClick={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
+                        setRenamingChatId(chat.id);
+                        setRenameValue(chat.title);
+                      }}
+                      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-teal-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
+                      title="Rename chat"
+                      type="button"
+                    >
+                      <Pencil className="w-3.5 h-3.5 text-teal-400 hover:text-teal-300" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
                         console.log('Delete button onClick triggered for chat:', chat.id);
                         handleDeleteChat(chat.id, e);
                       }}
-                      className="opacity-70 group-hover:opacity-100 p-1.5 hover:bg-red-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
+                      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-red-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
                       title="Delete chat"
                       type="button"
                     >
-                      <Trash2 className="w-4 h-4 text-red-400 hover:text-red-300" />
+                      <Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-300" />
                     </button>
                   </div>
                 </div>
@@ -1639,6 +1732,27 @@ function App() {
                     </div>
                     <p className="text-center text-xs text-gray-400 mt-2">{uploadProgress}%</p>
                   </div>
+                  <button
+                    onClick={async () => {
+                      // 1. Abort the client-side fetch (closes SSE connection)
+                      uploadAbortRef.current?.abort();
+                      // 2. Tell the server to cancel the AI processing
+                      try {
+                        await fetch(`${API_BASE_URL}/upload/cancel-processing`, { method: 'POST', credentials: 'include' });
+                      } catch {
+                        // Best-effort — server may already have cleaned up
+                      }
+                      // 3. Reset client UI state
+                      setIsProcessingFile(false);
+                      setSelectedFile(null);
+                      setUploadProgress(0);
+                      setProgressMessage('');
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }}
+                    className="mt-6 px-4 py-2 text-sm text-red-500 border border-red-300 rounded-lg hover:bg-red-50 transition-colors duration-150"
+                  >
+                    Cancel
+                  </button>
                 </div>
               ) : (
                 <GraphVisualization data={graphData} conceptProgress={conceptProgress} />
@@ -1761,7 +1875,7 @@ function App() {
 
                       // Save the end message to backend (consistent with other messages)
                       try {
-                        await axios.post('http://localhost:4000/chat/message', {
+                        await axios.post(`${API_BASE_URL}/chat/message`, {
                           chat_id: currentChatId,
                           sender: 'ai',
                           text: endMessage.content,
@@ -1846,14 +1960,18 @@ function App() {
                         {message.isQuestion ? formatQuestion(message.content) : message.content}
                       </div>
                       {message.file && (
-                        <div className="mt-2 p-2 bg-white/10 rounded-lg">
+                        <div className={`mt-2 p-2 rounded-lg ${
+                          message.sender === 'user' ? 'bg-white/20' : 'bg-slate-100'
+                        }`}>
                           <div className="flex items-center space-x-2">
                             {getFileIcon(message.file.type)}
                             <a
                               href={message.file.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-sm text-blue-400 hover:text-blue-300 truncate"
+                              className={`text-sm truncate underline ${
+                                message.sender === 'user' ? 'text-white hover:text-teal-100' : 'text-teal-600 hover:text-teal-500'
+                              }`}
                             >
                               {message.file.name}
                             </a>
