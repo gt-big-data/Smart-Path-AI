@@ -1617,7 +1617,12 @@ function App() {
                           value={renameValue}
                           onChange={(e) => setRenameValue(e.target.value)}
                           onBlur={() => handleRenameChat(chat.id)}
-                          onKeyDown={(e) => { if (e.key === 'Escape') { setRenamingChatId(null); } }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setRenamingChatId(null);
+                              setRenameValue(chat.title);
+                            }
+                          }}
                           className="w-full bg-slate-700 text-slate-200 text-sm rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-teal-400"
                           maxLength={60}
                         />
