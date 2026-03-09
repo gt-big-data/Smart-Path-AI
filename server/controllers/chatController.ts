@@ -309,7 +309,7 @@ export const renameChat = async (req: Request, res: Response): Promise<void> => 
     }
 
     if (!chat_id || !title || !title.trim()) {
-      res.status(400).json({ message: 'Chat ID and title are required' });
+      res.status(400).json({ message: 'Chat ID is required and title cannot be empty or contain only whitespace' });
       return;
     }
 
