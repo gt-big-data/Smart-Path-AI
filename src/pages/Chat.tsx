@@ -1624,7 +1624,6 @@ function App() {
                             }
                           }}
                           className="w-full bg-slate-700 text-slate-200 text-sm rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-teal-400"
-                          maxLength={60}
                         />
                         <button type="submit" className="p-0.5 hover:bg-teal-500/20 rounded flex-shrink-0" title="Confirm rename">
                           <Check className="w-3.5 h-3.5 text-teal-400" />
