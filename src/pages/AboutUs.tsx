@@ -30,7 +30,8 @@ const teamMembers: TeamMember[] = [
     semester: 'Spring 2026',
     isLead: true,
     description: 'Overall project lead for SmartPathAI.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
+    linkedin: 'https://www.linkedin.com/in/vinh-t-pham/',
+    photo: '/team/vihn.png',
   },
   // --- UI ---
   {
@@ -52,7 +53,6 @@ const teamMembers: TeamMember[] = [
     year: 'Junior',
     semester: 'Spring 2026',
     description: 'Landing page redesign, processing visuals, and node labeling.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
   },
   // --- Deployment ---
   {
@@ -63,7 +63,6 @@ const teamMembers: TeamMember[] = [
     year: 'Junior',
     semester: 'Spring 2026',
     description: 'AWS services, containerization, and CI/CD pipeline.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
   },
   {
     name: 'Raghav',
@@ -73,7 +72,8 @@ const teamMembers: TeamMember[] = [
     year: 'Junior',
     semester: 'Spring 2026',
     description: 'AWS deployment, backend containerization, and infrastructure.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
+    linkedin: 'https://www.linkedin.com/in/raghav-garg-22b787303/',
+    photo: '/team/raghav.jpg',
   },
   {
     name: 'Ian',
@@ -83,7 +83,6 @@ const teamMembers: TeamMember[] = [
     year: 'Junior',
     semester: 'Spring 2026',
     description: 'AWS services research and deployment prototyping.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
   },
   {
     name: 'Bayan',
@@ -93,7 +92,6 @@ const teamMembers: TeamMember[] = [
     year: 'Junior',
     semester: 'Spring 2026',
     description: 'CI/CD pipeline and deployment automation.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
   },
   // --- Image Processing ---
   {
@@ -105,7 +103,8 @@ const teamMembers: TeamMember[] = [
     semester: 'Spring 2026',
     isLead: true,
     description: 'OCR integration, handwritten note processing, and subteam lead.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
+    linkedin: 'https://www.linkedin.com/in/akhil-bejjanki-9b5628366/',
+    photo: '/team/akhil.png',
   },
   {
     name: 'Abhiram',
@@ -115,7 +114,6 @@ const teamMembers: TeamMember[] = [
     year: 'Junior',
     semester: 'Spring 2026',
     description: 'OCR tools research and image-to-text pipeline development.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
   },
   {
     name: 'Raiyan',
@@ -125,7 +123,6 @@ const teamMembers: TeamMember[] = [
     year: 'Junior',
     semester: 'Spring 2026',
     description: 'Handwritten notes detection and image processing testing.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
   },
   // --- Parallel / Processing ---
   {
@@ -137,7 +134,8 @@ const teamMembers: TeamMember[] = [
     semester: 'Spring 2026',
     isLead: true,
     description: 'Pipeline optimization, bottleneck analysis, and subteam lead.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
+    linkedin: 'https://www.linkedin.com/in/amodh-naik/',
+    photo: '/team/amod.jpeg',
   },
   {
     name: 'Kareena',
@@ -147,7 +145,7 @@ const teamMembers: TeamMember[] = [
     year: 'Junior',
     semester: 'Spring 2026',
     description: 'Processing pipeline optimization and performance improvements.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
+    photo: '/team/kareena.png',
   },
   {
     name: 'Shreya',
@@ -157,7 +155,6 @@ const teamMembers: TeamMember[] = [
     year: 'Junior',
     semester: 'Spring 2026',
     description: 'Baseline benchmarking and parallel processing research.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
   },
   // --- Node Simplification ---
   {
@@ -169,7 +166,6 @@ const teamMembers: TeamMember[] = [
     semester: 'Spring 2026',
     isLead: true,
     description: 'Knowledge graph restructuring, center-based layout, and subteam lead.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
   },
   {
     name: 'Panda',
@@ -179,7 +175,6 @@ const teamMembers: TeamMember[] = [
     year: 'Junior',
     semester: 'Spring 2026',
     description: 'Node deduplication and graph structure improvements.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
   },
   {
     name: 'Jayan',
@@ -189,7 +184,8 @@ const teamMembers: TeamMember[] = [
     year: 'Junior',
     semester: 'Spring 2026',
     description: 'Node size properties and knowledge graph optimization.',
-    linkedin: 'https://linkedin.com/in/melanieychen',
+    linkedin: 'https://www.linkedin.com/in/jayan-sirikonda/',
+    photo: '/team/jayan.png',
   },
   // ===================== Fall 2026 =====================
   // Add Fall 2026 members here when the new semester starts.
