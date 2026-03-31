@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { BookOpen, TrendingDown, ChevronLeft } from 'lucide-react';
 
 interface ProgressItem {
+  concept_id: string;
   topic_name: string;
   confidence_score: number;
   last_practiced: string;
@@ -33,12 +34,12 @@ const ProgressPage: React.FC = () => {
           progressList = Array.isArray(progressRes.data) ? progressRes.data : [];
           console.log(`[ProgressPage] Received ${progressList.length} progress records from backend`);
           if (progressList.length > 0) {
-            console.log('[ProfilePage] Sample progress records:', progressList.slice(0, 3));
+            console.log('[ProgressPage] Sample progress records:', progressList.slice(0, 3));
           } else {
-            console.log('[ProfilePage] No progress records received from backend');
+            console.log('[ProgressPage] No progress records received from backend');
           }
         } catch (progressError: any) {
-          console.error('[ProfilePage] Error fetching progress:', progressError);
+          console.error('[ProgressPage] Error fetching progress:', progressError);
           // Continue even if progress fails - we can still show graphs
           if (progressError.response?.status === 401) {
             setError('Please log in to view your progress.');
@@ -54,7 +55,7 @@ const ProgressPage: React.FC = () => {
           graphIds = graphIdsRes.data?.graphIds || [];
           console.log('ProgressPage: Successfully fetched graph IDs:', graphIds);
         } catch (graphIdsError: any) {
-          console.error('ProfilePage: Error fetching graph IDs:', {
+          console.error('ProgressPage: Error fetching graph IDs:', {
             status: graphIdsError.response?.status,
             statusText: graphIdsError.response?.statusText,
             data: graphIdsError.response?.data,
@@ -155,8 +156,8 @@ const ProgressPage: React.FC = () => {
         const graphData = { graph: { nodes: allNodes } };
 
         // DEBUG: log raw responses to help diagnose missing labels
-        console.debug('ProfilePage: raw graph response', graphData);
-        console.debug('ProfilePage: raw progress response', progressList);
+        console.debug('ProgressPage: raw graph response', graphData);
+        console.debug('ProgressPage: raw progress response', progressList);
 
         // Build a quick map from possible ids to the node's display name
         const nodeNameById = new Map<string, string>();
@@ -199,8 +200,8 @@ const ProgressPage: React.FC = () => {
           }
         }
         
-        console.log(`[ProfilePage] Built nodeNameById map with ${nodeNameById.size} entries`);
-        console.log(`[ProfilePage] Sample node IDs from graph:`, nodes.slice(0, 3).map((n: any) => ({
+        console.log(`[ProgressPage] Built nodeNameById map with ${nodeNameById.size} entries`);
+        console.log(`[ProgressPage] Sample node IDs from graph:`, nodes.slice(0, 3).map((n: any) => ({
           id: n.id,
           topicID: n.properties?.topicID,
           conceptId: n.properties?.conceptId,
@@ -208,9 +209,9 @@ const ProgressPage: React.FC = () => {
         })));
 
         // Normalize progress entries into the UI shape and keep the raw concept id for lookups
-        console.log(`[ProfilePage] Trying to match ${progressList.length} progress records against ${nodes.length} nodes`);
-        console.log(`[ProfilePage] Progress conceptIds:`, progressList.map((p: any) => p.conceptId || p.conceptID).slice(0, 5));
-        console.log(`[ProfilePage] Sample node topicIDs:`, nodes.slice(0, 5).map((n: any) => n.properties?.topicID).filter(Boolean));
+        console.log(`[ProgressPage] Trying to match ${progressList.length} progress records against ${nodes.length} nodes`);
+        console.log(`[ProgressPage] Progress conceptIds:`, progressList.map((p: any) => p.conceptId || p.conceptID).slice(0, 5));
+        console.log(`[ProgressPage] Sample node topicIDs:`, nodes.slice(0, 5).map((n: any) => n.properties?.topicID).filter(Boolean));
         
         const normalized: Array<any> = progressList.map((p: any) => {
           const conceptId = String(p.conceptId || p.conceptID || p.topicId || p.topic_id || p.id);
@@ -229,20 +230,20 @@ const ProgressPage: React.FC = () => {
             });
             if (found) {
               name = getNodeLabel(found);
-              console.log(`[ProfilePage] ✅ Found node for conceptId ${conceptId}: ${name}`);
+              console.log(`[ProgressPage] ✅ Found node for conceptId ${conceptId}: ${name}`);
             } else {
               // Log when we can't find a node for debugging
-              console.warn(`[ProfilePage] ❌ Could not find node for conceptId: ${conceptId}`);
+              console.warn(`[ProgressPage] ❌ Could not find node for conceptId: ${conceptId}`);
               // Show what topicIDs are actually available
               const availableTopicIDs = nodes
                 .map((n: any) => n.properties?.topicID)
                 .filter(Boolean)
                 .slice(0, 10);
-              console.warn(`[ProfilePage] Available topicIDs (first 10):`, availableTopicIDs);
-              console.warn(`[ProfilePage] Does conceptId match any topicID?`, availableTopicIDs.includes(conceptId));
+              console.warn(`[ProgressPage] Available topicIDs (first 10):`, availableTopicIDs);
+              console.warn(`[ProgressPage] Does conceptId match any topicID?`, availableTopicIDs.includes(conceptId));
             }
           } else {
-            console.log(`[ProfilePage] ✅ Found name via map for conceptId ${conceptId}: ${name}`);
+            console.log(`[ProgressPage] ✅ Found name via map for conceptId ${conceptId}: ${name}`);
           }
           // Better fallback display for orphaned concepts
           if (!name) {
@@ -259,12 +260,12 @@ const ProgressPage: React.FC = () => {
 
         // If any items still show the raw id (no friendly name), try fetching node metadata for those ids
         const stillMissing = normalized.filter((n: any) => n.topic_name === n.concept_id).map((n: any) => n.concept_id);
-        console.log(`[ProfilePage] Still missing names for ${stillMissing.length} concepts:`, stillMissing);
+        console.log(`[ProgressPage] Still missing names for ${stillMissing.length} concepts:`, stillMissing);
         
         if (stillMissing.length > 0 && graphIds.length > 0) {
           try {
             const idsParam = Array.from(new Set(stillMissing)).join(',');
-            console.log(`[ProfilePage] Fetching node metadata for IDs: ${idsParam}`);
+            console.log(`[ProgressPage] Fetching node metadata for IDs: ${idsParam}`);
 
             // Fetch metadata from all graphs
             const metaPromises = graphIds.map(id =>
@@ -303,8 +304,8 @@ const ProgressPage: React.FC = () => {
                 resolvedCount++;
               }
             }
-            console.log(`[ProfilePage] Metadata fetch resolved ${resolvedCount} out of ${stillMissing.length} missing names`);
-            console.log(`[ProfilePage] Metadata map entries:`, Array.from(metaMap.entries()).slice(0, 5));
+            console.log(`[ProgressPage] Metadata fetch resolved ${resolvedCount} out of ${stillMissing.length} missing names`);
+            console.log(`[ProgressPage] Metadata map entries:`, Array.from(metaMap.entries()).slice(0, 5));
           } catch (metaErr) {
             console.warn('Failed to fetch node metadata for missing ids', metaErr);
           }
@@ -316,7 +317,7 @@ const ProgressPage: React.FC = () => {
         );
         if (stillUnknown.length > 0) {
           try {
-            console.log(`[ProfilePage] Attempting to find topic names from quiz history for ${stillUnknown.length} concepts...`);
+            console.log(`[ProgressPage] Attempting to find topic names from quiz history for ${stillUnknown.length} concepts...`);
             const quizHistoryRes = await axios.get('http://localhost:4000/api/quiz-history', { withCredentials: true });
             const quizHistories = Array.isArray(quizHistoryRes.data?.quizHistories) 
               ? quizHistoryRes.data.quizHistories 
@@ -375,16 +376,16 @@ const ProgressPage: React.FC = () => {
                 if (extractedName) {
                   item.topic_name = extractedName;
                   questionBasedCount++;
-                  console.log(`[ProfilePage] ✅ Extracted topic name from question for ${item.concept_id}: ${extractedName}`);
+                  console.log(`[ProgressPage] ✅ Extracted topic name from question for ${item.concept_id}: ${extractedName}`);
                 }
               }
             }
             
             if (questionBasedCount > 0) {
-              console.log(`[ProfilePage] ✅ Extracted ${questionBasedCount} topic names from quiz history questions`);
+              console.log(`[ProgressPage] ✅ Extracted ${questionBasedCount} topic names from quiz history questions`);
             }
           } catch (quizHistoryErr) {
-            console.warn('[ProfilePage] Failed to fetch quiz history for topic name extraction:', quizHistoryErr);
+            console.warn('[ProgressPage] Failed to fetch quiz history for topic name extraction:', quizHistoryErr);
           }
         }
 
@@ -394,7 +395,7 @@ const ProgressPage: React.FC = () => {
         
         const orphanedCount = normalized.filter(i => i.topic_name.startsWith('Unknown Topic')).length;
         if (orphanedCount > 0) {
-          console.log(`[ProfilePage] ${orphanedCount} concepts have unknown names (may be from deleted/changed graphs)`);
+          console.log(`[ProgressPage] ${orphanedCount} concepts have unknown names (may be from deleted/changed graphs)`);
         }
         
         // Topics to review: simple threshold (confidence < 0.75), sorted ascending
@@ -403,7 +404,7 @@ const ProgressPage: React.FC = () => {
         // Full progress: sort by most recently practiced
         const full_progress = validConcepts.sort((a, b) => new Date(b.last_practiced).getTime() - new Date(a.last_practiced).getTime());
 
-        console.log('[ProfilePage] Setting profile data:');
+        console.log('[ProgressPage] Setting profile data:');
         console.log(`  - Full progress: ${full_progress.length} items`);
         console.log(`  - Topics to review: ${topics_to_review.length} items`);
         if (full_progress.length > 0) {
@@ -516,7 +517,7 @@ const ProgressPage: React.FC = () => {
               {profileData?.topics_to_review && profileData.topics_to_review.length > 0 ? (
                 <ul className="space-y-4">
                   {profileData.topics_to_review.map((item) => (
-                    <li key={item.topic_name} className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                    <li key={item.concept_id} className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
                       <div className="flex justify-between items-center">
                         <span className="font-medium text-gray-700" title={item.topic_name}>
                           {friendlyTopicLabel(item.topic_name)}
@@ -551,7 +552,7 @@ const ProgressPage: React.FC = () => {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {profileData.full_progress.map((item) => (
-                        <tr key={item.topic_name}>
+                        <tr key={item.concept_id}>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" title={item.topic_name}>
                             {friendlyTopicLabel(item.topic_name)}
                           </td>
@@ -578,4 +579,3 @@ const ProgressPage: React.FC = () => {
 };
 
 export default ProgressPage;
-

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Chat from './pages/Chat';
 import Login from './pages/Login';
@@ -10,7 +11,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ProgressProvider } from './context/ProgressContext';
 
 // Route guard — redirects unauthenticated users to /login
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
@@ -66,7 +67,7 @@ function AppContent() {
   );
 }
 
-const App: React.FC = () => {
+function App() {
   return (
     <AuthProvider>
       <ProgressProvider>
@@ -74,6 +75,6 @@ const App: React.FC = () => {
       </ProgressProvider>
     </AuthProvider>
   );
-};
+}
 
 export default App;
