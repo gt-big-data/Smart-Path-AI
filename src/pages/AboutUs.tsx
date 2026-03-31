@@ -111,9 +111,10 @@ const teamMembers: TeamMember[] = [
     role: 'Image Processing Team',
     team: 'Image Processing',
     major: 'Computer Science',
-    year: 'Junior',
+    year: 'Freshman',
     semester: 'Spring 2026',
     description: 'OCR tools research and image-to-text pipeline development.',
+    linkedin: 'https://www.linkedin.com/in/abhiram-raju-t/',
   },
   {
     name: 'Raiyan',
@@ -166,6 +167,8 @@ const teamMembers: TeamMember[] = [
     semester: 'Spring 2026',
     isLead: true,
     description: 'Knowledge graph restructuring, center-based layout, and subteam lead.',
+    linkedin: 'https://www.linkedin.com/in/john-doan-67a303248/',
+    photo: '/team/john.jpg',
   },
   {
     name: 'Panda',
