@@ -154,10 +154,6 @@ const ProgressPage: React.FC = () => {
 
         const graphData = { graph: { nodes: allNodes } };
 
-        // DEBUG: log raw responses to help diagnose missing labels
-        console.debug('ProfilePage: raw graph response', graphData);
-        console.debug('ProfilePage: raw progress response', progressList);
-
         // Build a quick map from possible ids to the node's display name
         const nodeNameById = new Map<string, string>();
         const nodes = Array.isArray(graphData.graph?.nodes) ? graphData.graph.nodes : [];
