@@ -40,7 +40,7 @@ router.get('/google', passport_1.default.authenticate('google', {
 // 2. Google OAuth callback
 //    Google redirects here after the user grants permission
 router.get('/google/callback', passport_1.default.authenticate('google', { failureMessage: true }), (req, res) => {
-    res.redirect('http://localhost:5173');
+    res.redirect(process.env.CLIENT_URL || 'http://localhost:5173');
 });
 router.get('/me', (req, res) => {
     if (req.isAuthenticated && req.isAuthenticated()) {

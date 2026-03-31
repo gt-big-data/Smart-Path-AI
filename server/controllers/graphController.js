@@ -13,14 +13,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.semanticSearchGraph = exports.searchGraph = exports.getNodeMetadata = exports.getUserProfile = exports.generateConversationResponse = exports.verifyAnswer = exports.generateQuestionsWithAnswers = exports.viewGraph = void 0;
-const axios_1 = __importDefault(require("axios"));
 const openai_1 = __importDefault(require("openai"));
-const dotenv_1 = __importDefault(require("dotenv"));
-const path_1 = __importDefault(require("path"));
 const ConceptProgress_1 = __importDefault(require("../models/ConceptProgress"));
 const axiosConfig_1 = require("../utils/axiosConfig");
-// Load environment variables
-dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../.env') });
 // Initialize OpenAI with explicit API key
 const openai = new openai_1.default({
     apiKey: process.env.OPENAI_API_KEY || '' // Provide empty string as fallback
@@ -56,7 +51,9 @@ const viewGraph = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         if (!graph_id) {
             return res.status(400).json({ error: 'graph_id is required' });
         }
-        const response = yield axios_1.default.get(`http://localhost:8000/view-graph?graph_id=${graph_id}`);
+        const response = yield axiosConfig_1.pythonServiceClient.get('/view-graph', {
+            params: { graph_id: String(graph_id) }
+        });
         res.json(response.data);
     }
     catch (error) {
@@ -312,9 +309,11 @@ const getUserProfile = (req, res) => __awaiter(void 0, void 0, void 0, function*
         return res.status(400).json({ error: 'graph_id is required' });
     }
     try {
-        const url = `http://localhost:8000/user/${userId}/profile?graph_id=${graph_id}`;
+        const url = `/user/${userId}/profile`;
         console.log(`Fetching user profile from AI server: ${url}`);
-        const response = yield axios_1.default.get(url);
+        const response = yield axiosConfig_1.pythonServiceClient.get(url, {
+            params: { graph_id: String(graph_id) }
+        });
         // Forward the data from the AI server directly to the frontend
         res.json(response.data);
     }
@@ -337,8 +336,9 @@ const getNodeMetadata = (req, res) => __awaiter(void 0, void 0, void 0, function
         if (!conceptIdsRaw)
             return res.status(400).json({ error: 'concept_ids or concept_id is required' });
         const wanted = String(conceptIdsRaw).split(',').map(s => s.trim()).filter(Boolean);
-        const url = `http://localhost:8000/view-graph?graph_id=${encodeURIComponent(String(graph_id))}`;
-        const response = yield axios_1.default.get(url);
+        const response = yield axiosConfig_1.pythonServiceClient.get('/view-graph', {
+            params: { graph_id: String(graph_id) }
+        });
         const nodes = ((_b = (_a = response.data) === null || _a === void 0 ? void 0 : _a.graph) === null || _b === void 0 ? void 0 : _b.nodes) || [];
         const matches = nodes.filter((node) => {
             const props = node.properties || {};

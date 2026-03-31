@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { BookOpen, Sparkles, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -94,17 +93,6 @@ function AppContent() {
 }
 
 const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    const checkAuth = async () => {
-      const response = await fetch('/api/auth/check');
-      const data = await response.json();
-      setIsAuthenticated(data.isAuthenticated);
-    };
-    checkAuth();
-  }, []);
-
   return (
     <AuthProvider>
       <ProgressProvider>
@@ -112,6 +100,6 @@ const App: React.FC = () => {
       </ProgressProvider>
     </AuthProvider>
   );
-}
+};
 
 export default App;

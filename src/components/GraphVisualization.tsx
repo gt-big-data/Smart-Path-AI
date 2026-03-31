@@ -14,6 +14,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Search, X } from 'lucide-react';
+import { API_BASE_URL } from '../config/api';
 
 interface GraphData {
   status: string;
@@ -430,7 +431,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
         ? 'semantic-search-graph' 
         : 'search-graph';
       
-      const url = `http://localhost:4000/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
+      const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
       console.log('[Graph Search] Fetching:', url);
       
       const response = await fetch(url, { credentials: 'include' });

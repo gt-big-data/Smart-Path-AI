@@ -7,7 +7,7 @@ exports.pythonServiceClient = void 0;
 const axios_1 = __importDefault(require("axios"));
 // Configure axios instance for Python service with proper timeouts
 // Using 127.0.0.1 instead of localhost to avoid IPv6 issues
-const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8000';
+const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'https://smartpath-backend-361386464842.us-east1.run.app';
 exports.pythonServiceClient = axios_1.default.create({
     baseURL: PYTHON_SERVICE_URL,
     timeout: 120000, // 120 seconds (2 minutes) timeout for AI operations

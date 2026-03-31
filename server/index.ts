@@ -25,6 +25,7 @@ import chatRoutes from './routes/chatRoutes';
 import progressRoutes from './routes/progressRoutes';
 import quizHistoryRoutes from './routes/quizHistoryRoutes';
 import session from 'express-session';
+import MongoStore from 'connect-mongo';
 import axios from 'axios';
 import User from './models/User';
 
@@ -36,6 +37,7 @@ const parsedPort = rawPort ? parseInt(rawPort, 10) : 4000;
 const port = Number.isNaN(parsedPort) ? 4000 : parsedPort;
 const corsOriginConfig = process.env.CORS_ORIGINS || process.env.CLIENT_URL || 'http://localhost:5173';
 const corsOrigins = corsOriginConfig.split(',').map((origin) => origin.trim()).filter(Boolean);
+const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.env.K_SERVICE);
 
 // Connect to Mongo
 const connectDB = async () => {
@@ -58,12 +60,20 @@ app.use(cors({
 app.use(express.json());
 
 // Session middleware (before passport middleware)
+app.set('trust proxy', 1);
 app.use(session({
     secret: process.env.SESSION_SECRET || 'your-secret-key',
+    proxy: isProduction,
     resave: false,
     saveUninitialized: false,
+    store: MongoStore.create({
+        mongoUrl: process.env.MONGO_URI!,
+        collectionName: 'sessions',
+        ttl: 14 * 24 * 60 * 60,
+    }),
     cookie: {
-        secure: process.env.NODE_ENV === 'production', // Only use secure in production
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
