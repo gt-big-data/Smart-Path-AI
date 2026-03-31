@@ -1807,7 +1807,7 @@ function App() {
                 <button
                   onClick={() => {
                     if (currentChat?.graph_id) {
-                      navigate(`/progress?graph_id=${currentChat.graph_id}`);
+                      navigate('/progress');
                     } else {
                       alert("Please upload a document to view progress.");
                     }
