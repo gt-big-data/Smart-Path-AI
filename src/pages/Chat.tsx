@@ -1807,14 +1807,14 @@ function App() {
                 <button
                   onClick={() => {
                     if (currentChat?.graph_id) {
-                      navigate(`/profile?graph_id=${currentChat.graph_id}`);
+                      navigate('/progress');
                     } else {
                       alert("Please upload a document to view progress.");
                     }
                   }}
                   className="px-4 py-2 bg-white text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 hover:border-teal-300 transition-all duration-200 flex items-center justify-center gap-2 font-medium shadow-sm btn-lift"
                 >
-                  View Profile
+                  View Progress
                 </button>
                 
                 <button
