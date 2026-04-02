@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, LayoutDashboard, TrendingUp, User, Users } from 'lucide-react';
+import { ArrowRight, LayoutDashboard, TrendingUp, UserCircle, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Navigation from '../components/Navigation';
 import { useAuth } from '../context/AuthContext';
@@ -12,6 +12,7 @@ const featureCards = [
     to: '/chat',
     requiresAuth: true,
     color: 'teal',
+    iconClass: 'h-6 w-6',
   },
   {
     title: 'Progress',
@@ -20,14 +21,16 @@ const featureCards = [
     to: '/progress',
     requiresAuth: true,
     color: 'blue',
+    iconClass: 'h-6 w-6',
   },
   {
     title: 'Profile',
     description: 'Manage your account settings and preferences.',
-    icon: User,
+    icon: UserCircle,
     to: '/profile',
     requiresAuth: true,
     color: 'violet',
+    iconClass: 'h-4 w-4',
   },
   {
     title: 'About Us',
@@ -36,6 +39,7 @@ const featureCards = [
     to: '/about',
     requiresAuth: false,
     color: 'amber',
+    iconClass: 'h-6 w-6',
   },
 ] as const;
 
@@ -123,12 +127,12 @@ export default function Home() {
                 className={`group text-left p-6 bg-white/80 backdrop-blur-sm rounded-xl border border-slate-200/60 ${colors.border} transition-all shadow-sm hover:shadow-md ${colors.shadow} btn-lift`}
               >
                 <div className={`inline-flex items-center justify-center w-12 h-12 rounded-lg ${colors.bg} mb-4`}>
-                  <Icon className={`h-6 w-6 ${colors.icon}`} />
+                  <Icon className={`${card.iconClass} ${colors.icon}`} />
                 </div>
                 <h3 className="text-lg font-semibold mb-2 text-slate-800 group-hover:text-slate-900">
                   {card.title}
                 </h3>
-                <p className="text-sm text-slate-600 leading-relaxed">
+                <p className="text-sm text-slate-600 leading-relaxed min-h-[80px]">
                   {card.description}
                 </p>
                 <div className="mt-4 flex items-center text-sm font-medium text-slate-400 group-hover:text-teal-500 transition-colors">
