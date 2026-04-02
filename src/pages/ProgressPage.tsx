@@ -399,7 +399,7 @@ const ProgressPage: React.FC = () => {
         }
         
         // Topics to review: simple threshold (confidence < 0.75), sorted ascending
-        const topics_to_review = validConcepts.filter(i => i.confidence_score < 0.75).sort((a, b) => a.confidence_score - b.confidence_score);
+        const topics_to_review = validConcepts.filter(i => i.confidence_score < 0.75).sort((a, b) => a.confidence_score - b.confidence_score).slice(0, 5);
 
         // Full progress: sort by most recently practiced
         const full_progress = validConcepts.sort((a, b) => new Date(b.last_practiced).getTime() - new Date(a.last_practiced).getTime());

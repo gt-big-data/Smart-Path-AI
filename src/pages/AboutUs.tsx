@@ -33,6 +33,16 @@ const teamMembers: TeamMember[] = [
     linkedin: 'https://www.linkedin.com/in/vinh-t-pham/',
     photo: '/team/vihn.png',
   },
+  {
+    name: 'Anvi Bejjanki',
+    role: 'Project Lead',
+    team: 'Leadership',
+    major: 'Computer Science',
+    year: 'Junior',
+    semester: 'Spring 2026',
+    isLead: true,
+    description: 'Overall project lead for SmartPathAI.',
+  },
   // --- UI ---
   {
     name: 'Melanie',
@@ -53,6 +63,7 @@ const teamMembers: TeamMember[] = [
     year: 'Junior',
     semester: 'Spring 2026',
     description: 'Landing page redesign, processing visuals, and node labeling.',
+    linkedin: 'https://www.linkedin.com/in/vikram-renganathan-gt/',
   },
   // --- Deployment ---
   {
@@ -147,15 +158,6 @@ const teamMembers: TeamMember[] = [
     semester: 'Spring 2026',
     description: 'Processing pipeline optimization and performance improvements.',
     photo: '/team/kareena.png',
-  },
-  {
-    name: 'Shreya',
-    role: 'Processing Team',
-    team: 'Processing',
-    major: 'Computer Science',
-    year: 'Junior',
-    semester: 'Spring 2026',
-    description: 'Baseline benchmarking and parallel processing research.',
   },
   // --- Node Simplification ---
   {
