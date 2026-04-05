@@ -1,6 +1,6 @@
 //Chat.tsx
 import React, { useState, useEffect, useRef, ChangeEvent, useCallback } from 'react';
-import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File, Trash2, Pencil, Check } from 'lucide-react';
+import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File, Trash2, Pencil, Check, Home, Settings, UserCircle } from 'lucide-react';
 import {
   Panel,
   PanelGroup,
@@ -1707,6 +1707,20 @@ function App() {
             ))}
           </div>
         )}
+        <div className="p-4 border-t border-slate-700/50 flex flex-col gap-2">
+          <button onClick={() => navigate('/')} className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200" title="Home">
+            <Home className="w-5 h-5" />
+            {!isSidebarCollapsed && <span className="text-sm">Home</span>}
+          </button>
+          <button onClick={() => navigate('/profile')} className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200" title="Profile">
+            <User className="w-5 h-5" />
+            {!isSidebarCollapsed && <span className="text-sm">Profile</span>}
+          </button>
+          <button className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200 opacity-50 cursor-not-allowed" title="Settings (coming soon)">
+            <Settings className="w-5 h-5" />
+            {!isSidebarCollapsed && <span className="text-sm">Settings</span>}
+          </button>
+        </div>
       </div>
 
       <PanelGroup direction="horizontal" className="flex-1">
@@ -1806,22 +1820,17 @@ function App() {
                 <button
                   onClick={() => {
                     if (currentChat?.graph_id) {
-                      navigate(`/profile?graph_id=${currentChat.graph_id}`);
+                      navigate('/progress');
                     } else {
                       alert("Please upload a document to view progress.");
                     }
                   }}
                   className="px-4 py-2 bg-white text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 hover:border-teal-300 transition-all duration-200 flex items-center justify-center gap-2 font-medium shadow-sm btn-lift"
                 >
-                  View Profile
+                  View Progress
                 </button>
                 
-                <button
-                  onClick={() => navigate('/')}
-                  className="px-4 py-2 bg-white text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 hover:border-teal-300 transition-all duration-200 flex items-center justify-center gap-2 font-medium shadow-sm btn-lift"
-                >
-                  Return to Homepage
-                </button>
+                
                 
                 {/* Start Quiz button moved to header for better placement */}
                 {shouldStartQuiz && !isAnswering && currentChat?.graph_id && (

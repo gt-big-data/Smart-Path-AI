@@ -45,10 +45,20 @@ const SUBJECT_MAP: { [key: string]: string } = {
 interface GraphVisualizationProps {
   data: GraphData | null;
   conceptProgress: ConceptProgress[];
+  isLoading?: boolean;
 }
 
 interface CustomNodeProps extends NodeProps {
   style?: React.CSSProperties;
+}
+
+// Node edit popup state interface
+interface NodeEditState {
+  nodeId: string;
+  label: string;
+  color: string;
+  x: number;
+  y: number;
 }
 
 const COLOR_PALETTE = {
@@ -208,9 +218,265 @@ const NodeTooltip = ({ content }: { content: string }) => {
   );
 };
 
+// Loading screen component
+const GraphLoadingScreen = ({ isLoading }: { isLoading: boolean }) => {
+  return (
+    <div style={{
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '20px',
+      background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+      color: 'white',
+    }}>
+      {isLoading ? (
+        <>
+          {/* Animated graph nodes */}
+          <div style={{ position: 'relative', width: '80px', height: '80px' }}>
+            <style>{`
+              @keyframes orbit {
+                0% { transform: rotate(0deg) translateX(30px) rotate(0deg); }
+                100% { transform: rotate(360deg) translateX(30px) rotate(-360deg); }
+              }
+              @keyframes pulse-center {
+                0%, 100% { transform: scale(1); opacity: 0.9; }
+                50% { transform: scale(1.15); opacity: 1; }
+              }
+              @keyframes orbit2 {
+                0% { transform: rotate(120deg) translateX(30px) rotate(-120deg); }
+                100% { transform: rotate(480deg) translateX(30px) rotate(-480deg); }
+              }
+              @keyframes orbit3 {
+                0% { transform: rotate(240deg) translateX(30px) rotate(-240deg); }
+                100% { transform: rotate(600deg) translateX(30px) rotate(-600deg); }
+              }
+            `}</style>
+            {/* Center node */}
+            <div style={{
+              position: 'absolute',
+              top: '50%', left: '50%',
+              width: '20px', height: '20px',
+              borderRadius: '50%',
+              background: '#14b8a6',
+              transform: 'translate(-50%, -50%)',
+              animation: 'pulse-center 1.5s ease-in-out infinite',
+              boxShadow: '0 0 15px rgba(20, 184, 166, 0.6)',
+            }} />
+            {/* Orbiting nodes */}
+            {['#3b82f6', '#8b5cf6', '#f59e0b'].map((color, i) => (
+              <div key={i} style={{
+                position: 'absolute',
+                top: '50%', left: '50%',
+                width: '12px', height: '12px',
+                borderRadius: '50%',
+                background: color,
+                marginTop: '-6px', marginLeft: '-6px',
+                animation: `orbit${i === 0 ? '' : i + 1} ${1.8 + i * 0.3}s linear infinite`,
+                boxShadow: `0 0 8px ${color}`,
+              }} />
+            ))}
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '18px', fontWeight: '600', color: '#e2e8f0', marginBottom: '6px' }}>
+              Building Knowledge Graph
+            </div>
+            <div style={{ fontSize: '14px', color: '#64748b' }}>
+              Extracting concepts and relationships...
+            </div>
+          </div>
+          {/* Animated progress dots */}
+          <div style={{ display: 'flex', gap: '6px' }}>
+            {[0, 1, 2].map(i => (
+              <div key={i} style={{
+                width: '8px', height: '8px',
+                borderRadius: '50%',
+                background: '#14b8a6',
+                animation: `pulse-center 1.2s ease-in-out ${i * 0.2}s infinite`,
+              }} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Empty state icon */}
+          <div style={{
+            width: '72px', height: '72px',
+            borderRadius: '16px',
+            background: 'rgba(20, 184, 166, 0.1)',
+            border: '1px solid rgba(20, 184, 166, 0.2)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '32px',
+          }}>
+            🗂️
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '18px', fontWeight: '600', color: '#e2e8f0', marginBottom: '6px' }}>
+              No Graph Uploaded Yet
+            </div>
+            <div style={{ fontSize: '14px', color: '#64748b', maxWidth: '260px', lineHeight: '1.5' }}>
+              Upload a PDF to generate your knowledge graph and start exploring concepts.
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+// Node Edit Popup component
+const NodeEditPopup = ({
+  editState,
+  onClose,
+  onSave,
+}: {
+  editState: NodeEditState;
+  onClose: () => void;
+  onSave: (id: string, label: string, color: string) => void;
+}) => {
+  const [label, setLabel] = useState(editState.label);
+  const [color, setColor] = useState(editState.color);
+
+  const colorOptions = Object.values(COLOR_PALETTE);
+
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: 'fixed',
+        top: editState.y,
+        left: editState.x,
+        zIndex: 9999,
+        background: 'white',
+        borderRadius: '10px',
+        boxShadow: '0 8px 30px rgba(0,0,0,0.18)',
+        padding: '16px',
+        width: '240px',
+        border: '1px solid #e5e7eb',
+      }}
+    >
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <span style={{ fontWeight: '600', fontSize: '14px', color: '#111827' }}>Edit Node</span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}>
+          <X className="w-4 h-4" style={{ color: '#6b7280' }} />
+        </button>
+      </div>
+
+      {/* Label field */}
+      <div style={{ marginBottom: '12px' }}>
+        <label style={{ fontSize: '12px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '4px' }}>
+          Label
+        </label>
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          style={{
+            width: '100%',
+            padding: '7px 10px',
+            borderRadius: '6px',
+            border: '1px solid #d1d5db',
+            fontSize: '13px',
+            color: '#111827',
+            outline: 'none',
+            boxSizing: 'border-box',
+          }}
+          onFocus={(e) => e.target.style.borderColor = '#14b8a6'}
+          onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+        />
+      </div>
+
+      {/* Color picker */}
+      <div style={{ marginBottom: '14px' }}>
+        <label style={{ fontSize: '12px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '6px' }}>
+          Color
+        </label>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          {colorOptions.map((c) => (
+            <button
+              key={c}
+              onClick={() => setColor(c)}
+              style={{
+                width: '22px',
+                height: '22px',
+                borderRadius: '50%',
+                background: c,
+                border: color === c ? '2px solid #111827' : '2px solid transparent',
+                cursor: 'pointer',
+                outline: color === c ? '2px solid white' : 'none',
+                outlineOffset: '-3px',
+                transition: 'transform 0.1s',
+              }}
+              title={c}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Preview */}
+      <div style={{ marginBottom: '14px' }}>
+        <label style={{ fontSize: '12px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '6px' }}>
+          Preview
+        </label>
+        <div style={{
+          background: color,
+          color: 'white',
+          padding: '8px 12px',
+          borderRadius: '6px',
+          fontSize: '13px',
+          fontWeight: '500',
+          textAlign: 'center',
+          wordBreak: 'break-word',
+        }}>
+          {label || 'Node Label'}
+        </div>
+      </div>
+
+      {/* Buttons */}
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <button
+          onClick={onClose}
+          style={{
+            flex: 1,
+            padding: '7px',
+            borderRadius: '6px',
+            border: '1px solid #d1d5db',
+            background: 'white',
+            color: '#374151',
+            fontSize: '13px',
+            cursor: 'pointer',
+            fontWeight: '500',
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => { onSave(editState.nodeId, label, color); onClose(); }}
+          style={{
+            flex: 1,
+            padding: '7px',
+            borderRadius: '6px',
+            border: 'none',
+            background: '#14b8a6',
+            color: 'white',
+            fontSize: '13px',
+            cursor: 'pointer',
+            fontWeight: '500',
+          }}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // Function to render confidence circles based on score
 const renderConfidenceCircles = (confidenceScore: number | null) => {
-  // If null or undefined, show empty circles
   if (confidenceScore === null || confidenceScore === undefined) {
     return (
       <div style={{
@@ -238,16 +504,14 @@ const renderConfidenceCircles = (confidenceScore: number | null) => {
   }
 
   let filledCircles = 0;
-  
-  // Determine number of filled circles based on confidence score
   if (confidenceScore > 0.7) {
-    filledCircles = 3; // ●●●
+    filledCircles = 3;
   } else if (confidenceScore > 0.4) {
-    filledCircles = 2; // ●●○
+    filledCircles = 2;
   } else if (confidenceScore > 0.0) {
-    filledCircles = 1; // ●○○
+    filledCircles = 1;
   } else {
-    filledCircles = 0; // ○○○
+    filledCircles = 0;
   }
 
   return (
@@ -275,15 +539,33 @@ const renderConfidenceCircles = (confidenceScore: number | null) => {
   );
 };
 
-// Custom node component with confidence circles
+// We need a global callback ref for the node edit popup trigger
+// This lets CustomNode (which doesn't have direct access to parent state) fire an event upward
+const nodeClickCallbacks = new Map<string, (e: React.MouseEvent) => void>();
+
 const CustomNode = memo((props: CustomNodeProps) => {
-  const { data, style = {} } = props;
+  const { data, style = {}, id } = props;
   const [showTooltip, setShowTooltip] = useState(false);
   
   const truncateText = (text: string) => {
     if (!text) return '';
     if (text.length <= 30) return text;
     return text.substring(0, 30) + '...';
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const cb = nodeClickCallbacks.get('onNodeEdit');
+    if (cb) cb({ ...e, currentTarget: e.currentTarget, target: e.target } as React.MouseEvent);
+    // Store node info for the popup
+    (window as any).__pendingNodeEdit = {
+      nodeId: id,
+      label: data.label,
+      color: (style as any).background || '#3b82f6',
+      x: Math.min(e.clientX + 10, window.innerWidth - 260),
+      y: Math.min(e.clientY + 10, window.innerHeight - 340),
+    };
+    window.dispatchEvent(new CustomEvent('node-edit-request'));
   };
   
   return (
@@ -298,14 +580,17 @@ const CustomNode = memo((props: CustomNodeProps) => {
           ...nodeStyles,
           ...style,
           position: 'relative',
+          cursor: 'pointer',
         }}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
+        onDoubleClick={handleDoubleClick}
+        title="Double-click to edit"
       >
         {renderConfidenceCircles(data.confidenceScore)}
-        {truncateText(data.label)}
+        {data.customLabel || truncateText(data.label)}
       </div>
-      {showTooltip && <NodeTooltip content={data.description} />}
+      {showTooltip && !data.customLabel && <NodeTooltip content={data.description} />}
       <Handle 
         type="source" 
         position={Position.Bottom} 
@@ -319,7 +604,7 @@ const nodeTypes = {
   default: CustomNode,
 };
 
-const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptProgress }) => {
+const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptProgress, isLoading = false }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [minimapLocked, setMinimapLocked] = useState(false);
@@ -332,6 +617,42 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
   const [isSearching, setIsSearching] = useState(false);
   const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword');
 
+  // Node edit popup state
+  const [nodeEditState, setNodeEditState] = useState<NodeEditState | null>(null);
+
+  // Listen for node edit requests from CustomNode
+  useEffect(() => {
+    const handler = () => {
+      const pending = (window as any).__pendingNodeEdit;
+      if (pending) {
+        setNodeEditState(pending);
+        (window as any).__pendingNodeEdit = null;
+      }
+    };
+    window.addEventListener('node-edit-request', handler);
+    return () => window.removeEventListener('node-edit-request', handler);
+  }, []);
+
+  // Close popup when clicking elsewhere
+  useEffect(() => {
+    const handler = () => setNodeEditState(null);
+    if (nodeEditState) {
+      window.addEventListener('click', handler);
+    }
+    return () => window.removeEventListener('click', handler);
+  }, [nodeEditState]);
+
+  const handleNodeEditSave = (nodeId: string, label: string, color: string) => {
+    setNodes(prev => prev.map(node => {
+      if (node.id !== nodeId) return node;
+      return {
+        ...node,
+        data: { ...node.data, customLabel: label },
+        style: { ...node.style, background: color },
+      };
+    }));
+  };
+
   const getNodeLabel = (node: any) => {
     const nameBasedNodeTypes = [
       'Topic', 'Subtopic', 'Event', 'Figure', 'Location', 
@@ -343,37 +664,23 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     
     const shouldUseName = node.labels.some(label => nameBasedNodeTypes.includes(label));
     
-    // Helper function to truncate long text
     const truncateText = (text: string, maxWords: number = 4): string => {
       const words = text.split(' ');
-      if (words.length <= maxWords) {
-        return text;
-      }
+      if (words.length <= maxWords) return text;
       return words.slice(0, maxWords).join(' ') + '...';
     };
     
-    // Try name first for name-based node types
     if (shouldUseName) {
       if (node.properties.name && node.properties.name.trim()) {
         return truncateText(node.properties.name.trim());
       }
     }
     
-    // Try all possible text properties in order of preference
     const possibleProperties = [
-      'text',
-      'description', 
-      'illustration',
-      'explanation',
-      'content',
-      'title',
-      'label',
-      'summary',
-      'definition',
-      'name', // Try name even if not in nameBasedNodeTypes
+      'text', 'description', 'illustration', 'explanation',
+      'content', 'title', 'label', 'summary', 'definition', 'name',
     ];
     
-    // Check each property in order
     for (const prop of possibleProperties) {
       const value = node.properties[prop];
       if (value && typeof value === 'string' && value.trim()) {
@@ -381,16 +688,13 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       }
     }
     
-    // If no text property found, try to get any string property
     for (const [key, value] of Object.entries(node.properties || {})) {
       if (typeof value === 'string' && value.trim() && key !== 'id') {
         return truncateText(value.trim());
       }
     }
     
-    // Last resort: use node type label instead of "No Label"
     const nodeType = node.labels?.[0] || 'Node';
-    
     console.warn('Node with no displayable properties, using fallback:', {
       labels: node.labels,
       properties: Object.keys(node.properties || {}),
@@ -408,42 +712,24 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     return color;
   };
 
-  // Search handler function
   const handleSearch = useCallback(async (query: string) => {
-    console.log('[Graph Search] Starting search...', { query, hasData: !!data, hasGraph: !!data?.graph });
-    
     if (!query.trim() || !data?.graph) {
       setSearchResults([]);
       return;
     }
 
     const graphId = (data as any).graph_id;
-    console.log('[Graph Search] Graph ID:', graphId);
-    
-    if (!graphId) {
-      console.warn('[Graph Search] No graph_id available for search');
-      return;
-    }
+    if (!graphId) return;
 
     setIsSearching(true);
     try {
-      const endpoint = searchMode === 'semantic' 
-        ? 'semantic-search-graph' 
-        : 'search-graph';
-      
+      const endpoint = searchMode === 'semantic' ? 'semantic-search-graph' : 'search-graph';
       const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
-      console.log('[Graph Search] Fetching:', url);
-      
       const response = await fetch(url, { credentials: 'include' });
       const result = await response.json();
-      
-      console.log('[Graph Search] Response:', result);
-      
       if (result.status === 'success') {
-        console.log('[Graph Search] Found nodes:', result.node_ids);
         setSearchResults(result.node_ids || []);
       } else {
-        console.warn('[Graph Search] Search failed:', result);
         setSearchResults([]);
       }
     } catch (error) {
@@ -454,20 +740,14 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     }
   }, [data, searchMode]);
 
-  // Debounce search
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (searchQuery) {
-        handleSearch(searchQuery);
-      } else {
-        setSearchResults([]);
-      }
+      if (searchQuery) handleSearch(searchQuery);
+      else setSearchResults([]);
     }, 300);
-
     return () => clearTimeout(timer);
   }, [searchQuery, handleSearch]);
 
-  // Highlight search results
   useEffect(() => {
     if (searchResults.length > 0) {
       setNodes(prevNodes => 
@@ -485,7 +765,6 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
         }))
       );
     } else {
-      // Reset borders when no search results
       setNodes(prevNodes => 
         prevNodes.map(node => ({
           ...node,
@@ -504,29 +783,16 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
     const subject = graphData.subject || 'default';
     setCurrentSubject(subject);
-    
-    console.log('🎨 Color Mapping Info:');
-    console.log('  Subject detected:', subject);
-    console.log('  Color scheme:', subjectColorSchemes[subject.toLowerCase()] ? 'Found' : 'Using default');
 
-    // Create maps for flexible matching
     const confidenceMap = new Map<string, number>();
     const confidenceByName = new Map<string, number>();
     
     conceptProgress.forEach(progress => {
       confidenceMap.set(progress.conceptId, progress.confidenceScore);
-      // Also try to extract just the name part if conceptId contains underscores or prefixes
       const namePart = progress.conceptId.split('_').pop() || progress.conceptId;
       confidenceByName.set(namePart.toLowerCase(), progress.confidenceScore);
     });
 
-    console.log('🎯 Graph Visualization - Confidence Data:');
-    console.log('  Progress entries:', conceptProgress.length);
-    console.log('  Stored conceptIds:', Array.from(confidenceMap.keys()));
-    console.log('  Graph has', graphData.graph.nodes.length, 'nodes');
-    console.log('  Node IDs:', graphData.graph.nodes.map(n => n.id));
-
-    // First, process edges to find which nodes have connections
     const processedEdges: Edge[] = graphData.graph.relationships.map((rel) => ({
       id: `${rel.source}-${rel.target}`,
       source: rel.source,
@@ -538,17 +804,14 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       animated: true,
     }));
 
-    // Create a set of node IDs that have connections
     const connectedNodeIds = new Set<string>();
     processedEdges.forEach(edge => {
       connectedNodeIds.add(edge.source);
       connectedNodeIds.add(edge.target);
     });
 
-    // Helper function to check if a label is just the node type (fallback) or generic labels
     const isFallbackLabel = (label: string, nodeType: string): boolean => {
       const normalizedLabel = label.toLowerCase().trim();
-      // Check if label is exactly the node type (our fallback), or generic labels like "other"
       return label === nodeType || 
              label === 'Node' || 
              normalizedLabel === 'other' ||
@@ -558,7 +821,6 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
              normalizedLabel === '';
     };
 
-    // Track node types and their colors for verification
     const nodeTypeColorMap = new Map<string, string>();
     
     const processedNodes: Node[] = graphData.graph.nodes
@@ -567,26 +829,19 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
         const nodeColor = getNodeColor(nodeType, subject);
         const nodeLabel = getNodeLabel(node);
         
-        // Track this node type and color
         if (!nodeTypeColorMap.has(nodeType)) {
           nodeTypeColorMap.set(nodeType, nodeColor);
         }
         
-        // Check if this is a fallback label (just the node type)
         const hasFallbackLabel = isFallbackLabel(nodeLabel, nodeType);
         const hasConnections = connectedNodeIds.has(node.id);
         
-        // Skip nodes with fallback labels that have no connections
         if (hasFallbackLabel && !hasConnections) {
-          console.log(`Filtering out node ${node.id} - has fallback label "${nodeLabel}" and no connections`);
           return null;
         }
         
-        // Try multiple matching strategies:
-        // 1. Direct ID match
         let confidenceScore = confidenceMap.get(node.id) ?? null;
         
-        // 2. Check node properties for conceptId, topicId, etc.
         if (confidenceScore === null) {
           const possibleIds = [
             node.properties.conceptId,
@@ -599,38 +854,22 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
           
           for (const possibleId of possibleIds) {
             confidenceScore = confidenceMap.get(String(possibleId)) ?? null;
-            if (confidenceScore !== null) {
-              console.log(`  ✅ Matched node ${node.id} via property to conceptId ${possibleId} with score ${confidenceScore}`);
-              break;
-            }
+            if (confidenceScore !== null) break;
           }
         }
         
-        // 3. If no match, try matching by node name
         if (confidenceScore === null && node.properties.name) {
           const nodeName = node.properties.name.toLowerCase();
           confidenceScore = confidenceByName.get(nodeName) ?? null;
-          if (confidenceScore !== null) {
-            console.log(`  ✅ Matched node ${node.id} via name "${node.properties.name}" with score ${confidenceScore}`);
-          }
         }
         
-        // 4. If still no match, try matching ID as substring
         if (confidenceScore === null) {
           for (const [conceptId, score] of confidenceMap.entries()) {
             if (conceptId.includes(node.id) || node.id.includes(conceptId)) {
               confidenceScore = score;
-              console.log(`  ✅ Matched node ${node.id} via substring to conceptId ${conceptId} with score ${confidenceScore}`);
               break;
             }
           }
-        }
-        
-        if (confidenceScore !== null) {
-          console.log(`  🎯 Node "${node.properties.name || node.id}" FINAL CONFIDENCE: ${confidenceScore}`);
-        } else {
-          console.log(`  ⚠️ Node "${node.properties.name || node.id}" (${node.id}) - NO MATCH FOUND`);
-          console.log(`     Node properties:`, Object.keys(node.properties));
         }
         
         return {
@@ -641,7 +880,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
             description: node.properties.description || node.properties.text,
             type: nodeType,
             subject: subject,
-            confidenceScore: confidenceScore, // Add confidence score to node data
+            confidenceScore: confidenceScore,
           },
           position: { x: 0, y: 0 },
           style: {
@@ -657,41 +896,12 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
           },
         };
       })
-      .filter((node): node is Node => node !== null); // Remove null entries
+      .filter((node): node is Node => node !== null);
 
-    // Create a set of valid node IDs after filtering
     const validNodeIds = new Set(processedNodes.map(node => node.id));
-    
-    // Filter edges to only include those where both source and target nodes exist
     const validEdges = processedEdges.filter(edge => 
       validNodeIds.has(edge.source) && validNodeIds.has(edge.target)
     );
-    
-    // Log color assignments for verification
-    console.log('🎨 Node Type Color Assignments:');
-    const sortedEntries = Array.from(nodeTypeColorMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    sortedEntries.forEach(([type, color]) => {
-      console.log(`  ${type}: ${color}`);
-    });
-    
-    // Check for duplicate colors (should not happen with proper scheme)
-    const colorCounts = new Map<string, string[]>();
-    sortedEntries.forEach(([type, color]) => {
-      if (!colorCounts.has(color)) {
-        colorCounts.set(color, []);
-      }
-      colorCounts.get(color)!.push(type);
-    });
-    
-    const duplicates = Array.from(colorCounts.entries()).filter(([_, types]) => types.length > 1);
-    if (duplicates.length > 0) {
-      console.warn('⚠️ WARNING: Multiple node types share the same color:');
-      duplicates.forEach(([color, types]) => {
-        console.warn(`  Color ${color} used by: ${types.join(', ')}`);
-      });
-    } else {
-      console.log('✅ All node types have unique colors!');
-    }
 
     const nodePositions = forceDirectedLayout(processedNodes, validEdges);
     processedNodes.forEach((node, index) => {
@@ -701,12 +911,9 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     setNodes(processedNodes);
     setEdges(validEdges);
     
-    // Track which node types are present in the graph for the legend
     const typesInGraph = new Set<string>();
     processedNodes.forEach(node => {
-      if (node.data?.type) {
-        typesInGraph.add(node.data.type);
-      }
+      if (node.data?.type) typesInGraph.add(node.data.type);
     });
     setNodeTypesInGraph(typesInGraph);
   }, [setNodes, setEdges, conceptProgress]);
@@ -787,11 +994,11 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     return positions;
   };
 
+  // Show loading/empty state
   if (!data?.graph) {
-    return <div className="h-full flex items-center justify-center text-gray-400">No graph data available</div>;
+    return <GraphLoadingScreen isLoading={isLoading} />;
   }
 
-  // Create legend entries from node types present in graph
   const legendEntries = Array.from(nodeTypesInGraph).map(type => ({
     type,
     color: getNodeColor(type, currentSubject)
@@ -799,6 +1006,31 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      {/* Node Edit Popup */}
+      {nodeEditState && (
+        <NodeEditPopup
+          editState={nodeEditState}
+          onClose={() => setNodeEditState(null)}
+          onSave={handleNodeEditSave}
+        />
+      )}
+
+      {/* Hint tooltip */}
+      <div style={{
+        position: 'absolute',
+        top: '16px',
+        right: '16px',
+        zIndex: 10,
+        background: 'rgba(0,0,0,0.5)',
+        color: 'rgba(255,255,255,0.7)',
+        fontSize: '11px',
+        padding: '4px 10px',
+        borderRadius: '20px',
+        pointerEvents: 'none',
+      }}>
+        Double-click a node to edit
+      </div>
+
       {/* Search Bar */}
       <div style={{
         position: 'absolute',
@@ -843,7 +1075,6 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
           {isSearching && (
             <div className="ml-2 text-sm text-gray-500">Searching...</div>
           )}
-          {/* Search mode toggle */}
           <div style={{
             display: 'flex',
             gap: '4px',
@@ -898,24 +1129,22 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
         )}
       </div>
       
-      {/* Legend Component - Compact */}
+      {/* Legend */}
       {legendEntries.length > 0 && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: '10px',
-            left: '10px',
-            background: 'rgba(255, 255, 255, 0.95)',
-            border: '1px solid #e5e7eb',
-            borderRadius: '6px',
-            padding: '8px 10px',
-            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-            zIndex: 1000,
-            maxWidth: '250px',
-            maxHeight: '300px',
-            overflowY: 'auto',
-          }}
-        >
+        <div style={{
+          position: 'absolute',
+          bottom: '10px',
+          left: '10px',
+          background: 'rgba(255, 255, 255, 0.95)',
+          border: '1px solid #e5e7eb',
+          borderRadius: '6px',
+          padding: '8px 10px',
+          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+          zIndex: 1000,
+          maxWidth: '250px',
+          maxHeight: '300px',
+          overflowY: 'auto',
+        }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
             {legendEntries.map((entry) => (
               <div
@@ -931,16 +1160,14 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
                 }}
                 title={entry.type.replace(/([A-Z])/g, ' $1').trim()}
               >
-                <div
-                  style={{
-                    width: '12px',
-                    height: '12px',
-                    borderRadius: '2px',
-                    backgroundColor: entry.color,
-                    border: '1px solid rgba(0, 0, 0, 0.15)',
-                    flexShrink: 0,
-                  }}
-                />
+                <div style={{
+                  width: '12px',
+                  height: '12px',
+                  borderRadius: '2px',
+                  backgroundColor: entry.color,
+                  border: '1px solid rgba(0, 0, 0, 0.15)',
+                  flexShrink: 0,
+                }} />
                 <span style={{ color: '#4b5563', whiteSpace: 'nowrap' }}>
                   {entry.type.replace(/([A-Z])/g, ' $1').trim()}
                 </span>
@@ -949,6 +1176,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
           </div>
         </div>
       )}
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -956,19 +1184,10 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{
-          padding: 0.5,
-          minZoom: 0.1,
-          maxZoom: 1,
-          duration: 800,
-        }}
+        fitViewOptions={{ padding: 0.5, minZoom: 0.1, maxZoom: 1, duration: 800 }}
         minZoom={0.1}
         maxZoom={4}
-        defaultViewport={{
-          x: 0,
-          y: 0,
-          zoom: 0.2,
-        }}
+        defaultViewport={{ x: 0, y: 0, zoom: 0.2 }}
         defaultEdgeOptions={{
           type: 'smoothstep',
           animated: true,
