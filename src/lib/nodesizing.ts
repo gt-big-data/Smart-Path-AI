@@ -1,12 +1,10 @@
-// src/lib/nodeizing.ts
-
 export interface SizingOptions {
   minWidth?: number;
   maxWidth?: number;
   minHeight?: number;
   maxHeight?: number;
   /**
-   * 'linear'     — raw ratio (your current approach)
+   * 'linear'     — raw ratio (current approach)
    * 'log'        — logarithmic, compresses extremes (recommended)
    * 'percentile' — rank-based, immune to outlier spikes
    */
@@ -49,7 +47,7 @@ export function computeNodeSizes(
 ): NodeSizingContext {
   const opts = { ...DEFAULTS, ...options };
 
-  // --- Pass 1: Count connections ---
+  // Pass 1: Count connections
   const connectionCount = new Map<string, number>();
   // Initialize all nodes at 0 so isolated nodes are included
   nodeIds.forEach(id => connectionCount.set(id, 0));
@@ -64,7 +62,7 @@ export function computeNodeSizes(
   const maxConnections = sorted[sorted.length - 1] ?? 1;
   const median = sorted[Math.floor(sorted.length / 2)] ?? 1;
 
-  // --- Pass 2: Compute ratio per node ---
+  // Pass 2: Compute ratio per node
   const sizes = new Map<string, NodeSizeResult>();
 
   for (const nodeId of nodeIds) {
@@ -74,7 +72,7 @@ export function computeNodeSizes(
     let ratio: number;
 
     if (maxConnections === minConnections) {
-      // All nodes have equal connections — use uniform mid-size (0.5 = centred in the range)
+      // All nodes have equal connections - use uniform mid-size (0.5 = centred in the range)
       ratio = 0.5;
     } else if (opts.scale === 'log') {
       // Log scale: compresses outliers, spreads the middle
@@ -82,13 +80,13 @@ export function computeNodeSizes(
       const logMax = Math.log1p(maxConnections);
       ratio = (Math.log1p(count) - logMin) / (logMax - logMin);
     } else if (opts.scale === 'percentile') {
-      // Rank-based: every node gets a proportional rank 0–1.
+      // Rank-based: every node gets a proportional rank 0-1.
       // Use findIndex (first occurrence) so tied nodes share the same rank
       // instead of all being pushed to ratio=1.0 by a filter(c <= count).
       const firstIdx = sorted.findIndex(c => c === count);
       ratio = (firstIdx + 1) / sorted.length;
     } else {
-      // Linear (your original)
+      // Linear
       ratio = (count - minConnections) / (maxConnections - minConnections);
     }
 
