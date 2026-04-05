@@ -14,6 +14,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Search, X } from 'lucide-react';
+import { computeNodeSizes } from '../lib/nodesizing';
 
 interface GraphData {
   status: string;
@@ -186,6 +187,7 @@ const nodeStyles = {
   height: '100%',
   margin: 0,
   boxSizing: 'border-box' as const,
+  borderRadius: '24px',
 };
 
 const NodeTooltip = ({ content }: { content: string }) => {
@@ -760,6 +762,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
             boxShadow: searchResults.includes(node.id)
               ? '0 0 15px rgba(251, 191, 36, 0.6)'
               : 'none',
+            borderRadius: '24px',
           }
         }))
       );
@@ -771,6 +774,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
             ...node.style,
             border: '1px solid rgba(255,255,255,0.2)',
             boxShadow: 'none',
+            borderRadius: '24px',
           }
         }))
       );
@@ -792,8 +796,17 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       confidenceByName.set(namePart.toLowerCase(), progress.confidenceScore);
     });
 
-    const processedEdges: Edge[] = graphData.graph.relationships.map((rel) => ({
-      id: `${rel.source}-${rel.target}`,
+    // One row per id: duplicate ids break React keys and inflate the graph.
+    const seenNodeIds = new Set<string>();
+    const nodesInput = graphData.graph.nodes.filter((n) => {
+      const id = String(n.id);
+      if (seenNodeIds.has(id)) return false;
+      seenNodeIds.add(id);
+      return true;
+    });
+
+    const processedEdges: Edge[] = graphData.graph.relationships.map((rel, i) => ({
+      id: `${rel.source}-${rel.target}-${String(rel.type)}-${i}`,
       source: rel.source,
       target: rel.target,
       label: rel.type.replace(/_/g, ' '),
@@ -803,8 +816,29 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       animated: true,
     }));
 
+    // Node Sizing
+    const nodeIds = nodesInput.map(n => n.id);
+
+    // Guard: only pass edges whose endpoints exist in nodeIds so phantom IDs
+    // (e.g. stale refs after deduplication) don't pollute connectionCount stats.
+    const nodeIdSet = new Set(nodeIds);
+    const safeEdges = processedEdges.filter(
+      e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target)
+    );
+
+    const { sizes, connectionCount } = computeNodeSizes(
+      nodeIds,
+      safeEdges,
+      confidenceMap,
+      { scale: 'log' }
+    );
+
+    const allWidths = [...sizes.values()].map(s => s.width).sort((a, b) => a - b);
+    const medianWidth = allWidths[Math.floor(allWidths.length / 2)] ?? 200;
+    const layoutSpacing = Math.max(360, medianWidth + 100);
+
     const connectedNodeIds = new Set<string>();
-    processedEdges.forEach(edge => {
+    safeEdges.forEach(edge => {
       connectedNodeIds.add(edge.source);
       connectedNodeIds.add(edge.target);
     });
@@ -822,7 +856,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
     const nodeTypeColorMap = new Map<string, string>();
     
-    const processedNodes: Node[] = graphData.graph.nodes
+    const processedNodes: Node[] = nodesInput
       .map((node) => {
         const nodeType = node.labels[0];
         const nodeColor = getNodeColor(nodeType, subject);
@@ -871,38 +905,41 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
           }
         }
         
+        const size = sizes.get(node.id) ?? { width: 200, height: 70 };
         return {
           id: node.id,
           type: 'default',
-          data: { 
+          data: {
             label: nodeLabel,
             description: node.properties.description || node.properties.text,
             type: nodeType,
             subject: subject,
             confidenceScore: confidenceScore,
+            connections: connectionCount.get(node.id) ?? 0,  // expose for tooltip
           },
           position: { x: 0, y: 0 },
           style: {
             background: nodeColor,
             color: '#ffffff',
             border: '1px solid rgba(255,255,255,0.2)',
-            width: '200px',
-            height: '70px',
+            width: `${size.width}px`,
+            height: `${size.height}px`,
             padding: 0,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            borderRadius: '24px',
           },
         };
       })
       .filter((node): node is Node => node !== null);
 
     const validNodeIds = new Set(processedNodes.map(node => node.id));
-    const validEdges = processedEdges.filter(edge => 
+    const validEdges = processedEdges.filter(edge =>
       validNodeIds.has(edge.source) && validNodeIds.has(edge.target)
     );
 
-    const nodePositions = forceDirectedLayout(processedNodes, validEdges);
+    const nodePositions = forceDirectedLayout(processedNodes, validEdges, layoutSpacing);
     processedNodes.forEach((node, index) => {
       node.position = nodePositions[index];
     });
@@ -923,9 +960,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     }
   }, [data, processGraphData]);
 
-  const forceDirectedLayout = (nodes: Node[], edges: Edge[]) => {
+  const forceDirectedLayout = (nodes: Node[], edges: Edge[], spacing: number = 360) => {
     const positions: { x: number; y: number }[] = [];
-    const spacing = 300;
     const width = Math.max(1000, nodes.length * 200);
     const height = Math.max(800, nodes.length * 150);
     
@@ -1155,7 +1191,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
                   fontSize: '10px',
                   padding: '2px 6px',
                   background: '#f9fafb',
-                  borderRadius: '4px',
+                  borderRadius: '2px',
                 }}
                 title={entry.type.replace(/([A-Z])/g, ' $1').trim()}
               >
