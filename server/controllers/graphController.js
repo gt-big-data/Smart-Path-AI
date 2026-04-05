@@ -23,7 +23,8 @@ const axiosConfig_1 = require("../utils/axiosConfig");
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../.env') });
 // Initialize OpenAI with explicit API key
 const openai = new openai_1.default({
-    apiKey: process.env.OPENAI_API_KEY || '' // Provide empty string as fallback
+    apiKey: process.env.OPENAI_API_KEY || '',
+    baseURL: process.env.OPENAI_BASE_URL || undefined
 });
 // Verify API key is loaded
 if (!process.env.OPENAI_API_KEY) {
@@ -191,7 +192,7 @@ Provide feedback in this JSON format:
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userPrompt }
             ],
-            model: "gpt-4o-mini",
+            model: "cx/gpt-5.4-mini",
             temperature: 0.8,
             max_tokens: 500
         });
