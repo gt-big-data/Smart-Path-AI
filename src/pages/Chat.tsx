@@ -9,6 +9,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import GraphVisualization from '../components/GraphVisualization';
+import { API_BASE_URL } from '../config/api';
 
 interface Message {
   id: string;
@@ -55,8 +56,6 @@ interface ConceptProgress {
   confidenceScore: number;
   lastAttempted?: Date;
 }
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);

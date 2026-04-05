@@ -17,6 +17,7 @@ const axios_1 = __importDefault(require("axios"));
 const multer_1 = __importDefault(require("multer"));
 const form_data_1 = __importDefault(require("form-data"));
 const crypto_1 = require("crypto");
+const axiosConfig_1 = require("../utils/axiosConfig");
 // Configure multer for handling file uploads
 exports.upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
@@ -167,8 +168,9 @@ const processPdf = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 sendEvent({ type: 'progress', percent: rounded, message: getProgressMessage(rounded) });
             }
         }, 1500);
-        // Send to processing server, passing the abort signal so we can cancel mid-flight
-        const response = yield axios_1.default.post(`${PYTHON_SERVICE_URL}/process-pdf`, formData, {
+        // Send to processing server
+        const response = yield axiosConfig_1.pythonServiceClient.post('/process-pdf', formData, {
+            params: req.query,
             headers: Object.assign({}, formData.getHeaders()),
             maxBodyLength: Infinity,
             maxContentLength: Infinity,

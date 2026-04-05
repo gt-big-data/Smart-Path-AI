@@ -143,7 +143,8 @@ exports.login = login;
  * Redirect the user to your frontend app.
  */
 const googleAuthCallback = (res) => {
-    return res.redirect('http://localhost:5173');
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    return res.redirect(clientUrl);
 };
 exports.googleAuthCallback = googleAuthCallback;
 const checkAuth = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
