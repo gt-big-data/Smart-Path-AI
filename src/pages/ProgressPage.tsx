@@ -13,6 +13,13 @@ interface ProgressItem {
 interface ProfileData {
   full_progress: ProgressItem[];
   topics_to_review: ProgressItem[];
+  per_graph_progress?: Array<{
+    graph_id: string;
+    title?: string;
+    node_count: number;
+    last_practiced?: string;
+    items: ProgressItem[];
+  }>;
 }
 
 const ProgressPage: React.FC = () => {
@@ -144,15 +151,19 @@ const ProgressPage: React.FC = () => {
           return;
         }
 
-        // Combine all graph data (only from successful fetches)
-        const allNodes: any[] = [];
-        graphResponses.forEach((graphRes: any) => {
-          // Skip error responses
-          if (graphRes && !graphRes.error && graphRes.data && graphRes.data.graph && graphRes.data.graph.nodes) {
-            allNodes.push(...graphRes.data.graph.nodes);
+        // Organize graph data per graph id (only from successful fetches)
+        const perGraphNodes = new Map<string, any[]>();
+        graphResponses.forEach((graphRes: any, idx: number) => {
+          const gid = graphIds[idx];
+          if (graphRes && !graphRes.error && graphRes.data && graphRes.data.graph && Array.isArray(graphRes.data.graph.nodes)) {
+            perGraphNodes.set(gid, graphRes.data.graph.nodes);
+          } else {
+            perGraphNodes.set(gid, []);
           }
         });
 
+        // Flatten all nodes for name resolution fallback
+        const allNodes: any[] = Array.from(perGraphNodes.values()).flat();
         const graphData = { graph: { nodes: allNodes } };
 
         // DEBUG: log raw responses to help diagnose missing labels
@@ -189,14 +200,20 @@ const ProgressPage: React.FC = () => {
           return String(node.id);
         };
 
-        for (const node of nodes) {
-          const props = node.properties || {};
-          const candidates = [props.conceptId, props.topicID, props.topicId, props.topic_id, props.concept_id, node.id, props.neo4j_id, props.id]
-            .filter(Boolean)
-            .map(String);
-          const display = getNodeLabel(node) || String(node.id);
-          for (const c of candidates) {
-            nodeNameById.set(String(c), display);
+        // Map each candidate id to a display name and remember which graph it came from
+        const conceptIdToGraphId = new Map<string, string>();
+        for (const [gid, nodeList] of perGraphNodes.entries()) {
+          for (const node of nodeList) {
+            const props = node.properties || {};
+            const candidates = [props.conceptId, props.topicID, props.topicId, props.topic_id, props.concept_id, node.id, props.neo4j_id, props.id]
+              .filter(Boolean)
+              .map(String);
+            const display = getNodeLabel(node) || String(node.id);
+            for (const c of candidates) {
+              nodeNameById.set(String(c), display);
+              // Only set graph mapping if not already present
+              if (!conceptIdToGraphId.has(String(c))) conceptIdToGraphId.set(String(c), gid);
+            }
           }
         }
         
@@ -217,6 +234,7 @@ const ProgressPage: React.FC = () => {
           const conceptId = String(p.conceptId || p.conceptID || p.topicId || p.topic_id || p.id);
           // Try map lookup first. If missing, attempt to find node by id and compute a label.
           let name = nodeNameById.get(conceptId) || p.name || p.topicName;
+          const graph_id = conceptIdToGraphId.get(conceptId) || '';
           if (!name) {
             const found = nodes.find((n: any) => {
               const props = n.properties || {};
@@ -231,6 +249,16 @@ const ProgressPage: React.FC = () => {
             if (found) {
               name = getNodeLabel(found);
               console.log(`[ProgressPage] ✅ Found node for conceptId ${conceptId}: ${name}`);
+              // if we found node in flattened nodes, try to find its graph id by scanning perGraphNodes
+              if (!graph_id) {
+                for (const [gid, nodeList] of perGraphNodes.entries()) {
+                  if (nodeList.some((nn: any) => nn === found || String(nn.id) === String(found.id))) {
+                    // assign graph mapping
+                    conceptIdToGraphId.set(conceptId, gid);
+                    break;
+                  }
+                }
+              }
             } else {
               // Log when we can't find a node for debugging
               console.warn(`[ProgressPage] ❌ Could not find node for conceptId: ${conceptId}`);
@@ -255,6 +283,7 @@ const ProgressPage: React.FC = () => {
             topic_name: name,
             confidence_score: typeof p.confidenceScore === 'number' ? p.confidenceScore : (p.confidence_score ?? 0),
             last_practiced: p.lastAttempted || p.last_practiced || p.updatedAt || new Date().toISOString(),
+            graph_id,
           };
         });
 
@@ -402,7 +431,46 @@ const ProgressPage: React.FC = () => {
         const topics_to_review = validConcepts.filter(i => i.confidence_score < 0.75).sort((a, b) => a.confidence_score - b.confidence_score).slice(0, 5);
 
         // Full progress: sort by most recently practiced
-        const full_progress = validConcepts.sort((a, b) => new Date(b.last_practiced).getTime() - new Date(a.last_practiced).getTime());
+        const full_progress = [...validConcepts].sort((a, b) => new Date(b.last_practiced).getTime() - new Date(a.last_practiced).getTime());
+
+        // Group progress by graph_id
+        const perGraphMap = new Map<string, { items: ProgressItem[]; node_count: number; title?: string; last_practiced?: string }>();
+        for (const [gid, nodeList] of perGraphNodes.entries()) {
+          perGraphMap.set(gid, { items: [], node_count: nodeList.length, title: undefined, last_practiced: undefined });
+        }
+        for (const item of full_progress) {
+          const gid = (item as any).graph_id || '';
+          if (!perGraphMap.has(gid)) {
+            perGraphMap.set(gid, { items: [], node_count: 0 });
+          }
+          const entry = perGraphMap.get(gid)!;
+          entry.items.push(item);
+          // compute last practiced per graph
+          const lp = entry.last_practiced ? new Date(entry.last_practiced) : null;
+          const cand = new Date(item.last_practiced);
+          if (!lp || cand > lp) entry.last_practiced = item.last_practiced;
+        }
+
+        // Try to fetch chat titles to display per graph
+        try {
+          const userRes = await axios.get('http://localhost:4000/chat/user', { withCredentials: true });
+          const userId = userRes.data;
+          if (userId) {
+            const chatsRes = await axios.get(`http://localhost:4000/chat/${userId}/chats`, { withCredentials: true });
+            const userChats = Array.isArray(chatsRes.data) ? chatsRes.data : [];
+            for (const chat of userChats) {
+              const gid = chat.graph_id;
+              if (gid && perGraphMap.has(gid)) {
+                const e = perGraphMap.get(gid)!;
+                e.title = chat.title || 'Chat';
+              }
+            }
+          }
+        } catch (chatErr) {
+          console.warn('Failed to fetch chat titles for progress page', chatErr);
+        }
+
+        const per_graph_progress = Array.from(perGraphMap.entries()).map(([graph_id, v]) => ({ graph_id, title: v.title, node_count: v.node_count, last_practiced: v.last_practiced, items: v.items }));
 
         console.log('[ProgressPage] Setting profile data:');
         console.log(`  - Full progress: ${full_progress.length} items`);
@@ -411,7 +479,7 @@ const ProgressPage: React.FC = () => {
           console.log('  - Sample full_progress items:', full_progress.slice(0, 3));
         }
         
-        setProfileData({ full_progress, topics_to_review });
+        setProfileData({ full_progress, topics_to_review, per_graph_progress });
       } catch (err: any) {
         console.error('Error fetching profile data:', err);
         if (err.response) {
@@ -443,6 +511,17 @@ const ProgressPage: React.FC = () => {
     if (score < 0.4) return 'text-red-500';
     if (score < 0.75) return 'text-yellow-500';
     return 'text-green-500';
+  };
+
+  const [expandedGraphs, setExpandedGraphs] = useState<Set<string>>(new Set());
+
+  const toggleGraph = (gid: string) => {
+    setExpandedGraphs(prev => {
+      const next = new Set(prev);
+      if (next.has(gid)) next.delete(gid);
+      else next.add(gid);
+      return next;
+    });
   };
 
   const isLikelyUUID = (s: string) => {
@@ -512,7 +591,7 @@ const ProgressPage: React.FC = () => {
             <section className="lg:col-span-1 bg-white/80 backdrop-blur-sm p-6 rounded-xl border border-slate-200/60 shadow-sm">
               <div className="flex items-center gap-3 mb-4">
                 <TrendingDown className="w-6 h-6 text-yellow-500" />
-                <h2 className="text-xl font-semibold text-slate-800">Topics to Review</h2>
+                <h2 className="text-xl font-semibold text-slate-800">Top Topics to Review</h2>
               </div>
               {profileData?.topics_to_review && profileData.topics_to_review.length > 0 ? (
                 <ul className="space-y-4">
@@ -536,38 +615,49 @@ const ProgressPage: React.FC = () => {
   
             {/* Full Progress */}
             <section className="lg:col-span-2 bg-white/80 backdrop-blur-sm p-6 rounded-xl border border-slate-200/60 shadow-sm">
-              <div className="flex items-center gap-3 mb-4">
-                <BookOpen className="w-6 h-6 text-teal-500" />
-                <h2 className="text-xl font-semibold text-slate-800">All Practiced Topics</h2>
-              </div>
-              {profileData?.full_progress && profileData.full_progress.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Topic</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Confidence</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Practiced</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {profileData.full_progress.map((item) => (
-                        <tr key={item.concept_id}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" title={item.topic_name}>
-                            {friendlyTopicLabel(item.topic_name)}
-                          </td>
-                          <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${getScoreColor(item.confidence_score)}`}>
-                            {Math.round(item.confidence_score * 100)}%
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(item.last_practiced).toLocaleDateString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="flex items-center gap-3 mb-4">
+                  <BookOpen className="w-6 h-6 text-teal-500" />
+                  <h2 className="text-xl font-semibold text-slate-800">All Practiced Topics</h2>
                 </div>
-              ) : (
-                <p className="text-gray-500">You haven't practiced any topics yet. Complete a quiz to see your progress!</p>
-              )}
+                {profileData?.per_graph_progress && profileData.per_graph_progress.length > 0 ? (
+                  <div className="space-y-3">
+                    {profileData.per_graph_progress.map((g) => (
+                      <div key={g.graph_id} className="border border-slate-100 rounded-md bg-white p-3">
+                        <button
+                          onClick={() => toggleGraph(g.graph_id)}
+                          className="w-full flex items-center justify-between gap-3"
+                          aria-expanded={expandedGraphs.has(g.graph_id)}
+                        >
+                          <div className="flex items-center gap-3 text-left">
+                            <div className="font-medium text-slate-800">{g.title || friendlyTopicLabel(g.graph_id)}</div>
+                            <div className="text-sm text-slate-500">· {g.node_count} nodes</div>
+                          </div>
+                          <div className="text-sm text-slate-500">{g.last_practiced ? new Date(g.last_practiced).toLocaleDateString() : '—'}</div>
+                        </button>
+                        {expandedGraphs.has(g.graph_id) && (
+                          <div className="mt-3 border-t pt-3 max-h-64 overflow-y-auto">
+                            {g.items.length > 0 ? (
+                              <ul className="space-y-2">
+                                {g.items.map((item) => (
+                                  <li key={item.concept_id} className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50">
+                                    <div className="text-sm text-slate-800" title={item.topic_name}>{friendlyTopicLabel(item.topic_name)}</div>
+                                    <div className={`text-sm font-semibold ${getScoreColor(item.confidence_score)}`}>
+                                      {Math.round(item.confidence_score * 100)}%
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <div className="text-sm text-slate-500">No practiced topics for this chat.</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-500">You haven't practiced any topics yet. Complete a quiz to see your progress!</p>
+                )}
             </section>
           </main>
         </div>
