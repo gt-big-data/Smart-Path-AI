@@ -183,6 +183,7 @@ const nodeStyles = {
   color: 'white',
   letterSpacing: '0.5px',
   lineHeight: '1.3',
+  borderRaidus: '50%',
   width: '100%',
   height: '100%',
   margin: 0,
@@ -572,9 +573,22 @@ const CustomNode = memo((props: CustomNodeProps) => {
   return (
     <>
       <Handle 
+        id="top"
         type="target" 
         position={Position.Top} 
-        style={{ background: '#555', width: '8px', height: '8px', top: '-4px' }} 
+        style={{ background: '#555', width: '8px', height: '8px' }} 
+      />
+      <Handle 
+        id="left"
+        type="target" 
+        position={Position.Left} 
+        style={{ background: '#555', width: '8px', height: '8px' }} 
+      />
+      <Handle 
+        id="right"
+        type="target" 
+        position={Position.Right} 
+        style={{ background: '#555', width: '8px', height: '8px' }} 
       />
       <div
         style={{
@@ -593,9 +607,28 @@ const CustomNode = memo((props: CustomNodeProps) => {
       </div>
       {showTooltip && !data.customLabel && <NodeTooltip content={data.description} />}
       <Handle 
+        id="bottom"
         type="source" 
         position={Position.Bottom} 
-        style={{ background: '#555', width: '8px', height: '8px', bottom: '-4px' }} 
+        style={{ background: '#555', width: '8px', height: '8px' }} 
+      />
+      <Handle 
+        id="top-source"
+        type="source" 
+        position={Position.Top} 
+        style={{ background: '#555', width: '8px', height: '8px' }} 
+      />
+      <Handle 
+        id="left-source"
+        type="source" 
+        position={Position.Left} 
+        style={{ background: '#555', width: '8px', height: '8px' }} 
+      />
+      <Handle 
+        id="right-source"
+        type="source" 
+        position={Position.Right} 
+        style={{ background: '#555', width: '8px', height: '8px' }} 
       />
     </>
   );
@@ -966,13 +999,61 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       console.log('✅ All node types have unique colors!');
     }
 
-    const nodePositions = forceDirectedLayout(processedNodes, validEdges);
+    //const nodePositions = forceDirectedLayout(processedNodes, validEdges);
+    const nodePositions = hierarchicalLayout(processedNodes, validEdges);
     processedNodes.forEach((node, index) => {
       node.position = nodePositions[index];
     });
 
+    // Now that nodes are positioned, create edges with appropriate handle selection
+    const processedEdgesWithHandles: Edge[] = validEdges
+      .map((edge) => {
+        const sourceNode = processedNodes.find(n => n.id === edge.source);
+        const targetNode = processedNodes.find(n => n.id === edge.target);
+        
+        if (!sourceNode || !targetNode) return null;
+
+        // Calculate the angle between source and target nodes
+        const dx = targetNode.position.x - sourceNode.position.x;
+        const dy = targetNode.position.y - sourceNode.position.y;
+        const angle = Math.atan2(dy, dx) * (180 / Math.PI); // Convert to degrees
+
+        // Determine best handles based on angle
+        let sourceHandle = 'bottom'; // default
+        let targetHandle = 'top'; // default
+
+        // For source handle (where edge starts from)
+        if (angle >= -45 && angle < 45) {
+          sourceHandle = 'right-source'; // right
+        } else if (angle >= 45 && angle < 135) {
+          sourceHandle = 'bottom'; // bottom
+        } else if (angle >= 135 || angle < -135) {
+          sourceHandle = 'left-source'; // left
+        } else {
+          sourceHandle = 'top-source'; // top
+        }
+
+        // For target handle (where edge goes to) - opposite direction
+        if (angle >= -45 && angle < 45) {
+          targetHandle = 'left'; // left (opposite of right)
+        } else if (angle >= 45 && angle < 135) {
+          targetHandle = 'top'; // top (opposite of bottom)
+        } else if (angle >= 135 || angle < -135) {
+          targetHandle = 'right'; // right (opposite of left)
+        } else {
+          targetHandle = 'bottom'; // bottom (opposite of top)
+        }
+
+        return {
+          ...edge,
+          sourceHandle: sourceHandle,
+          targetHandle: targetHandle,
+        };
+      })
+      .filter((edge): edge is Edge => edge !== null);
+
     setNodes(processedNodes);
-    setEdges(validEdges);
+    setEdges(processedEdgesWithHandles);
     
     const typesInGraph = new Set<string>();
     processedNodes.forEach(node => {
@@ -1052,6 +1133,163 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       pos.x = pos.x - centerX + width / 2;
       pos.y = pos.y - centerY + height / 2;
     });
+
+    return positions;
+  };
+
+  type PolarNode = {
+  r: number;
+  theta: number;
+  mass: number;
+};
+
+  const polarConstrainedLayout = (nodes: Node[], edges: Edge[]) => {
+    const N = nodes.length;
+
+    // ==============================
+    // ⚙️ PARAMETERS (tune freely)
+    // ==============================
+    const numTopics = nodes.filter(n => n.data?.type === "Topic").length;
+    const numSubtopics = nodes.filter(n => n.data?.type === "Subtopic").length;
+    const numChildren = nodes.length - numTopics - numSubtopics;
+
+    const R_TOPIC = 300;
+    const R_SUB = R_TOPIC + 250 + numSubtopics * 20;
+    const R_CHILD = R_SUB + 250 + numChildren * 10;
+
+    const ITERATIONS = 60;
+
+    const K_REPEL = 0.1;
+    const K_ATTRACT = 1;
+
+    const MIN_ANGLE = 0.3; // minimum angular separation
+
+    // ==============================
+    // 🗺️ Build lookup maps
+    // ==============================
+    const indexById = new Map<string, number>();
+    nodes.forEach((n, i) => indexById.set(n.id, i));
+
+    const adj = new Map<number, number[]>();
+    nodes.forEach((_, i) => adj.set(i, []));
+    edges.forEach(e => {
+      const a = indexById.get(e.source);
+      const b = indexById.get(e.target);
+      if (a != null && b != null) {
+        adj.get(a)!.push(b);
+        adj.get(b)!.push(a);
+      }
+    });
+
+    // ==============================
+    // 🌱 Initialize polar positions
+    // ==============================
+    const polar: PolarNode[] = [];
+
+    nodes.forEach((node, i) => {
+      let r = R_CHILD;
+      let mass = 1;
+
+      if (node.data?.isCenter) {
+        r = 0;
+        mass = 100; // immovable
+      } else if (node.data?.type === "Topic") {
+        r = R_TOPIC;
+        mass = 3;
+      } else if (node.data?.type === "Subtopic") {
+        r = R_SUB;
+        mass = 2;
+      } else {
+        r = R_CHILD;
+        mass = 1;
+      }
+
+      polar[i] = {
+        r,
+        theta: Math.random() * 2 * Math.PI, // random seed
+        mass,
+      };
+    });
+
+    // ==============================
+    // 🔁 Iterative relaxation
+    // ==============================
+    for (let iter = 0; iter < ITERATIONS; iter++) {
+      const deltaTheta = new Array(N).fill(0);
+
+      // ==========================
+      // 🧲 REPULSION (same ring)
+      // ==========================
+      for (let i = 0; i < N; i++) {
+        for (let j = i + 1; j < N; j++) {
+          if (polar[i].r !== polar[j].r) continue;
+
+          let d = polar[j].theta - polar[i].theta;
+
+          // wrap to [-π, π]
+          if (d > Math.PI) d -= 2 * Math.PI;
+          if (d < -Math.PI) d += 2 * Math.PI;
+
+          const dist = Math.abs(d);
+
+          const force = K_REPEL / (dist + 0.05);
+
+          deltaTheta[i] -= force / polar[i].mass * Math.sign(d);
+          deltaTheta[j] += force / polar[j].mass * Math.sign(d);
+        }
+      }
+
+      // ==========================
+      // 🔗 ATTRACTION (edges)
+      // ==========================
+      edges.forEach(e => {
+        const i = indexById.get(e.source)!;
+        const j = indexById.get(e.target)!;
+
+        let d = polar[j].theta - polar[i].theta;
+
+        if (d > Math.PI) d -= 2 * Math.PI;
+        if (d < -Math.PI) d += 2 * Math.PI;
+
+        const dist = Math.abs(d);
+
+        if (dist > MIN_ANGLE) {
+          const force = K_ATTRACT * (dist - MIN_ANGLE) * Math.sign(d);
+
+          const totalMass = polar[i].mass + polar[j].mass;
+
+          deltaTheta[i] += force * (polar[j].mass / totalMass);
+          deltaTheta[j] -= force * (polar[i].mass / totalMass);
+        }
+      });
+
+      // ==========================
+      // ✨ Apply updates
+      // ==========================
+      for (let i = 0; i < N; i++) {
+        if (nodes[i].data?.isCenter) continue;
+
+        polar[i].theta += deltaTheta[i];
+
+        // normalize angle to [0, 2π]
+        if (polar[i].theta < 0) polar[i].theta += 2 * Math.PI;
+        if (polar[i].theta > 2 * Math.PI) polar[i].theta -= 2 * Math.PI;
+      }
+    }
+
+    // ==============================
+    // 🔄 Convert to Cartesian
+    // ==============================
+    const width = Math.max(1000, nodes.length * 150);
+    const height = Math.max(800, nodes.length * 120);
+
+    const cx = width / 2;
+    const cy = height / 2;
+
+    const positions = polar.map(p => ({
+      x: cx + p.r * Math.cos(p.theta),
+      y: cy + p.r * Math.sin(p.theta),
+    }));
 
     return positions;
   };
