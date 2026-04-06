@@ -67,6 +67,7 @@ function App() {
   const [progressMessage, setProgressMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [graphData, setGraphData] = useState<any>(null);
+  const [graphLoading, setGraphLoading] = useState(false);
   const [qaData, setQaData] = useState<QAPair[]>([]);
   const [conceptProgress, setConceptProgress] = useState<ConceptProgress[]>([]); // Add state for concept progress
   const [quizLength, setQuizLength] = useState<5 | 10 | 15>(5);
@@ -79,6 +80,7 @@ function App() {
   const deletingChatRef = useRef<string | null>(null);
   const renameInFlightRef = useRef<string | null>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
+  const graphRequestIdRef = useRef<number>(0);
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [loadingDots, setLoadingDots] = useState('');
@@ -205,19 +207,29 @@ function App() {
     };
   };
 
-  const fetchGraphData = async (graphId?: string) => {
+  const fetchGraphData = async (graphId?: string, targetChatId?: string) => {
     if (!graphId) return;
+    const requestId = ++graphRequestIdRef.current;
+    // mark loading for this request
+    setGraphLoading(true);
     try {
       const response = await axios.get(`${API_BASE_URL}/api/view-graph?graph_id=${graphId}`);
       console.log('Graph data response:', response.data);
-      // Add graph_id to the response data so search can use it
-      setGraphData({ ...response.data, graph_id: graphId });
-      
-      // Fetch concept progress after loading graph
-      await fetchConceptProgress();
+      // Only apply results if this request is still the latest and the chat hasn't changed
+      if (requestId === graphRequestIdRef.current && (!targetChatId || targetChatId === currentChatId)) {
+        setGraphData({ ...response.data, graph_id: graphId });
+        // Fetch concept progress after loading graph
+        await fetchConceptProgress();
+      } else {
+        console.log('Discarding stale graph response for graph_id', graphId);
+      }
     } catch (error) {
       console.error('Error fetching graph:', error);
-      setGraphData({ error: 'Failed to load graph data' });
+      if (requestId === graphRequestIdRef.current) {
+        setGraphData({ error: 'Failed to load graph data' });
+      }
+    } finally {
+      if (requestId === graphRequestIdRef.current) setGraphLoading(false);
     }
   };
 
@@ -352,7 +364,7 @@ function App() {
           ));
         }
 
-        await fetchGraphData(responseData.graph_id);
+        await fetchGraphData(responseData.graph_id, currentChatId);
         
         // Show the "Start Quiz" button after document upload
         // User can now choose quiz settings before starting
@@ -1044,11 +1056,21 @@ function App() {
   const handleChatSelect = (chatId: string) => {
     // Clear graph data immediately when switching chats to prevent showing wrong graph
     setGraphData(null);
+    // Invalidate any in-flight graph requests so responses aren't applied to the wrong chat
+    graphRequestIdRef.current++;
     setQaData([]);
     setIsAnswering(false);
     setCurrentQuestionIndex(0);
     setUserAnswers([]);
     setQuizCompleted(false);
+    // If the target chat already has a graph, show loading immediately
+    const target = chats.find(c => c.id === chatId);
+    if (target?.graph_id) {
+      setGraphLoading(true);
+    } else {
+      setGraphLoading(false);
+    }
+
     setCurrentChatId(chatId);
   };
 
@@ -1363,7 +1385,7 @@ function App() {
     const existingQuizState = currentChat ? loadQuizState(currentChat.id) : null;
 
     if (currentChat?.graph_id) {
-      fetchGraphData(currentChat.graph_id);
+      fetchGraphData(currentChat.graph_id, currentChat.id);
       
       // Check if there's an existing quiz in progress
       if (existingQuizState) {
@@ -1481,7 +1503,7 @@ function App() {
   useEffect(() => {
       const currentChat = chats.find(chat => chat.id === currentChatId);
     if (currentChat?.graph_id) {
-      fetchGraphData(currentChat.graph_id);
+      fetchGraphData(currentChat.graph_id, currentChat.id);
 
           // Try to restore persisted quiz state first
           const persisted = currentChatId ? loadQuizState(currentChatId) : null;
@@ -1769,7 +1791,7 @@ function App() {
                   </button>
                 </div>
               ) : (
-                <GraphVisualization data={graphData} conceptProgress={conceptProgress} />
+                <GraphVisualization data={graphData} conceptProgress={conceptProgress} isLoading={graphLoading} />
               )}
             </div>
           </div>
