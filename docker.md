@@ -49,7 +49,6 @@ Open `./.env` and set values for:
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `OPENAI_API_KEY`
-- `OPENAI_BASE_URL`
 - `SESSION_SECRET`
 
 ## 3) Run (Build Mode)
