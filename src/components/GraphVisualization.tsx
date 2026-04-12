@@ -183,7 +183,6 @@ const nodeStyles = {
   color: 'white',
   letterSpacing: '0.5px',
   lineHeight: '1.3',
-  borderRaidus: '50%',
   width: '100%',
   height: '100%',
   margin: 0,
@@ -1000,7 +999,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     }
 
     //const nodePositions = forceDirectedLayout(processedNodes, validEdges);
-    const nodePositions = hierarchicalLayout(processedNodes, validEdges);
+    const nodePositions = polarConstrainedLayout(processedNodes, validEdges);
     processedNodes.forEach((node, index) => {
       node.position = nodePositions[index];
     });
@@ -1050,7 +1049,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
           targetHandle: targetHandle,
         };
       })
-      .filter((edge): edge is Edge => edge !== null);
+      //.filter((edge): edge is Edge => edge !== null);
 
     setNodes(processedNodes);
     setEdges(processedEdgesWithHandles);
@@ -1154,8 +1153,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     const numChildren = nodes.length - numTopics - numSubtopics;
 
     const R_TOPIC = 300;
-    const R_SUB = R_TOPIC + 250 + numSubtopics * 20;
-    const R_CHILD = R_SUB + 250 + numChildren * 10;
+    const R_SUB = R_TOPIC + numSubtopics * 8;
+    const R_CHILD = R_SUB + 200 + numChildren * 5;
 
     const ITERATIONS = 60;
 
@@ -1290,145 +1289,6 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       x: cx + p.r * Math.cos(p.theta),
       y: cy + p.r * Math.sin(p.theta),
     }));
-
-    return positions;
-  };
-
-  // Hierarchical layout: Topic top, Subtopics left, children to right (Alternative to force-directed)
-  const hierarchicalLayout = (nodes: Node[], edges: Edge[]) => {
-    const positions: { x: number; y: number }[] = [];
-    const width = Math.max(1000, nodes.length * 200);
-    const height = Math.max(800, nodes.length * 150);
-
-    // Build fast lookup with node index and adjacency list
-    const nodeById = new Map(nodes.map((n, i) => [n.id, { node: n, index: i }]));
-    const adj = new Map<string, Set<string>>();
-    nodes.forEach(n => adj.set(n.id, new Set()));
-    edges.forEach(e => {
-      if (adj.has(e.source)) adj.get(e.source)!.add(e.target);
-      if (adj.has(e.target)) adj.get(e.target)!.add(e.source);
-    });
-
-    // categories of nodes
-    const topics = nodes.filter(n => n.data?.type === 'Topic');
-    const subtopics = nodes.filter(n => n.data?.type === 'Subtopic');
-    const others = nodes.filter(n => n.data?.type !== 'Topic' && n.data?.type !== 'Subtopic');
-
-    // detect special center topic
-    const centerTopic = topics.find(t => t.data?.isCenter);
-    const otherTopics = centerTopic ? topics.filter(t => t !== centerTopic) : topics;
-
-    // compute a simple weight for each non-center topic: 1 + #subtopics + #children-of-subtopics
-    const subtreeSize = new Map<string, number>();
-    otherTopics.forEach(t => {
-      let count = 1;
-      const subs = Array.from(adj.get(t.id) || []).filter(id => {
-        const n = nodeById.get(id)?.node;
-        return n && n.data?.type === 'Subtopic';
-      });
-      count += subs.length;
-      subs.forEach(sid => {
-        const neigh = adj.get(sid);
-        if (neigh) {
-          count += Array.from(neigh).filter(id => {
-            const n = nodeById.get(id)?.node;
-            return n && n.data?.type !== 'Topic' && n.data?.type !== 'Subtopic';
-          }).length;
-        }
-      });
-      subtreeSize.set(t.id, count);
-    });
-
-    const marginTop = 80;
-    const leftColX = 160;
-    const topicGapUnit = 80; // vertical gap unit per weight
-    const subtopicSpacingY = 140;
-    const childStartX = leftColX + 260;
-    const childXSpacing = 220;
-    const childYSpacing = 90;
-
-    // place center topic alone in top row
-    if (centerTopic) {
-      const idx = nodeById.get(centerTopic.id)!.index;
-      positions[idx] = { x: Math.round(width / 2), y: marginTop };
-    }
-
-    // stack remaining topics along left column using their weights
-    let runningY = marginTop + (centerTopic ? 120 : 0);
-    otherTopics.forEach(t => {
-      const idx = nodeById.get(t.id)!.index;
-      positions[idx] = { x: leftColX, y: runningY };
-      const weight = subtreeSize.get(t.id) || 1;
-      runningY += topicGapUnit + weight * topicGapUnit;
-    });
-
-    // place subtopics to the right of their parent topic, keeping siblings spaced
-    subtopics.forEach(s => {
-      const parentId = Array.from(adj.get(s.id) || []).find(pid => {
-        const pn = nodeById.get(pid)?.node;
-        return pn && pn.data?.type === 'Topic';
-      });
-      if (!parentId) return;
-      const pIdx = nodeById.get(parentId)!.index;
-      const pPos = positions[pIdx];
-      const siblingSubs = Array.from(adj.get(parentId) || []).filter(id => {
-        const n = nodeById.get(id)?.node;
-        return n && n.data?.type === 'Subtopic';
-      });
-      const subIndex = siblingSubs.indexOf(s.id);
-      const subx = (pPos ? pPos.x : leftColX) + 220;
-      const suby = (pPos ? pPos.y : runningY) + subIndex * subtopicSpacingY;
-      const sIdx = nodeById.get(s.id)!.index;
-      positions[sIdx] = { x: subx, y: suby };
-
-      const neighbors = Array.from(adj.get(s.id) || []).filter(id => id !== s.id && id !== parentId);
-      const childIds = neighbors.filter(id => {
-        const n = nodeById.get(id)?.node;
-        return n && n.data?.type !== 'Topic' && n.data?.type !== 'Subtopic';
-      });
-      childIds.forEach((childId, ci) => {
-        const childIdx = nodeById.get(childId)!.index;
-        const x = childStartX + Math.floor(ci / 3) * childXSpacing;
-        const y = suby + (ci % 3) * childYSpacing - childYSpacing;
-        positions[childIdx] = { x, y };
-      });
-    });
-
-    // assign any remaining nodes in a simple grid on the right
-    let col = 0;
-    let row = 0;
-    others.forEach(o => {
-      const idx = nodeById.get(o.id)!.index;
-      if (positions[idx]) return;
-      const x = childStartX + 2 * childXSpacing + col * childXSpacing;
-      const y = marginTop + 50 + row * childYSpacing;
-      positions[idx] = { x, y };
-      row++;
-      if (row > 6) { row = 0; col++; }
-    });
-
-    // fallback grid for any still-unplaced nodes, probably won't be used
-    nodes.forEach((_, i) => {
-      if (!positions[i]) {
-        const cols = Math.ceil(Math.sqrt(nodes.length));
-        const r = Math.floor(i / cols);
-        const c = i % cols;
-        positions[i] = { x: 200 + c * 220, y: 140 + r * 140 };
-      }
-    });
-
-    // center whole layout
-    const minX = Math.min(...positions.map(p => p.x));
-    const maxX = Math.max(...positions.map(p => p.x));
-    const minY = Math.min(...positions.map(p => p.y));
-    const maxY = Math.max(...positions.map(p => p.y));
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-    
-    positions.forEach(pos => {
-      pos.x = pos.x - centerX + width / 2;
-      pos.y = pos.y - centerY + height / 2;
-    });
 
     return positions;
   };
