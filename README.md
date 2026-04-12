@@ -28,7 +28,7 @@
           [0] > server@1.0.0 dev
           [0] > npx ts-node --project tsconfig.json index.ts
           [0]
-          [0] Server running on http://localhost:4000
+          [0] Server running on https://smartpath-node-backend-361386464842.us-east1.run.app
           [0] MongoDB connected
 
 

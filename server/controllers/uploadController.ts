@@ -32,7 +32,7 @@ type ActiveUpload = {
 // Key: a unique upload session id
 const activeUploads = new Map<string, ActiveUpload>();
 
-const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8000';
+const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'https://smartpath-backend-361386464842.us-east1.run.app';
 
 const getRequestOwnerKey = (req: Request): string => {
   const passportUser = (req.session as any)?.passport?.user;
@@ -70,6 +70,33 @@ function getProgressMessage(percent: number): string {
   if (percent < 95) return 'Finalizing your learning path...';
   return 'Processing complete!';
 }
+
+const isMetadataOnlyGraph = (payload: any): boolean => {
+  const nodes = payload?.graph?.nodes;
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    return true;
+  }
+
+  if (nodes.length !== 1) {
+    return false;
+  }
+
+  const node = nodes[0] || {};
+  const labels = Array.isArray(node.labels) ? node.labels : [];
+  const subject = String(node?.properties?.subject || '').toLowerCase();
+  return labels.includes('GraphMetadata') && subject === 'default';
+};
+
+/** FastAPI typically returns `{ detail: string }` on errors; other stacks use `{ error: string }`. */
+const getAiServiceErrorMessage = (data: unknown): string | undefined => {
+  if (!data || typeof data !== 'object') return undefined;
+  const d = data as Record<string, unknown>;
+  if (typeof d.error === 'string' && d.error.length > 0) return d.error;
+  if (typeof d.detail === 'string' && d.detail.length > 0) return d.detail;
+  if (Array.isArray(d.detail) && d.detail.length > 0) return JSON.stringify(d.detail);
+  if (typeof d.message === 'string' && d.message.length > 0) return d.message;
+  return undefined;
+};
 
 export const processPdf: RequestHandler = async (req, res) => {
   const ownerKey = getRequestOwnerKey(req);
@@ -174,7 +201,7 @@ export const processPdf: RequestHandler = async (req, res) => {
       }
     }, 1500);
 
-    // Send to processing server
+    // Send to processing server (long PDFs + LLM can exceed the default 120s axios timeout)
     const response = await pythonServiceClient.post('/process-pdf', formData, {
       params: req.query,
       headers: {
@@ -183,9 +210,16 @@ export const processPdf: RequestHandler = async (req, res) => {
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
       signal: abortController.signal,
+      timeout: 900000,
     });
 
     clearProgressInterval();
+
+    if (isMetadataOnlyGraph(response.data)) {
+      console.warn(`[Upload ${uploadId}] AI service returned metadata-only or empty graph`, {
+        graph_id: (response.data as any)?.graph_id,
+      });
+    }
 
     // If client already disconnected while we were waiting, don't bother sending events
     if (clientDisconnected) {
@@ -235,7 +269,7 @@ export const processPdf: RequestHandler = async (req, res) => {
       });
       sendEvent({
         type: 'error',
-        error: error.response?.data?.error || 'Failed to process PDF',
+        error: getAiServiceErrorMessage(error.response?.data) || 'Failed to process PDF',
         details: `${error.message} - Status: ${error.response?.status}`
       });
     } else {
