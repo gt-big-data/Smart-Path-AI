@@ -29,7 +29,7 @@ export default function Login() {
 
   // Simplified Google login - direct redirect
   const handleGoogleLogin = () => {
-    window.location.href = 'http://localhost:4000/auth/google';
+    window.location.href = 'https://smartpath-node-backend-361386464842.us-east1.run.app/auth/google';
   };
 
   return (

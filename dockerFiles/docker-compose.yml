@@ -11,8 +11,8 @@ services:
       CLIENT_PORT: 5173
       CLIENT_URL: ${CLIENT_URL:-http://localhost:5173}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
-      SERVER_PUBLIC_URL: ${SERVER_PUBLIC_URL:-http://localhost:4000}
-      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:4000/auth/google/callback}
+      SERVER_PUBLIC_URL: ${SERVER_PUBLIC_URL:-https://smartpath-node-backend-361386464842.us-east1.run.app}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-https://smartpath-node-backend-361386464842.us-east1.run.app/auth/google/callback}
       MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/smartpathai}
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

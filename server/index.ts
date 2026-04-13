@@ -25,17 +25,27 @@ import chatRoutes from './routes/chatRoutes';
 import progressRoutes from './routes/progressRoutes';
 import quizHistoryRoutes from './routes/quizHistoryRoutes';
 import session from 'express-session';
+import MongoStore from 'connect-mongo';
 import axios from 'axios';
 import User from './models/User';
 
 import './config/passport';
 
 const app = express();
+const isProduction = process.env.NODE_ENV === 'production';
 const rawPort = process.env.PORT;
 const parsedPort = rawPort ? parseInt(rawPort, 10) : 4000;
 const port = Number.isNaN(parsedPort) ? 4000 : parsedPort;
 const corsOriginConfig = process.env.CORS_ORIGINS || process.env.CLIENT_URL || 'http://localhost:5173';
 const corsOrigins = corsOriginConfig.split(',').map((origin) => origin.trim()).filter(Boolean);
+const sessionStore = process.env.MONGO_URI
+    ? MongoStore.create({
+        mongoUrl: process.env.MONGO_URI,
+        collectionName: 'sessions',
+        ttl: 14 * 24 * 60 * 60,
+        autoRemove: 'native',
+    })
+    : undefined;
 
 // Connect to Mongo
 const connectDB = async () => {
@@ -57,13 +67,20 @@ app.use(cors({
 
 app.use(express.json());
 
+// Cloud Run / reverse proxies terminate TLS before forwarding to the container.
+// Express must trust the proxy so secure cookies are accepted/set correctly.
+app.set('trust proxy', 1);
+
 // Session middleware (before passport middleware)
 app.use(session({
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
     saveUninitialized: false,
+    proxy: true,
+    ...(sessionStore ? { store: sessionStore } : {}),
     cookie: {
-        secure: process.env.NODE_ENV === 'production', // Only use secure in production
+        secure: isProduction, // Required for SameSite=None cookies in production
+        sameSite: isProduction ? 'none' : 'lax',
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }

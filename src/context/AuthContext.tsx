@@ -25,7 +25,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     
     setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:4000/auth/check-auth', {
+      const response = await fetch('https://smartpath-node-backend-361386464842.us-east1.run.app/auth/check-auth', {
         credentials: 'include',
       });
       const data = await response.json();
@@ -53,7 +53,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const signup = async (email: string, password: string, name: string) => {
     try {
-      const response = await fetch('http://localhost:4000/auth/signup', {
+      const response = await fetch('https://smartpath-node-backend-361386464842.us-east1.run.app/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, name }),
@@ -83,7 +83,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const login = async (email: string, password: string) => {
     try {
-      const response = await fetch('http://localhost:4000/auth/login', {
+      const response = await fetch('https://smartpath-node-backend-361386464842.us-east1.run.app/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -107,12 +107,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const loginWithGoogle = () => {
-    window.location.href = 'http://localhost:4000/auth/google';
+    window.location.href = 'https://smartpath-node-backend-361386464842.us-east1.run.app/auth/google';
   };
 
   const logout = async () => {
     try {
-      const response = await fetch('http://localhost:4000/auth/logout', {
+      const response = await fetch('https://smartpath-node-backend-361386464842.us-east1.run.app/auth/logout', {
         method: 'POST',
         credentials: 'include',
       });

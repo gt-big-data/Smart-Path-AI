@@ -17,6 +17,7 @@ const axios_1 = __importDefault(require("axios"));
 const multer_1 = __importDefault(require("multer"));
 const form_data_1 = __importDefault(require("form-data"));
 const crypto_1 = require("crypto");
+const axiosConfig_1 = require("../utils/axiosConfig");
 // Configure multer for handling file uploads
 exports.upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
@@ -38,7 +39,7 @@ exports.upload = (0, multer_1.default)({
 // Track active upload AbortControllers so they can be cancelled externally
 // Key: a unique upload session id
 const activeUploads = new Map();
-const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8000';
+const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'https://smartpath-backend-361386464842.us-east1.run.app';
 const getRequestOwnerKey = (req) => {
     var _a, _b;
     const passportUser = (_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user;
@@ -81,6 +82,35 @@ function getProgressMessage(percent) {
         return 'Finalizing your learning path...';
     return 'Processing complete!';
 }
+const isMetadataOnlyGraph = (payload) => {
+    var _a, _b;
+    const nodes = (_a = payload === null || payload === void 0 ? void 0 : payload.graph) === null || _a === void 0 ? void 0 : _a.nodes;
+    if (!Array.isArray(nodes) || nodes.length === 0) {
+        return true;
+    }
+    if (nodes.length !== 1) {
+        return false;
+    }
+    const node = nodes[0] || {};
+    const labels = Array.isArray(node.labels) ? node.labels : [];
+    const subject = String(((_b = node === null || node === void 0 ? void 0 : node.properties) === null || _b === void 0 ? void 0 : _b.subject) || '').toLowerCase();
+    return labels.includes('GraphMetadata') && subject === 'default';
+};
+/** FastAPI typically returns `{ detail: string }` on errors; other stacks use `{ error: string }`. */
+const getAiServiceErrorMessage = (data) => {
+    if (!data || typeof data !== 'object')
+        return undefined;
+    const d = data;
+    if (typeof d.error === 'string' && d.error.length > 0)
+        return d.error;
+    if (typeof d.detail === 'string' && d.detail.length > 0)
+        return d.detail;
+    if (Array.isArray(d.detail) && d.detail.length > 0)
+        return JSON.stringify(d.detail);
+    if (typeof d.message === 'string' && d.message.length > 0)
+        return d.message;
+    return undefined;
+};
 const processPdf = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g;
     const ownerKey = getRequestOwnerKey(req);
@@ -167,14 +197,21 @@ const processPdf = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 sendEvent({ type: 'progress', percent: rounded, message: getProgressMessage(rounded) });
             }
         }, 1500);
-        // Send to processing server, passing the abort signal so we can cancel mid-flight
-        const response = yield axios_1.default.post(`${PYTHON_SERVICE_URL}/process-pdf`, formData, {
+        // Send to processing server (use shared client + long timeout for PDF/LLM on Cloud Run)
+        const response = yield axiosConfig_1.pythonServiceClient.post('/process-pdf', formData, {
+            params: req.query,
             headers: Object.assign({}, formData.getHeaders()),
             maxBodyLength: Infinity,
             maxContentLength: Infinity,
             signal: abortController.signal,
+            timeout: 900000,
         });
         clearProgressInterval();
+        if (isMetadataOnlyGraph(response.data)) {
+            console.warn(`[Upload ${uploadId}] AI service returned metadata-only or empty graph`, {
+                graph_id: response.data === null || response.data === void 0 ? void 0 : response.data.graph_id,
+            });
+        }
         // If client already disconnected while we were waiting, don't bother sending events
         if (clientDisconnected) {
             console.log(`[Upload ${uploadId}] AI server responded but client already disconnected — discarding result`);
@@ -219,8 +256,8 @@ const processPdf = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             });
             sendEvent({
                 type: 'error',
-                error: ((_f = (_e = error.response) === null || _e === void 0 ? void 0 : _e.data) === null || _f === void 0 ? void 0 : _f.error) || 'Failed to process PDF',
-                details: `${error.message} - Status: ${(_g = error.response) === null || _g === void 0 ? void 0 : _g.status}`
+                error: getAiServiceErrorMessage((_e = error.response) === null || _e === void 0 ? void 0 : _e.data) || 'Failed to process PDF',
+                details: `${error.message} - Status: ${(_f = error.response) === null || _f === void 0 ? void 0 : _f.status}`
             });
         }
         else {
