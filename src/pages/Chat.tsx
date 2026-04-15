@@ -79,6 +79,7 @@ function App() {
   const deletingChatRef = useRef<string | null>(null);
   const renameInFlightRef = useRef<string | null>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
+  const latestGraphRequestRef = useRef<string | null>(null);
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [loadingDots, setLoadingDots] = useState('');
@@ -206,29 +207,99 @@ function App() {
     };
   };
 
+  const isPlaceholderGraph = (payload: any): boolean => {
+    const nodes = payload?.graph?.nodes;
+    if (!Array.isArray(nodes) || nodes.length === 0) {
+      return true;
+    }
+    if (nodes.length > 1) {
+      return false;
+    }
+
+    const node = nodes[0] || {};
+    const labels = Array.isArray(node.labels) ? node.labels.map((l: string) => String(l).toLowerCase()) : [];
+    const propSubject = String(node?.properties?.subject ?? '').toLowerCase();
+    const topSubject = String(payload?.subject ?? '').toLowerCase();
+    if (
+      labels.some((l) => l.includes('graphmetadata')) &&
+      (propSubject === 'default' || topSubject === 'default')
+    ) {
+      return true;
+    }
+
+    const id = String(node.id || '').toLowerCase();
+    const label = String(node?.labels?.[0] || '').toLowerCase();
+    const name = String(node?.properties?.name || '').toLowerCase();
+    const text = String(node?.properties?.text || '').toLowerCase();
+    return [id, label, name, text].some((value) => value === 'default' || value.includes('placeholder'));
+  };
+
   const fetchGraphData = async (graphId?: string, expectedChatId?: string) => {
     if (!graphId) return;
+    const requestKey = `${graphId}:${expectedChatId ?? ''}:${Date.now()}`;
+    latestGraphRequestRef.current = requestKey;
     setIsGraphLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/view-graph?graph_id=${graphId}`);
-      // Only update graph data if the user is still on the same chat
-      setCurrentChatId(currentId => {
-        if (currentId === expectedChatId) {
-          setGraphData({ ...response.data, graph_id: graphId });
-          fetchConceptProgress();
+      const maxAttempts = 20;
+      let selectedData: any = null;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        // Abort stale retries if a newer graph request has been issued.
+        if (latestGraphRequestRef.current !== requestKey) {
+          return;
+        }
+
+        const response = await axios.get(`${API_BASE_URL}/api/view-graph`, {
+          params: {
+            graph_id: graphId,
+            t: Date.now(),
+          },
+          headers: {
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+          },
+          withCredentials: true,
+        });
+
+        const payload = response.data;
+        const placeholder = isPlaceholderGraph(payload);
+
+        if (!placeholder || attempt === maxAttempts) {
+          selectedData = payload;
+          break;
+        }
+
+        // Delay allows backend graph persistence/indexing to complete.
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      if (!selectedData) {
+        throw new Error('Failed to load graph data');
+      }
+
+      if (latestGraphRequestRef.current !== requestKey) {
+        return;
+      }
+
+      setCurrentChatId((currentId) => {
+        if (!expectedChatId || currentId === expectedChatId) {
+          setGraphData({ ...selectedData, graph_id: graphId });
+          void fetchConceptProgress();
         }
         return currentId;
       });
     } catch (error) {
       console.error('Error fetching graph:', error);
-      setCurrentChatId(currentId => {
-        if (currentId === expectedChatId) {
+      setCurrentChatId((currentId) => {
+        if (!expectedChatId || currentId === expectedChatId) {
           setGraphData({ error: 'Failed to load graph data' });
         }
         return currentId;
       });
     } finally {
-      setIsGraphLoading(false);
+      if (latestGraphRequestRef.current === requestKey) {
+        setIsGraphLoading(false);
+      }
     }
   };
 
@@ -363,7 +434,7 @@ function App() {
           ));
         }
 
-        await fetchGraphData(responseData.graph_id);
+        await fetchGraphData(responseData.graph_id, currentChatId);
         
         // Show the "Start Quiz" button after document upload
         // User can now choose quiz settings before starting
@@ -1374,8 +1445,6 @@ function App() {
     const existingQuizState = currentChat ? loadQuizState(currentChat.id) : null;
 
     if (currentChat?.graph_id) {
-      fetchGraphData(currentChat.graph_id, currentChatId);
-      
       // Check if there's an existing quiz in progress
       if (existingQuizState) {
         // Restore quiz state if it exists
@@ -1385,6 +1454,8 @@ function App() {
         setShouldStartQuiz(true);
       }
     } else {
+      latestGraphRequestRef.current = null;
+      setIsGraphLoading(false);
       setGraphData(null);
       setQaData([]);
       setIsAnswering(false);
@@ -1540,12 +1611,14 @@ function App() {
         }
       }
     } else {
-          // This is a chat without a document/graph, so reset everything.
+      // This is a chat without a document/graph, so reset everything.
+      latestGraphRequestRef.current = null;
+      setIsGraphLoading(false);
       setGraphData(null);
       setQaData([]);
       setIsAnswering(false);
-          setShouldStartQuiz(false);
-      }
+      setShouldStartQuiz(false);
+    }
   }, [currentChatId, currentChat?.graph_id]); // Dependency array ensures this runs when the chat changes
 
   // Show loading state while fetching chats
