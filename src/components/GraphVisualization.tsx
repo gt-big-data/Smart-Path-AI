@@ -557,12 +557,16 @@ const CustomNode = memo((props: CustomNodeProps) => {
     const cb = nodeClickCallbacks.get('onNodeEdit');
     if (cb) cb({ ...e, currentTarget: e.currentTarget, target: e.target } as React.MouseEvent);
     // Store node info for the popup
+    const popUpWidth = 260;
+    const popUpHeight = 340;
+    const x = e.clientX + popUpWidth > window.innerWidth ? e.clientX - popUpWidth : e.clientX + 10;
+    const y = e.clientY + popUpHeight > window.innerHeight ? e.clientY - popUpHeight : e.clientY + 10;
     (window as any).__pendingNodeEdit = {
       nodeId: id,
       label: data.label,
       color: (style as any).background || '#3b82f6',
-      x: Math.min(e.clientX + 10, window.innerWidth - 260),
-      y: Math.min(e.clientY + 10, window.innerHeight - 340),
+      x,
+      y,
     };
     window.dispatchEvent(new CustomEvent('node-edit-request'));
   };
@@ -1017,8 +1021,9 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       {/* Hint tooltip */}
       <div style={{
         position: 'absolute',
-        top: '16px',
-        right: '16px',
+        bottom: '16px',
+        left: '50%',
+        transform: 'translateX(-50%)',
         zIndex: 10,
         background: 'rgba(0,0,0,0.5)',
         color: 'rgba(255,255,255,0.7)',

@@ -94,6 +94,7 @@ function App() {
 
   const currentChat = chats.find(chat => chat.id === currentChatId) ?? null;
   const [input, setInput] = useState('');
+  const [isGraphLoading, setIsGraphLoading] = useState(false);
 
   // Generate robust unique IDs to avoid duplicate keys when multiple messages are created in the same millisecond
   const generateMessageId = () => {
@@ -205,19 +206,29 @@ function App() {
     };
   };
 
-  const fetchGraphData = async (graphId?: string) => {
+  const fetchGraphData = async (graphId?: string, expectedChatId?: string) => {
     if (!graphId) return;
+    setIsGraphLoading(true);
     try {
       const response = await axios.get(`${API_BASE_URL}/api/view-graph?graph_id=${graphId}`);
-      console.log('Graph data response:', response.data);
-      // Add graph_id to the response data so search can use it
-      setGraphData({ ...response.data, graph_id: graphId });
-      
-      // Fetch concept progress after loading graph
-      await fetchConceptProgress();
+      // Only update graph data if the user is still on the same chat
+      setCurrentChatId(currentId => {
+        if (currentId === expectedChatId) {
+          setGraphData({ ...response.data, graph_id: graphId });
+          fetchConceptProgress();
+        }
+        return currentId;
+      });
     } catch (error) {
       console.error('Error fetching graph:', error);
-      setGraphData({ error: 'Failed to load graph data' });
+      setCurrentChatId(currentId => {
+        if (currentId === expectedChatId) {
+          setGraphData({ error: 'Failed to load graph data' });
+        }
+        return currentId;
+      });
+    } finally {
+      setIsGraphLoading(false);
     }
   };
 
@@ -1363,7 +1374,7 @@ function App() {
     const existingQuizState = currentChat ? loadQuizState(currentChat.id) : null;
 
     if (currentChat?.graph_id) {
-      fetchGraphData(currentChat.graph_id);
+      fetchGraphData(currentChat.graph_id, currentChatId);
       
       // Check if there's an existing quiz in progress
       if (existingQuizState) {
@@ -1481,7 +1492,7 @@ function App() {
   useEffect(() => {
       const currentChat = chats.find(chat => chat.id === currentChatId);
     if (currentChat?.graph_id) {
-      fetchGraphData(currentChat.graph_id);
+      fetchGraphData(currentChat.graph_id, currentChatId);
 
           // Try to restore persisted quiz state first
           const persisted = currentChatId ? loadQuizState(currentChatId) : null;
@@ -1769,7 +1780,7 @@ function App() {
                   </button>
                 </div>
               ) : (
-                <GraphVisualization data={graphData} conceptProgress={conceptProgress} />
+                <GraphVisualization data={graphData} conceptProgress={conceptProgress} isLoading={isGraphLoading} />
               )}
             </div>
           </div>

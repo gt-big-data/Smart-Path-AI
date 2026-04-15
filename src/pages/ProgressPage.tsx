@@ -15,11 +15,51 @@ interface ProfileData {
   topics_to_review: ProgressItem[];
 }
 
+const AccordionSection: React.FC<{
+  title: string;
+  nodeCount: number;
+  lastPracticed: string;
+  items: any[];
+  getScoreColor: (score: number) => string;
+  friendlyTopicLabel: (s: string) => string;
+}> = ({ title, nodeCount, lastPracticed, items, getScoreColor, friendlyTopicLabel }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <div className="border border-slate-200 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+      >
+        <div className="flex flex-col">
+          <span className="font-medium text-slate-800">{title}</span>
+          <span className="text-xs text-slate-500">{nodeCount} topics · Last practiced {new Date(lastPracticed).toLocaleDateString()}</span>
+        </div>
+        <span className="text-slate-400 text-lg">{isOpen ? '▲' : '▼'}</span>
+      </button>
+      {isOpen && (
+        <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+          {items.map((item) => (
+            <div key={item.concept_id} className="flex justify-between items-center px-4 py-2">
+              <span className="text-sm text-gray-700" title={item.topic_name}>
+                {friendlyTopicLabel(item.topic_name)}
+              </span>
+              <span className={`text-sm font-semibold ${getScoreColor(item.confidence_score)}`}>
+                {Math.round(item.confidence_score * 100)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ProgressPage: React.FC = () => {
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const [chatTitleMap, setChatTitleMap] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     const fetchProfileData = async () => {
@@ -47,6 +87,23 @@ const ProgressPage: React.FC = () => {
             return;
           }
         }
+
+        // Fetch chat titles to label accordion sections
+        const localChatTitleMap = new Map<string, string>();
+        try {
+          const userRes = await axios.get('http://localhost:4000/chat/user', { withCredentials: true });
+          const userId = userRes.data;
+          if (userId) {
+            const chatsRes = await axios.get(`http://localhost:4000/chat/${userId}/chats`, { withCredentials: true });
+            const chats = Array.isArray(chatsRes.data) ? chatsRes.data : [];
+            chats.forEach((chat: any) => {
+              if (chat.graph_id) localChatTitleMap.set(chat.graph_id, chat.title || 'Untitled Chat');
+            });
+          }
+        } catch (err) {
+          console.warn('Could not fetch chat titles:', err);
+        }
+        setChatTitleMap(localChatTitleMap);
 
         // Fetch all graph IDs for the user
         let graphIds: string[] = [];
@@ -496,7 +553,7 @@ const ProgressPage: React.FC = () => {
           <header className="mb-8 flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-slate-800">Your Learning Progress</h1>
-              <p className="text-md text-slate-500 mt-1">Track your progress and find topics to review.</p>
+              <p className="text-md text-slate-500 mt-1">Track your progress and find top topics to review.</p>
             </div>
             <button
               onClick={() => navigate(-1)}
@@ -508,11 +565,11 @@ const ProgressPage: React.FC = () => {
           </header>
   
           <main className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Topics to Review */}
+            {/* Top Topics to Review */}
             <section className="lg:col-span-1 bg-white/80 backdrop-blur-sm p-6 rounded-xl border border-slate-200/60 shadow-sm">
               <div className="flex items-center gap-3 mb-4">
                 <TrendingDown className="w-6 h-6 text-yellow-500" />
-                <h2 className="text-xl font-semibold text-slate-800">Topics to Review</h2>
+                <h2 className="text-xl font-semibold text-slate-800">Top Topics to Review</h2>
               </div>
               {profileData?.topics_to_review && profileData.topics_to_review.length > 0 ? (
                 <ul className="space-y-4">
@@ -535,35 +592,39 @@ const ProgressPage: React.FC = () => {
             </section>
   
             {/* Full Progress */}
+            {/* Full Progress - Accordion by Chat */}
             <section className="lg:col-span-2 bg-white/80 backdrop-blur-sm p-6 rounded-xl border border-slate-200/60 shadow-sm">
               <div className="flex items-center gap-3 mb-4">
                 <BookOpen className="w-6 h-6 text-teal-500" />
                 <h2 className="text-xl font-semibold text-slate-800">All Practiced Topics</h2>
               </div>
               {profileData?.full_progress && profileData.full_progress.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Topic</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Confidence</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Practiced</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {profileData.full_progress.map((item) => (
-                        <tr key={item.concept_id}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" title={item.topic_name}>
-                            {friendlyTopicLabel(item.topic_name)}
-                          </td>
-                          <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${getScoreColor(item.confidence_score)}`}>
-                            {Math.round(item.confidence_score * 100)}%
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(item.last_practiced).toLocaleDateString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="space-y-3">
+                  {Array.from(
+                    profileData.full_progress.reduce((acc, item) => {
+                      const graphId = item.concept_id.split(':')[1] || 'unknown';
+                      if (!acc.has(graphId)) acc.set(graphId, []);
+                      acc.get(graphId)!.push(item);
+                      return acc;
+                    }, new Map<string, typeof profileData.full_progress>())
+                  ).map(([graphId, items]) => {
+                    const chatTitle = chatTitleMap.get(graphId) || 'Untitled Chat';
+                    const lastPracticed = items.reduce((latest, item) =>
+                      new Date(item.last_practiced) > new Date(latest) ? item.last_practiced : latest,
+                      items[0].last_practiced
+                    );
+                    return (
+                      <AccordionSection
+                        key={graphId}
+                        title={chatTitle}
+                        nodeCount={items.length}
+                        lastPracticed={lastPracticed}
+                        items={items}
+                        getScoreColor={getScoreColor}
+                        friendlyTopicLabel={friendlyTopicLabel}
+                      />
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-gray-500">You haven't practiced any topics yet. Complete a quiz to see your progress!</p>
