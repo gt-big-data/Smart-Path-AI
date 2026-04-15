@@ -88,7 +88,7 @@ export default function Signup() {
   };
 
   const handleGoogleSignup = () => {
-    window.location.href = 'http://localhost:4000/auth/google';
+    window.location.href = 'https://smartpath-node-backend-361386464842.us-east1.run.app/auth/google';
   };
 
   // Add password check on input change

@@ -27,10 +27,25 @@ const chatRoutes_1 = __importDefault(require("./routes/chatRoutes"));
 const progressRoutes_1 = __importDefault(require("./routes/progressRoutes"));
 const quizHistoryRoutes_1 = __importDefault(require("./routes/quizHistoryRoutes"));
 const express_session_1 = __importDefault(require("express-session"));
+const connect_mongo_1 = __importDefault(require("connect-mongo"));
 const axios_1 = __importDefault(require("axios"));
 const User_1 = __importDefault(require("./models/User"));
 require("./config/passport");
 const app = (0, express_1.default)();
+const isProduction = process.env.NODE_ENV === 'production';
+const rawPort = process.env.PORT;
+const parsedPort = rawPort ? parseInt(rawPort, 10) : 4000;
+const port = Number.isNaN(parsedPort) ? 4000 : parsedPort;
+const corsOriginConfig = process.env.CORS_ORIGINS || process.env.CLIENT_URL || 'http://localhost:5173';
+const corsOrigins = corsOriginConfig.split(',').map((origin) => origin.trim()).filter(Boolean);
+const sessionStore = process.env.MONGO_URI
+    ? connect_mongo_1.default.create({
+        mongoUrl: process.env.MONGO_URI,
+        collectionName: 'sessions',
+        ttl: 14 * 24 * 60 * 60,
+        autoRemove: 'native',
+    })
+    : undefined;
 // Connect to Mongo
 const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -45,17 +60,23 @@ const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
 connectDB();
 // CORS
 app.use((0, cors_1.default)({
-    origin: 'http://localhost:5173',
+    origin: corsOrigins.length <= 1 ? corsOrigins[0] : corsOrigins,
     credentials: true,
 }));
 app.use(express_1.default.json());
+// Cloud Run / reverse proxies terminate TLS before forwarding to the container.
+// Express must trust the proxy so secure cookies are accepted/set correctly.
+app.set('trust proxy', 1);
 // Session middleware (before passport middleware)
 app.use((0, express_session_1.default)({
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
     saveUninitialized: false,
+    proxy: true,
+    ...(sessionStore ? { store: sessionStore } : {}),
     cookie: {
-        secure: process.env.NODE_ENV === 'production', // Only use secure in production
+        secure: isProduction, // Required for SameSite=None cookies in production
+        sameSite: isProduction ? 'none' : 'lax',
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
@@ -105,6 +126,6 @@ app.get('/flask/hi', (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 }));
 // Start server
-app.listen(4000, () => {
-    console.log('Server running on http://localhost:4000');
+app.listen(port, () => {
+    console.log(`Server running on http://localhost:${port}`);
 });

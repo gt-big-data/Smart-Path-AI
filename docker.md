@@ -84,7 +84,7 @@ docker compose -f docker-compose.yml down
 ## App URLs
 
 - Frontend: `http://localhost:5173`
-- App server: `http://localhost:4000`
+- App server: `https://smartpath-node-backend-361386464842.us-east1.run.app`
 - AI server: `http://localhost:8000`
 
 ## Common Confusion

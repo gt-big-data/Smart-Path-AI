@@ -6,7 +6,7 @@ import { pythonServiceClient } from '../utils/axiosConfig';
 
 // Initialize OpenAI with explicit API key
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || ''  // Provide empty string as fallback
+  apiKey: process.env.OPENAI_API_KEY || '',  // Provide empty string as fallback
 });
 
 // Verify API key is loaded
@@ -47,6 +47,12 @@ export const viewGraph = async (req: Request, res: Response) => {
     if (!graph_id) {
       return res.status(400).json({ error: 'graph_id is required' });
     }
+    // Prevent browser/CDN cache from serving stale placeholder graphs.
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+
     const response = await pythonServiceClient.get('/view-graph', {
       params: { graph_id: String(graph_id) }
     });

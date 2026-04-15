@@ -56,7 +56,7 @@ interface ConceptProgress {
   lastAttempted?: Date;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://smartpath-node-backend-361386464842.us-east1.run.app';
 
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -239,6 +239,9 @@ function App() {
     const requestKey = `${graphId}:${expectedChatId ?? ''}:${Date.now()}`;
     latestGraphRequestRef.current = requestKey;
     setIsGraphLoading(true);
+  const fetchGraphData = async (graphId?: string) => {
+    if (!graphId) return;
+    latestGraphRequestRef.current = graphId;
     try {
       const maxAttempts = 20;
       let selectedData: any = null;
@@ -246,13 +249,14 @@ function App() {
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         // Abort stale retries if a newer graph request has been issued.
         if (latestGraphRequestRef.current !== requestKey) {
+        if (latestGraphRequestRef.current !== graphId) {
           return;
         }
 
         const response = await axios.get(`${API_BASE_URL}/api/view-graph`, {
           params: {
             graph_id: graphId,
-            t: Date.now(),
+            t: Date.now(), // cache buster to avoid stale graph responses
           },
           headers: {
             'Cache-Control': 'no-cache',
@@ -263,6 +267,7 @@ function App() {
 
         const payload = response.data;
         const placeholder = isPlaceholderGraph(payload);
+        console.log(`[Graph] Fetch attempt ${attempt}/${maxAttempts} for ${graphId} placeholder=${placeholder}`);
 
         if (!placeholder || attempt === maxAttempts) {
           selectedData = payload;
@@ -288,6 +293,16 @@ function App() {
         }
         return currentId;
       });
+      if (latestGraphRequestRef.current !== graphId) {
+        return;
+      }
+
+      console.log('Graph data response:', selectedData);
+      // Add graph_id to the response data so search can use it
+      setGraphData({ ...selectedData, graph_id: graphId });
+      
+      // Fetch concept progress after loading graph
+      await fetchConceptProgress();
     } catch (error) {
       console.error('Error fetching graph:', error);
       setCurrentChatId((currentId) => {
@@ -325,10 +340,9 @@ function App() {
           size: file.size
         });
 
-        const currentChatData = chats.find(chat => chat.id === currentChatId);
-        const url = currentChatData?.graph_id 
-          ? `${API_BASE_URL}/upload/process-pdf?graph_id=${currentChatData.graph_id}`
-          : `${API_BASE_URL}/upload/process-pdf`;
+        // Always create a fresh graph for each uploaded document.
+        // Reusing old graph_id can cause stale/default graph carry-over.
+        const url = `${API_BASE_URL}/upload/process-pdf`;
 
         setUploadProgress(0);
         setProgressMessage('Uploading PDF...');
@@ -339,6 +353,7 @@ function App() {
         const response = await fetch(url, {
           method: 'POST',
           body: formData,
+          credentials: 'include',
           signal: abortController.signal,
         });
 
@@ -392,6 +407,23 @@ function App() {
           throw new Error('No response data received from server');
         }
 
+        const processed = responseData.processed_chunks;
+        const uploadStatus = responseData.status;
+        if (
+          typeof processed === 'number' &&
+          processed < 1 &&
+          uploadStatus !== 'cancelled'
+        ) {
+          const firstFail =
+            Array.isArray(responseData.failed_chunks) && responseData.failed_chunks.length > 0
+              ? String((responseData.failed_chunks[0] as { error?: string })?.error || '')
+              : '';
+          throw new Error(
+            firstFail ||
+              'No concepts were written to the graph (0 chunks processed). On GCP, verify OPENAI_API_KEY / LLM config and Neo4j env on the AI service, and PYTHON_SERVICE_URL on the Node service.'
+          );
+        }
+
         const fileUploadMessage: Message = {
           id: generateMessageId(),
           content: `Uploaded file: ${file.name}`,
@@ -435,6 +467,15 @@ function App() {
         }
 
         await fetchGraphData(responseData.graph_id, currentChatId);
+        const uploadIncludesGraph = responseData?.graph && !isPlaceholderGraph(responseData);
+        if (uploadIncludesGraph) {
+          // Prefer graph data returned by process-pdf when available.
+          // This avoids a second fetch race where view-graph can briefly return placeholder data.
+          setGraphData({ ...responseData, graph_id: responseData.graph_id });
+          await fetchConceptProgress();
+        } else {
+          await fetchGraphData(responseData.graph_id);
+        }
         
         // Show the "Start Quiz" button after document upload
         // User can now choose quiz settings before starting
