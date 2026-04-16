@@ -40,6 +40,20 @@ const updateConfidenceScore = async (userId: string, conceptId: string, isCorrec
   console.log(`Updated confidence score for concept ${conceptId} to ${progress.confidenceScore}`);
 };
 
+const updateConfidenceScoreSafe = async (
+  userId: string | undefined,
+  conceptId: string | undefined,
+  isCorrect: boolean,
+  isRetry: boolean
+) => {
+  if (!userId || !conceptId) return;
+  try {
+    await updateConfidenceScore(userId, conceptId, isCorrect, isRetry);
+  } catch (err) {
+    console.error('Non-fatal confidence update error:', err);
+  }
+};
+
 
 export const viewGraph = async (req: Request, res: Response) => {
   try {
@@ -202,9 +216,7 @@ export const verifyAnswer = async (req: Request, res: Response) => {
 
     // Handle skipped questions - treat as incorrect
     if (userAnswer === 'SKIPPED' || userAnswer.trim().toUpperCase() === 'SKIP') {
-      if (userId && conceptId) {
-        await updateConfidenceScore(userId, conceptId, false, false);
-      }
+      await updateConfidenceScoreSafe(userId, conceptId, false, false);
       return res.json({
         isCorrect: false,
         feedback: `You skipped this question. Skipped questions are counted as incorrect for confidence tracking.`,
@@ -271,11 +283,7 @@ Provide feedback in this JSON format:
       const isCorrect = result.score >= 70;
 
       // Update confidence score
-      if (userId && conceptId) {
-        await updateConfidenceScore(userId, conceptId, isCorrect, isRetry || false);
-      } else {
-          console.log('Skipping confidence score update: missing userId or conceptId in request body.');
-      }
+      await updateConfidenceScoreSafe(userId, conceptId, isCorrect, isRetry || false);
 
       // Transform the result to match the expected frontend format while preserving the new evaluation approach
       const transformedResult = {
@@ -289,9 +297,7 @@ Provide feedback in this JSON format:
     } catch (llmError) {
       console.error('LLM verify fallback engaged:', llmError);
       const fallback = evaluateAnswerFallback(userAnswer, correctAnswer || '');
-      if (userId && conceptId) {
-        await updateConfidenceScore(userId, conceptId, fallback.isCorrect, isRetry || false);
-      }
+      await updateConfidenceScoreSafe(userId, conceptId, fallback.isCorrect, isRetry || false);
       res.json(fallback);
     }
 
@@ -299,9 +305,7 @@ Provide feedback in this JSON format:
     console.error('Error verifying answer:', error);
     const { userAnswer, correctAnswer, conceptId, isRetry }: VerifyAnswerRequest = req.body || {};
     const fallback = evaluateAnswerFallback(String(userAnswer || ''), String(correctAnswer || ''));
-    if (userId && conceptId) {
-      await updateConfidenceScore(userId, conceptId, fallback.isCorrect, Boolean(isRetry));
-    }
+    await updateConfidenceScoreSafe(userId, conceptId, fallback.isCorrect, Boolean(isRetry));
     res.json(fallback);
   }
 };
