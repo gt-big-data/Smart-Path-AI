@@ -239,9 +239,7 @@ function App() {
     const requestKey = `${graphId}:${expectedChatId ?? ''}:${Date.now()}`;
     latestGraphRequestRef.current = requestKey;
     setIsGraphLoading(true);
-  const fetchGraphData = async (graphId?: string) => {
-    if (!graphId) return;
-    latestGraphRequestRef.current = graphId;
+
     try {
       const maxAttempts = 20;
       let selectedData: any = null;
@@ -249,7 +247,6 @@ function App() {
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         // Abort stale retries if a newer graph request has been issued.
         if (latestGraphRequestRef.current !== requestKey) {
-        if (latestGraphRequestRef.current !== graphId) {
           return;
         }
 
@@ -293,16 +290,6 @@ function App() {
         }
         return currentId;
       });
-      if (latestGraphRequestRef.current !== graphId) {
-        return;
-      }
-
-      console.log('Graph data response:', selectedData);
-      // Add graph_id to the response data so search can use it
-      setGraphData({ ...selectedData, graph_id: graphId });
-      
-      // Fetch concept progress after loading graph
-      await fetchConceptProgress();
     } catch (error) {
       console.error('Error fetching graph:', error);
       setCurrentChatId((currentId) => {
@@ -466,15 +453,19 @@ function App() {
           ));
         }
 
-        await fetchGraphData(responseData.graph_id, currentChatId);
         const uploadIncludesGraph = responseData?.graph && !isPlaceholderGraph(responseData);
         if (uploadIncludesGraph) {
           // Prefer graph data returned by process-pdf when available.
           // This avoids a second fetch race where view-graph can briefly return placeholder data.
-          setGraphData({ ...responseData, graph_id: responseData.graph_id });
-          await fetchConceptProgress();
+          setCurrentChatId((currentId) => {
+            if (currentId === currentChatId) {
+              setGraphData({ ...responseData, graph_id: responseData.graph_id });
+              void fetchConceptProgress();
+            }
+            return currentId;
+          });
         } else {
-          await fetchGraphData(responseData.graph_id);
+          await fetchGraphData(responseData.graph_id, currentChatId);
         }
         
         // Show the "Start Quiz" button after document upload
@@ -1604,6 +1595,8 @@ function App() {
   useEffect(() => {
       const currentChat = chats.find(chat => chat.id === currentChatId);
     if (currentChat?.graph_id) {
+      setGraphData(null);
+      setIsGraphLoading(true);
       fetchGraphData(currentChat.graph_id, currentChatId);
 
           // Try to restore persisted quiz state first

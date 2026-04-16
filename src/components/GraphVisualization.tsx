@@ -1,5 +1,5 @@
 //GraphVisualization.tsx
-import React, { useCallback, useEffect, memo, useState } from 'react';
+import React, { useCallback, useEffect, memo, useRef, useState } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -60,6 +60,12 @@ interface NodeEditState {
   x: number;
   y: number;
 }
+
+const NODE_EDIT_POPUP_WIDTH = 260;
+const NODE_EDIT_POPUP_HEIGHT = 340;
+const VIEWPORT_PADDING = 12;
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 const COLOR_PALETTE = {
   BLUE: 'rgba(59, 130, 246, 1)',
@@ -340,29 +346,86 @@ const NodeEditPopup = ({
 }) => {
   const [label, setLabel] = useState(editState.label);
   const [color, setColor] = useState(editState.color);
+  const [position, setPosition] = useState({ x: editState.x, y: editState.y });
+  const dragStateRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({
+    dragging: false,
+    offsetX: 0,
+    offsetY: 0,
+  });
 
   const colorOptions = Object.values(COLOR_PALETTE);
+
+  useEffect(() => {
+    setLabel(editState.label);
+    setColor(editState.color);
+    setPosition({ x: editState.x, y: editState.y });
+  }, [editState]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragStateRef.current.dragging) return;
+      const maxX = window.innerWidth - NODE_EDIT_POPUP_WIDTH - VIEWPORT_PADDING;
+      const maxY = window.innerHeight - NODE_EDIT_POPUP_HEIGHT - VIEWPORT_PADDING;
+      setPosition({
+        x: clamp(e.clientX - dragStateRef.current.offsetX, VIEWPORT_PADDING, maxX),
+        y: clamp(e.clientY - dragStateRef.current.offsetY, VIEWPORT_PADDING, maxY),
+      });
+    };
+
+    const handleMouseUp = () => {
+      dragStateRef.current.dragging = false;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+
+  const handleDragStart = (e: React.MouseEvent<HTMLDivElement>) => {
+    dragStateRef.current = {
+      dragging: true,
+      offsetX: e.clientX - position.x,
+      offsetY: e.clientY - position.y,
+    };
+  };
 
   return (
     <div
       onClick={(e) => e.stopPropagation()}
       style={{
         position: 'fixed',
-        top: editState.y,
-        left: editState.x,
+        top: position.y,
+        left: position.x,
         zIndex: 9999,
         background: 'white',
         borderRadius: '10px',
         boxShadow: '0 8px 30px rgba(0,0,0,0.18)',
         padding: '16px',
-        width: '240px',
+        width: `${NODE_EDIT_POPUP_WIDTH}px`,
         border: '1px solid #e5e7eb',
       }}
     >
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+      <div
+        onMouseDown={handleDragStart}
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '12px',
+          cursor: 'move',
+          userSelect: 'none',
+        }}
+      >
         <span style={{ fontWeight: '600', fontSize: '14px', color: '#111827' }}>Edit Node</span>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}>
+        <button
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={onClose}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}
+        >
           <X className="w-4 h-4" style={{ color: '#6b7280' }} />
         </button>
       </div>
@@ -559,10 +622,13 @@ const CustomNode = memo((props: CustomNodeProps) => {
     const cb = nodeClickCallbacks.get('onNodeEdit');
     if (cb) cb({ ...e, currentTarget: e.currentTarget, target: e.target } as React.MouseEvent);
     // Store node info for the popup
-    const popUpWidth = 260;
-    const popUpHeight = 340;
-    const x = e.clientX + popUpWidth > window.innerWidth ? e.clientX - popUpWidth : e.clientX + 10;
-    const y = e.clientY + popUpHeight > window.innerHeight ? e.clientY - popUpHeight : e.clientY + 10;
+    const preferredX = e.clientX - NODE_EDIT_POPUP_WIDTH / 2;
+    const preferredYAbove = e.clientY - NODE_EDIT_POPUP_HEIGHT - 12;
+    const preferredYBelow = e.clientY + 12;
+    const maxX = window.innerWidth - NODE_EDIT_POPUP_WIDTH - VIEWPORT_PADDING;
+    const maxY = window.innerHeight - NODE_EDIT_POPUP_HEIGHT - VIEWPORT_PADDING;
+    const x = clamp(preferredX, VIEWPORT_PADDING, maxX);
+    const y = clamp(preferredYAbove > VIEWPORT_PADDING ? preferredYAbove : preferredYBelow, VIEWPORT_PADDING, maxY);
     (window as any).__pendingNodeEdit = {
       nodeId: id,
       label: data.label,
