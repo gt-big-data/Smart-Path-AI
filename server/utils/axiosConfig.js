@@ -5,8 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.pythonServiceClient = void 0;
 const axios_1 = __importDefault(require("axios"));
-// Configure axios instance for Python service with proper timeouts
-// Using 127.0.0.1 instead of localhost to avoid IPv6 issues
+// Configure axios instance for Python service with proper timeouts.
+// Must match server runtime: use PYTHON_SERVICE_URL (e.g. Cloud Run AI URL or local dev).
 const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'https://smartpath-backend-361386464842.us-east1.run.app';
 exports.pythonServiceClient = axios_1.default.create({
     baseURL: PYTHON_SERVICE_URL,
@@ -18,6 +18,7 @@ exports.pythonServiceClient = axios_1.default.create({
 // Add request interceptor for logging
 exports.pythonServiceClient.interceptors.request.use((config) => {
     var _a;
+    // Node multipart uploads: merge FormData headers so default Content-Type: application/json does not win.
     const d = config.data;
     if (d && typeof d.getHeaders === 'function') {
         const h = config.headers || {};

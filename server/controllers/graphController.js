@@ -13,17 +13,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.semanticSearchGraph = exports.searchGraph = exports.getNodeMetadata = exports.getUserProfile = exports.generateConversationResponse = exports.verifyAnswer = exports.generateQuestionsWithAnswers = exports.viewGraph = void 0;
-const axios_1 = __importDefault(require("axios"));
 const openai_1 = __importDefault(require("openai"));
-const dotenv_1 = __importDefault(require("dotenv"));
-const path_1 = __importDefault(require("path"));
 const ConceptProgress_1 = __importDefault(require("../models/ConceptProgress"));
 const axiosConfig_1 = require("../utils/axiosConfig");
-// Load environment variables
-dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../.env') });
 // Initialize OpenAI with explicit API key
 const openai = new openai_1.default({
-    apiKey: process.env.OPENAI_API_KEY || '',
+    apiKey: process.env.OPENAI_API_KEY || '', // Provide empty string as fallback
 });
 // Verify API key is loaded
 if (!process.env.OPENAI_API_KEY) {
@@ -145,6 +140,40 @@ const generateQuestionsWithAnswers = (req, res) => __awaiter(void 0, void 0, voi
     }
 });
 exports.generateQuestionsWithAnswers = generateQuestionsWithAnswers;
+const normalizeAnswer = (value = '') => value
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s]/g, '')
+    .replace(/\s+/g, ' ');
+const evaluateAnswerFallback = (userAnswer, correctAnswer) => {
+    const normalizedUser = normalizeAnswer(userAnswer);
+    const normalizedCorrect = normalizeAnswer(correctAnswer);
+    const normalizedChoice = (value) => {
+        const first = value.charAt(0);
+        if (['a', 'b', 'c', 'd'].includes(first))
+            return first;
+        if (value === 'true' || value === 't')
+            return 'true';
+        if (value === 'false' || value === 'f')
+            return 'false';
+        return value;
+    };
+    const compactUser = normalizedChoice(normalizedUser);
+    const compactCorrect = normalizedChoice(normalizedCorrect);
+    const isCorrect = !!compactCorrect && compactUser === compactCorrect;
+    if (isCorrect) {
+        return {
+            isCorrect: true,
+            feedback: "Nice work. That's correct.",
+            followUpQuestion: "What key idea helped you choose that answer?",
+        };
+    }
+    return {
+        isCorrect: false,
+        feedback: "Not quite. Re-check the key concept in the question and try again.",
+        followUpQuestion: "What evidence from the topic supports your choice?",
+    };
+};
 const verifyAnswer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d;
     const userId = (_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user;
@@ -152,7 +181,7 @@ const verifyAnswer = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         return res.status(401).json({ error: 'User not authenticated' });
     }
     try {
-        const { question, userAnswer, conceptId, isRetry } = req.body;
+        const { question, userAnswer, correctAnswer, conceptId, isRetry } = req.body;
         // Handle skipped questions - treat as incorrect
         if (userAnswer === 'SKIPPED' || userAnswer.trim().toUpperCase() === 'SKIP') {
             if (userId && conceptId) {
@@ -164,7 +193,7 @@ const verifyAnswer = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 followUpQuestion: ''
             });
         }
-        // Construct the prompt for GPT-4
+        // Construct the prompt for GPT
         const systemPrompt = `You are an educational assistant that evaluates student answers based on conceptual understanding rather than exact wording.
 Your role is to:
 1. Focus on the core concepts and key points in the answer
@@ -178,11 +207,13 @@ Evaluate answers based on:
 - Key points coverage (30%)
 - Clarity of expression (10%)
 
-Even partially correct answers should receive encouraging feedback.`;
+Even partially correct answers should receive encouraging feedback.
+Return valid JSON only.`;
         const userPrompt = `Evaluate this answer conceptually:
 
 Question: "${question}"
 Student's Answer: "${userAnswer}"
+Reference Correct Answer: "${correctAnswer || ''}"
 
 Provide feedback in this JSON format:
 {
@@ -192,23 +223,28 @@ Provide feedback in this JSON format:
   "conceptualHint": "If needed, a hint about missing concepts without giving away the answer",
   "thinkingPrompt": "A question to help the student think deeper about the topic"
 }`;
-        // Call GPT-4 for verification with higher temperature for more flexible responses
-        const completion = yield openai.chat.completions.create({
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt }
-            ],
-            model: "gpt-4o-mini",
-            temperature: 0.8,
-            max_tokens: 500
-        });
-        // Parse the response
-        const responseContent = (_d = (_c = completion.choices[0]) === null || _c === void 0 ? void 0 : _c.message) === null || _d === void 0 ? void 0 : _d.content;
-        if (!responseContent) {
-            throw new Error('No response from OpenAI');
-        }
         try {
-            const result = JSON.parse(responseContent);
+            // Prefer LLM conceptual grading, but keep a deterministic fallback if formatting/service fails.
+            const completion = yield openai.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt }
+                ],
+                model: "gpt-4o-mini",
+                temperature: 0.3,
+                max_tokens: 500,
+                response_format: { type: "json_object" },
+            });
+            const responseContent = (_d = (_c = completion.choices[0]) === null || _c === void 0 ? void 0 : _c.message) === null || _d === void 0 ? void 0 : _d.content;
+            if (!responseContent) {
+                throw new Error('No response from OpenAI');
+            }
+            const cleaned = responseContent
+                .replace(/^```json\s*/i, '')
+                .replace(/^```\s*/i, '')
+                .replace(/\s*```$/, '')
+                .trim();
+            const result = JSON.parse(cleaned);
             const isCorrect = result.score >= 70;
             // Update confidence score
             if (userId && conceptId) {
@@ -227,24 +263,23 @@ Provide feedback in this JSON format:
             };
             res.json(transformedResult);
         }
-        catch (parseError) {
-            console.error('Error parsing OpenAI response:', parseError);
-            // If parsing fails, we still need to send a response to the client.
-            // We should NOT try to update score here as it might be the cause of the error.
-            res.status(500).json({
-                isCorrect: false,
-                feedback: "There was an error processing your answer. Please try again.",
-                followUpQuestion: "Could you explain your thinking process?"
-            });
+        catch (llmError) {
+            console.error('LLM verify fallback engaged:', llmError);
+            const fallback = evaluateAnswerFallback(userAnswer, correctAnswer || '');
+            if (userId && conceptId) {
+                yield updateConfidenceScore(userId, conceptId, fallback.isCorrect, isRetry || false);
+            }
+            res.json(fallback);
         }
     }
     catch (error) {
         console.error('Error verifying answer:', error);
-        res.status(500).json({
-            isCorrect: false,
-            feedback: "There was an error verifying your answer. Please try again.",
-            followUpQuestion: "Could you rephrase your answer?"
-        });
+        const { userAnswer, correctAnswer, conceptId, isRetry } = req.body || {};
+        const fallback = evaluateAnswerFallback(String(userAnswer || ''), String(correctAnswer || ''));
+        if (userId && conceptId) {
+            yield updateConfidenceScore(userId, conceptId, fallback.isCorrect, Boolean(isRetry));
+        }
+        res.json(fallback);
     }
 });
 exports.verifyAnswer = verifyAnswer;

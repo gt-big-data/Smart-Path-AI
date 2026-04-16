@@ -153,6 +153,44 @@ interface VerifyAnswerRequest {
   isRetry?: boolean;
 }
 
+const normalizeAnswer = (value: string = ''): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s]/g, '')
+    .replace(/\s+/g, ' ');
+
+const evaluateAnswerFallback = (userAnswer: string, correctAnswer: string) => {
+  const normalizedUser = normalizeAnswer(userAnswer);
+  const normalizedCorrect = normalizeAnswer(correctAnswer);
+
+  const normalizedChoice = (value: string) => {
+    const first = value.charAt(0);
+    if (['a', 'b', 'c', 'd'].includes(first)) return first;
+    if (value === 'true' || value === 't') return 'true';
+    if (value === 'false' || value === 'f') return 'false';
+    return value;
+  };
+
+  const compactUser = normalizedChoice(normalizedUser);
+  const compactCorrect = normalizedChoice(normalizedCorrect);
+  const isCorrect = !!compactCorrect && compactUser === compactCorrect;
+
+  if (isCorrect) {
+    return {
+      isCorrect: true,
+      feedback: "Nice work. That's correct.",
+      followUpQuestion: "What key idea helped you choose that answer?",
+    };
+  }
+
+  return {
+    isCorrect: false,
+    feedback: "Not quite. Re-check the key concept in the question and try again.",
+    followUpQuestion: "What evidence from the topic supports your choice?",
+  };
+};
+
 export const verifyAnswer = async (req: Request, res: Response) => {
   const userId = (req.session as any)?.passport?.user;
   if (!userId) {
@@ -160,7 +198,7 @@ export const verifyAnswer = async (req: Request, res: Response) => {
   }
 
   try {
-    const { question, userAnswer, conceptId, isRetry }: VerifyAnswerRequest = req.body;
+    const { question, userAnswer, correctAnswer, conceptId, isRetry }: VerifyAnswerRequest = req.body;
 
     // Handle skipped questions - treat as incorrect
     if (userAnswer === 'SKIPPED' || userAnswer.trim().toUpperCase() === 'SKIP') {
@@ -174,7 +212,7 @@ export const verifyAnswer = async (req: Request, res: Response) => {
       });
     }
 
-    // Construct the prompt for GPT-4
+    // Construct the prompt for GPT
     const systemPrompt = `You are an educational assistant that evaluates student answers based on conceptual understanding rather than exact wording.
 Your role is to:
 1. Focus on the core concepts and key points in the answer
@@ -188,12 +226,14 @@ Evaluate answers based on:
 - Key points coverage (30%)
 - Clarity of expression (10%)
 
-Even partially correct answers should receive encouraging feedback.`;
+Even partially correct answers should receive encouraging feedback.
+Return valid JSON only.`;
 
     const userPrompt = `Evaluate this answer conceptually:
 
 Question: "${question}"
 Student's Answer: "${userAnswer}"
+Reference Correct Answer: "${correctAnswer || ''}"
 
 Provide feedback in this JSON format:
 {
@@ -204,25 +244,30 @@ Provide feedback in this JSON format:
   "thinkingPrompt": "A question to help the student think deeper about the topic"
 }`;
 
-    // Call GPT-4 for verification with higher temperature for more flexible responses
-    const completion = await openai.chat.completions.create({
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ],
-      model: "gpt-4o-mini",
-      temperature: 0.8,
-      max_tokens: 500
-    });
-
-    // Parse the response
-    const responseContent = completion.choices[0]?.message?.content;
-    if (!responseContent) {
-      throw new Error('No response from OpenAI');
-    }
-
     try {
-      const result = JSON.parse(responseContent);
+      // Prefer LLM conceptual grading, but keep a deterministic fallback if formatting/service fails.
+      const completion = await openai.chat.completions.create({
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        model: "gpt-4o-mini",
+        temperature: 0.3,
+        max_tokens: 500,
+        response_format: { type: "json_object" },
+      });
+
+      const responseContent = completion.choices[0]?.message?.content;
+      if (!responseContent) {
+        throw new Error('No response from OpenAI');
+      }
+
+      const cleaned = responseContent
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/\s*```$/, '')
+        .trim();
+      const result = JSON.parse(cleaned);
       const isCorrect = result.score >= 70;
 
       // Update confidence score
@@ -241,24 +286,23 @@ Provide feedback in this JSON format:
           : `Hint: ${result.conceptualHint}`
       };
       res.json(transformedResult);
-    } catch (parseError) {
-      console.error('Error parsing OpenAI response:', parseError);
-      // If parsing fails, we still need to send a response to the client.
-      // We should NOT try to update score here as it might be the cause of the error.
-      res.status(500).json({
-        isCorrect: false,
-        feedback: "There was an error processing your answer. Please try again.",
-        followUpQuestion: "Could you explain your thinking process?"
-      });
+    } catch (llmError) {
+      console.error('LLM verify fallback engaged:', llmError);
+      const fallback = evaluateAnswerFallback(userAnswer, correctAnswer || '');
+      if (userId && conceptId) {
+        await updateConfidenceScore(userId, conceptId, fallback.isCorrect, isRetry || false);
+      }
+      res.json(fallback);
     }
 
   } catch (error) {
     console.error('Error verifying answer:', error);
-    res.status(500).json({
-      isCorrect: false,
-      feedback: "There was an error verifying your answer. Please try again.",
-      followUpQuestion: "Could you rephrase your answer?"
-    });
+    const { userAnswer, correctAnswer, conceptId, isRetry }: VerifyAnswerRequest = req.body || {};
+    const fallback = evaluateAnswerFallback(String(userAnswer || ''), String(correctAnswer || ''));
+    if (userId && conceptId) {
+      await updateConfidenceScore(userId, conceptId, fallback.isCorrect, Boolean(isRetry));
+    }
+    res.json(fallback);
   }
 };
 

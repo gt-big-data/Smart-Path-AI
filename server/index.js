@@ -14,8 +14,19 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 // Load environment variables before any other imports
-dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '.env') });
+const envCandidates = [
+    path_1.default.resolve(__dirname, '.env'),
+    path_1.default.resolve(__dirname, '../.env'),
+];
+const resolvedEnvPath = envCandidates.find((candidate) => fs_1.default.existsSync(candidate));
+if (resolvedEnvPath) {
+    dotenv_1.default.config({ path: resolvedEnvPath });
+}
+else {
+    dotenv_1.default.config();
+}
 const mongoose_1 = __importDefault(require("mongoose"));
 const express_1 = __importDefault(require("express"));
 const passport_1 = __importDefault(require("passport"));
@@ -68,19 +79,12 @@ app.use(express_1.default.json());
 // Express must trust the proxy so secure cookies are accepted/set correctly.
 app.set('trust proxy', 1);
 // Session middleware (before passport middleware)
-app.use((0, express_session_1.default)({
-    secret: process.env.SESSION_SECRET || 'your-secret-key',
-    resave: false,
-    saveUninitialized: false,
-    proxy: true,
-    ...(sessionStore ? { store: sessionStore } : {}),
-    cookie: {
+app.use((0, express_session_1.default)(Object.assign(Object.assign({ secret: process.env.SESSION_SECRET || 'your-secret-key', resave: false, saveUninitialized: false, proxy: true }, (sessionStore ? { store: sessionStore } : {})), { cookie: {
         secure: isProduction, // Required for SameSite=None cookies in production
         sameSite: isProduction ? 'none' : 'lax',
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
-    }
-}));
+    } })));
 // Initialize passport and restore authentication state from session
 app.use(passport_1.default.initialize());
 app.use(passport_1.default.session());

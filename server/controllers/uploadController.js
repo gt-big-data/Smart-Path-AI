@@ -197,7 +197,7 @@ const processPdf = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 sendEvent({ type: 'progress', percent: rounded, message: getProgressMessage(rounded) });
             }
         }, 1500);
-        // Send to processing server (use shared client + long timeout for PDF/LLM on Cloud Run)
+        // Send to processing server (long PDFs + LLM can exceed the default 120s axios timeout)
         const response = yield axiosConfig_1.pythonServiceClient.post('/process-pdf', formData, {
             params: req.query,
             headers: Object.assign({}, formData.getHeaders()),
@@ -209,7 +209,7 @@ const processPdf = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         clearProgressInterval();
         if (isMetadataOnlyGraph(response.data)) {
             console.warn(`[Upload ${uploadId}] AI service returned metadata-only or empty graph`, {
-                graph_id: response.data === null || response.data === void 0 ? void 0 : response.data.graph_id,
+                graph_id: (_a = response.data) === null || _a === void 0 ? void 0 : _a.graph_id,
             });
         }
         // If client already disconnected while we were waiting, don't bother sending events
@@ -237,7 +237,7 @@ const processPdf = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             return;
         }
         // AI server intentionally returns 499 when cancellation is acknowledged.
-        if (axios_1.default.isAxiosError(error) && ((_a = error.response) === null || _a === void 0 ? void 0 : _a.status) === 499) {
+        if (axios_1.default.isAxiosError(error) && ((_b = error.response) === null || _b === void 0 ? void 0 : _b.status) === 499) {
             console.log(`[Upload ${uploadId}] AI server returned cancellation (499)`);
             if (!clientDisconnected) {
                 sendEvent({ type: 'error', error: 'Processing was cancelled' });
@@ -250,14 +250,14 @@ const processPdf = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (axios_1.default.isAxiosError(error)) {
             console.error('Axios Error:', {
                 message: error.message,
-                response: (_b = error.response) === null || _b === void 0 ? void 0 : _b.data,
-                status: (_c = error.response) === null || _c === void 0 ? void 0 : _c.status,
-                headers: (_d = error.response) === null || _d === void 0 ? void 0 : _d.headers
+                response: (_c = error.response) === null || _c === void 0 ? void 0 : _c.data,
+                status: (_d = error.response) === null || _d === void 0 ? void 0 : _d.status,
+                headers: (_e = error.response) === null || _e === void 0 ? void 0 : _e.headers
             });
             sendEvent({
                 type: 'error',
-                error: getAiServiceErrorMessage((_e = error.response) === null || _e === void 0 ? void 0 : _e.data) || 'Failed to process PDF',
-                details: `${error.message} - Status: ${(_f = error.response) === null || _f === void 0 ? void 0 : _f.status}`
+                error: getAiServiceErrorMessage((_f = error.response) === null || _f === void 0 ? void 0 : _f.data) || 'Failed to process PDF',
+                details: `${error.message} - Status: ${(_g = error.response) === null || _g === void 0 ? void 0 : _g.status}`
             });
         }
         else {
