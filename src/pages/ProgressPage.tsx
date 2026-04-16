@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, TrendingDown, ChevronLeft } from 'lucide-react';
+import { API_BASE_URL } from '../config/api';
 
 interface ProgressItem {
   concept_id: string;
   topic_name: string;
   confidence_score: number;
   last_practiced: string;
+  graph_id?: string;
 }
 
 interface ProfileData {
@@ -70,7 +72,7 @@ const ProgressPage: React.FC = () => {
         let progressList: any[] = [];
         try {
           console.log('[ProgressPage] Fetching progress from /api/concept-progress endpoint...');
-          const progressRes = await axios.get('https://smartpath-node-backend-361386464842.us-east1.run.app/api/concept-progress', { withCredentials: true });
+          const progressRes = await axios.get(`${API_BASE_URL}/api/concept-progress`, { withCredentials: true });
           progressList = Array.isArray(progressRes.data) ? progressRes.data : [];
           console.log(`[ProgressPage] Received ${progressList.length} progress records from backend`);
           if (progressList.length > 0) {
@@ -91,10 +93,10 @@ const ProgressPage: React.FC = () => {
         // Fetch chat titles to label accordion sections
         const localChatTitleMap = new Map<string, string>();
         try {
-          const userRes = await axios.get('http://localhost:4000/chat/user', { withCredentials: true });
+          const userRes = await axios.get(`${API_BASE_URL}/chat/user`, { withCredentials: true });
           const userId = userRes.data;
           if (userId) {
-            const chatsRes = await axios.get(`http://localhost:4000/chat/${userId}/chats`, { withCredentials: true });
+            const chatsRes = await axios.get(`${API_BASE_URL}/chat/${userId}/chats`, { withCredentials: true });
             const chats = Array.isArray(chatsRes.data) ? chatsRes.data : [];
             chats.forEach((chat: any) => {
               if (chat.graph_id) localChatTitleMap.set(chat.graph_id, chat.title || 'Untitled Chat');
@@ -108,7 +110,7 @@ const ProgressPage: React.FC = () => {
         // Fetch all graph IDs for the user
         let graphIds: string[] = [];
         try {
-          const graphIdsRes = await axios.get('https://smartpath-node-backend-361386464842.us-east1.run.app/chat/graph-ids', { withCredentials: true });
+          const graphIdsRes = await axios.get(`${API_BASE_URL}/chat/graph-ids`, { withCredentials: true });
           graphIds = graphIdsRes.data?.graphIds || [];
           console.log('ProgressPage: Successfully fetched graph IDs:', graphIds);
         } catch (graphIdsError: any) {
@@ -165,7 +167,7 @@ const ProgressPage: React.FC = () => {
 
         // Fetch all graphs in parallel
         const graphPromises = graphIds.map(id =>
-          axios.get('https://smartpath-node-backend-361386464842.us-east1.run.app/api/view-graph', {
+          axios.get(`${API_BASE_URL}/api/view-graph`, {
             params: { graph_id: id },
             withCredentials: true
           }).catch(err => {
@@ -203,10 +205,15 @@ const ProgressPage: React.FC = () => {
 
         // Combine all graph data (only from successful fetches)
         const allNodes: any[] = [];
-        graphResponses.forEach((graphRes: any) => {
+        graphResponses.forEach((graphRes: any, idx: number) => {
+          const sourceGraphId = graphIds[idx];
           // Skip error responses
           if (graphRes && !graphRes.error && graphRes.data && graphRes.data.graph && graphRes.data.graph.nodes) {
-            allNodes.push(...graphRes.data.graph.nodes);
+            const scopedNodes = graphRes.data.graph.nodes.map((node: any) => ({
+              ...node,
+              __graph_id: sourceGraphId,
+            }));
+            allNodes.push(...scopedNodes);
           }
         });
 
@@ -218,6 +225,7 @@ const ProgressPage: React.FC = () => {
 
         // Build a quick map from possible ids to the node's display name
         const nodeNameById = new Map<string, string>();
+        const conceptToGraphId = new Map<string, string>();
         const nodes = Array.isArray(graphData.graph?.nodes) ? graphData.graph.nodes : [];
 
         // Helper that mirrors GraphVisualization.getNodeLabel fallback logic
@@ -252,8 +260,12 @@ const ProgressPage: React.FC = () => {
             .filter(Boolean)
             .map(String);
           const display = getNodeLabel(node) || String(node.id);
+          const sourceGraphId = node.__graph_id;
           for (const c of candidates) {
             nodeNameById.set(String(c), display);
+            if (sourceGraphId) {
+              conceptToGraphId.set(String(c), String(sourceGraphId));
+            }
           }
         }
         
@@ -312,6 +324,7 @@ const ProgressPage: React.FC = () => {
             topic_name: name,
             confidence_score: typeof p.confidenceScore === 'number' ? p.confidenceScore : (p.confidence_score ?? 0),
             last_practiced: p.lastAttempted || p.last_practiced || p.updatedAt || new Date().toISOString(),
+            graph_id: conceptToGraphId.get(conceptId),
           };
         });
 
@@ -326,7 +339,7 @@ const ProgressPage: React.FC = () => {
 
             // Fetch metadata from all graphs
             const metaPromises = graphIds.map(id =>
-              axios.get('https://smartpath-node-backend-361386464842.us-east1.run.app/api/node-metadata', {
+              axios.get(`${API_BASE_URL}/api/node-metadata`, {
                 params: { graph_id: id, concept_ids: idsParam },
                 withCredentials: true,
               }).catch(err => {
@@ -375,7 +388,7 @@ const ProgressPage: React.FC = () => {
         if (stillUnknown.length > 0) {
           try {
             console.log(`[ProgressPage] Attempting to find topic names from quiz history for ${stillUnknown.length} concepts...`);
-            const quizHistoryRes = await axios.get('https://smartpath-node-backend-361386464842.us-east1.run.app/api/quiz-history', { withCredentials: true });
+            const quizHistoryRes = await axios.get(`${API_BASE_URL}/api/quiz-history`, { withCredentials: true });
             const quizHistories = Array.isArray(quizHistoryRes.data?.quizHistories) 
               ? quizHistoryRes.data.quizHistories 
               : [];
@@ -602,7 +615,7 @@ const ProgressPage: React.FC = () => {
                 <div className="space-y-3">
                   {Array.from(
                     profileData.full_progress.reduce((acc, item) => {
-                      const graphId = item.concept_id.split(':')[1] || 'unknown';
+                      const graphId = item.graph_id || 'unknown';
                       if (!acc.has(graphId)) acc.set(graphId, []);
                       acc.get(graphId)!.push(item);
                       return acc;
