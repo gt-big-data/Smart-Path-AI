@@ -1,94 +1,105 @@
 # Smart-Path-AI Docker Guide
 
-This guide is for running the full app stack with Docker from the project root.
+Run the full stack with Docker from the **workspace root** — the folder that contains both `Smart-Path-AI/` and `smartpathai-aiserver/` (this guide calls it `SmartPathAI`).
 
-## File Structure Example
+## File layout
 
 ```text
-bdbi/
-|- docker-compose.yml
-|- docker-compose.dev.yml
-|- .env
-|- Smart-Path-AI/
-|  |- Dockerfile
-|  |- dockerFiles/
-|  |  |- docker-compose.yml
-|  |  |- docker-compose.dev.yml
-|  |  |- .env.example
-|- smartpathai-aiserver/
-   |- Dockerfile
-   |- dockerFiles/
-      |- docker-compose.yml
-      |- docker-compose.dev.yml
-      |- .env.example
+SmartPathAI/
+├── docker-compose.yml          # copied from Smart-Path-AI/dockerFiles/
+├── docker-compose.dev.yml
+├── .env
+├── Smart-Path-AI/
+│   ├── Dockerfile
+│   └── dockerFiles/
+│       ├── docker-compose.yml
+│       ├── docker-compose.dev.yml
+│       └── .env.example
+└── smartpathai-aiserver/
+    └── Dockerfile
 ```
 
-## Before You Start
+## Before you start
 
-- Install Docker Desktop (or Docker Engine + Compose plugin).
-- Run commands from the project root (`bdbi`), not from inside `Smart-Path-AI/`.
+- Install Docker Desktop (or Docker Engine + Compose).
+- Run compose commands from `SmartPathAI/`, not from inside `Smart-Path-AI/`.
 
-## 1) Copy Docker Files To Project Root
-
-Use the files in this repo folder as the active root files:
+## 1. Copy compose files to the workspace root
 
 ```bash
-cd bdbi
+cd SmartPathAI
 cp Smart-Path-AI/dockerFiles/docker-compose.yml ./docker-compose.yml
 cp Smart-Path-AI/dockerFiles/docker-compose.dev.yml ./docker-compose.dev.yml
 cp Smart-Path-AI/dockerFiles/.env.example ./.env
 ```
 
-## 2) Fill In `.env`
+## 2. Fill in `.env`
 
-Open `./.env` and set values for:
+Required / commonly used:
 
-- `NEO4J_URI`
-- `NEO4J_USERNAME`
-- `NEO4J_PASSWORD`
-- `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
-- `OPENAI_API_KEY`
-- `SESSION_SECRET`
+```bash
+NEO4J_URI=
+NEO4J_USERNAME=
+NEO4J_PASSWORD=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+OPENAI_API_KEY=
+SESSION_SECRET=
+MONGO_URI=mongodb://mongo:27017/smartpathai
+CLIENT_URL=http://localhost:5173
+CORS_ORIGINS=http://localhost:5173
+```
 
-## 3) Run (Build Mode)
+Compose sets `PYTHON_SERVICE_URL=http://ai-server:8000` on the app service for you.
 
-This mode runs from built images. If you edit code, rebuild to see changes.
+Handwritten OCR also needs Document AI vars **inside the AI image** (`GCP_PROJECT_ID`, `GCP_LOCATION`, `DOCAI_PROCESSOR_ID`, and credentials). See `smartpathai-aiserver/DOCUMENT_AI_SETUP.md`. Printed PDFs work without that.
+
+## 3. Run (build mode)
+
+Built images. Rebuild to pick up code changes.
 
 ```bash
 docker compose -f docker-compose.yml up --build
 ```
 
-## 4) Run (Live Dev Mode)
+## 4. Run (live dev mode)
 
-This mode uses bind mounts for live code changes. It allows changes to be shown in real time without reloading the docker container.
+Bind mounts + reload. Use this while coding.
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-## 5) Stop
+Dev overlay:
 
-If running live dev mode:
+- App: `ts-node-dev` + Vite `--host 0.0.0.0`
+- AI: `uvicorn --reload --port 8000`
+
+## 5. Stop
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml down
-```
-
-If running build mode only:
-
-```bash
+# or, if you started build mode only:
 docker compose -f docker-compose.yml down
 ```
 
-## App URLs
+## URLs
 
-- Frontend: `http://localhost:5173`
-- App server: `https://smartpath-node-backend-361386464842.us-east1.run.app`
-- AI server: `http://localhost:8000`
+| Service | URL |
+|---------|-----|
+| Frontend (dev overlay) | http://localhost:5173 |
+| Express | http://localhost:4000 |
+| AI server | http://localhost:8000 |
+| Mongo | localhost:27017 |
 
-## Common Confusion
+Production `Smart-Path-AI/Dockerfile` starts **Express only** on 8080. Vite on 5173 is the dev overlay, not the production image.
 
-- Code changes not showing:
-  - You probably started with only `docker-compose.yml`.
-  - Use both files for live reload: `-f docker-compose.yml -f docker-compose.dev.yml`.
+## Ports (AI image)
+
+The AI `Dockerfile` runs uvicorn on **8080**. Direct `docker run` should use `-p 8000:8080`.
+
+The workspace compose file maps `8000:8000` and the **dev overlay** overrides the AI command to `--port 8000`, so live-dev compose matches. Build-mode compose without that override will not reach the AI process unless you change the mapping.
+
+## Code changes not showing?
+
+You started with only `docker-compose.yml`. Add the dev overlay: `-f docker-compose.yml -f docker-compose.dev.yml`.
