@@ -12,6 +12,7 @@ export interface IChat {
   date_created: Date;
   graph_id: string;
   messages: IMessage[];
+  isDeleted?: boolean;
 }
 
 export interface IUser extends Document {
@@ -35,6 +36,7 @@ const chatSchema = new mongoose.Schema<IChat>({
   date_created: { type: Date, default: Date.now },
   graph_id: { type: String, default: ''},
   messages: [messageSchema],
+  isDeleted: { type: Boolean, default: false },
 });
 
 const userSchema = new mongoose.Schema<IUser>({

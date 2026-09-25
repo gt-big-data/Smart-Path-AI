@@ -96,7 +96,10 @@ const ProgressPage: React.FC = () => {
           const userRes = await axios.get(`${API_BASE_URL}/chat/user`, { withCredentials: true });
           const userId = userRes.data;
           if (userId) {
-            const chatsRes = await axios.get(`${API_BASE_URL}/chat/${userId}/chats`, { withCredentials: true });
+            const chatsRes = await axios.get(`${API_BASE_URL}/chat/${userId}/chats`, {
+              params: { includeArchived: true },
+              withCredentials: true,
+            });
             const chats = Array.isArray(chatsRes.data) ? chatsRes.data : [];
             chats.forEach((chat: any) => {
               if (chat.graph_id) localChatTitleMap.set(chat.graph_id, chat.title || 'Untitled Chat');

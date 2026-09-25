@@ -15,6 +15,7 @@ const chatSchema = new mongoose_1.default.Schema({
     date_created: { type: Date, default: Date.now },
     graph_id: { type: String, default: '' },
     messages: [messageSchema],
+    isDeleted: { type: Boolean, default: false },
 });
 const userSchema = new mongoose_1.default.Schema({
     email: { type: String, required: true, unique: true },

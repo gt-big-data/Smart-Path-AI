@@ -161,7 +161,9 @@ export const getUserChats = async (req: Request, res: Response) => {
       return; // CRITICAL: Stop execution after sending error response
     }
 
-    res.status(200).json(user.chats);  // assuming chats are stored in user.chats
+    const includeArchived = req.query.includeArchived === 'true';
+    const chats = includeArchived ? user.chats : user.chats.filter((chat) => !chat.isDeleted);
+    res.status(200).json(chats);
   } catch (err) {
     res.status(500).json({ message: 'Server Error' });
   }
@@ -277,11 +279,11 @@ export const deleteChat = async (req: Request, res: Response): Promise<void> => 
 
     console.log(`Found chat at index ${chatIndex}, deleting...`);
 
-    // Remove the chat from the array
-    user.chats.splice(chatIndex, 1);
+    // Keep its graph reference available for historical progress lookups.
+    user.chats[chatIndex].isDeleted = true;
     await user.save();
 
-    console.log(`✅ Chat ${chat_id} deleted successfully. User now has ${user.chats.length} chats.`);
+    console.log(`✅ Chat ${chat_id} archived successfully.`);
     res.status(200).json({
       message: 'Chat deleted successfully',
       chat_id: chat_id,
