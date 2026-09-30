@@ -37,6 +37,7 @@ const graphRoutes_1 = __importDefault(require("./routes/graphRoutes"));
 const chatRoutes_1 = __importDefault(require("./routes/chatRoutes"));
 const progressRoutes_1 = __importDefault(require("./routes/progressRoutes"));
 const quizHistoryRoutes_1 = __importDefault(require("./routes/quizHistoryRoutes"));
+const practiceExamRoutes_1 = __importDefault(require("./routes/practiceExamRoutes"));
 const express_session_1 = __importDefault(require("express-session"));
 const connect_mongo_1 = __importDefault(require("connect-mongo"));
 const axios_1 = __importDefault(require("axios"));
@@ -113,6 +114,8 @@ app.use('/chat', chatRoutes_1.default);
 app.use('/api', progressRoutes_1.default);
 // Quiz History Routes
 app.use('/api/quiz-history', quizHistoryRoutes_1.default);
+// Saved graph-backed practice exams; does not update quiz progress.
+app.use('/api/practice-exams', practiceExamRoutes_1.default);
 app.get('/', (req, res) => {
     res.send('API is running');
 });
