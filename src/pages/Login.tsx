@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Brain, ArrowLeft } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { API_BASE_URL } from '../config/api';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -29,7 +30,7 @@ export default function Login() {
 
   // Simplified Google login - direct redirect
   const handleGoogleLogin = () => {
-    window.location.href = 'https://smartpath-node-backend-361386464842.us-east1.run.app/auth/google';
+    window.location.href = `${API_BASE_URL}/auth/google`;
   };
 
   return (

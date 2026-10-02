@@ -15,6 +15,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import { Search, X } from 'lucide-react';
 import { computeNodeSizes } from '../lib/nodesizing';
+import { API_BASE_URL } from '../config/api';
 
 interface GraphData {
   status: string;
@@ -795,7 +796,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     setIsSearching(true);
     try {
       const endpoint = searchMode === 'semantic' ? 'semantic-search-graph' : 'search-graph';
-      const url = `https://smartpath-node-backend-361386464842.us-east1.run.app/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
+      const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
       const response = await fetch(url, { credentials: 'include' });
       const result = await response.json();
       if (result.status === 'success') {

@@ -9,6 +9,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import GraphVisualization from '../components/GraphVisualization';
+import { API_BASE_URL } from '../config/api';
 
 interface Message {
   id: string;
@@ -56,7 +57,6 @@ interface ConceptProgress {
   lastAttempted?: Date;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://smartpath-node-backend-361386464842.us-east1.run.app';
 
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -375,7 +375,8 @@ function App() {
                   setUploadProgress(100);
                   setProgressMessage('Processing complete!');
                 } else if (event.type === 'error') {
-                  throw new Error(event.error || 'Failed to process file');
+                  const baseError = event.error || 'Failed to process file';
+                  throw new Error(event.details ? `${baseError} (${event.details})` : baseError);
                 }
               } catch (parseErr) {
                 if (parseErr instanceof SyntaxError) {
