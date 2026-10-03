@@ -9,6 +9,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import GraphVisualization from '../components/GraphVisualization';
+import PracticeExamPanel from '../components/PracticeExamPanel';
 
 interface Message {
   id: string;
@@ -60,6 +61,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://smartpath-nod
 
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [examPanels, setExamPanels] = useState<Record<string, boolean>>({});
   const [currentChatId, setCurrentChatId] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
@@ -1951,6 +1953,12 @@ function App() {
                 
                 
                 
+                <button
+                  className="px-4 py-2 rounded-lg border border-teal-600 text-teal-700 hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  disabled={!currentChat?.graph_id || isAnswering || isGeneratingQuestions || isProcessingFile}
+                  title={isAnswering ? 'Finish or end your quiz before opening a practice exam' : !currentChat?.graph_id ? 'Upload course notes first' : 'Generate or take a practice exam'}
+                  onClick={() => setExamPanels(previous => ({...previous, [currentChatId]: true}))}
+                >Practice Exam</button>
                 {/* Start Quiz button moved to header for better placement */}
                 {shouldStartQuiz && !isAnswering && currentChat?.graph_id && (
                   <button
@@ -2221,6 +2229,12 @@ function App() {
           </div>
         </Panel>
       </PanelGroup>
+      {Object.keys(examPanels).map(chatId => {
+        const chat = chats.find(item => item.id === chatId);
+        return chat ? <PracticeExamPanel key={chatId} chatId={chatId} title={chat.title}
+          open={!!examPanels[chatId] && currentChatId === chatId}
+          onClose={() => setExamPanels(previous => ({...previous, [chatId]: false}))}/> : null;
+      })}
     </div>
   );
 }
