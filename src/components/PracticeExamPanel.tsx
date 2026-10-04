@@ -134,7 +134,11 @@ export default function PracticeExamPanel({
   };
   const close = () =>
     void act("Saving before closing…", async () => {
-      await flush();
+      try {
+        await flush();
+      } catch {
+        // Panels stay mounted, retaining the unsaved draft and recovery controls.
+      }
       onClose();
     });
   useEffect(() => {
