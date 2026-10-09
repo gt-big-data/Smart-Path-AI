@@ -10,6 +10,7 @@ services:
       PORT: 4000
       CLIENT_PORT: 5173
       CLIENT_URL: ${CLIENT_URL:-http://localhost:5173}
+      AUTH_ALLOWED_ORIGINS: ${AUTH_ALLOWED_ORIGINS:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       SERVER_PUBLIC_URL: ${SERVER_PUBLIC_URL:-https://smartpath-node-backend-361386464842.us-east1.run.app}
       GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-https://smartpath-node-backend-361386464842.us-east1.run.app/auth/google/callback}

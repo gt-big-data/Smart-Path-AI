@@ -1,5 +1,5 @@
 import { Router, Request, Response, RequestHandler } from 'express';
-import passport from 'passport';
+import { beginGoogleLogin, completeGoogleLogin } from './googleLogin';
 import { signup, login, checkAuth, logout } from '../controllers/authController';
 import axios from 'axios';
 
@@ -20,25 +20,8 @@ router.get('/flask/hi', async (req, res) => {
     }
 });
 
-// Google OAuth endpoints, etc...
-router.get(
-    '/google',
-    passport.authenticate('google', {
-
-        //failureRedirect: 'http://localhost:5173/login', // or wherever you want users to land on failure
-        scope: ['profile', 'email'], // what data you want from the user
-        prompt: 'select_account',    // optional: always prompt user to pick account
-    })
-);
-
-// 2. Google OAuth callback
-//    Google redirects here after the user grants permission
-router.get('/google/callback',
-    passport.authenticate('google', { failureMessage: true }),
-    (req:Request, res: Response) => {
-        res.redirect(process.env.CLIENT_URL || 'http://localhost:5173');
-    }
-);
+router.get('/google', beginGoogleLogin);
+router.get('/google/callback', completeGoogleLogin);
 
 router.get('/me', (req: Request, res: Response) => {
     if (req.isAuthenticated && req.isAuthenticated()) {

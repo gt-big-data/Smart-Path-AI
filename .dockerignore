@@ -10,4 +10,10 @@ build
 .env
 .env.*
 server/.env
+**/.env
+**/.env.*
+cookies.txt
+**/cookies.txt
+.DS_Store
+**/.DS_Store
 coverage

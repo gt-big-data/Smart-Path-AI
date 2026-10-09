@@ -84,7 +84,8 @@ Express loads `server/.env`, then falls back to the repo-root `.env`.
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Express | Passport Google OAuth |
 | `GOOGLE_CALLBACK_URL` | Express | Must match the URI in Google Cloud Console |
 | `SERVER_PUBLIC_URL` | Express | Used to build the default callback URL |
-| `CLIENT_URL` | Express | Post-OAuth redirect (default `http://localhost:5173`) |
+| `CLIENT_URL` | Express | Default post-OAuth frontend origin (default `http://localhost:5173`) |
+| `AUTH_ALLOWED_ORIGINS` | Express | Exact comma-separated Google login return origins; defaults to `CLIENT_URL` |
 | `CORS_ORIGINS` | Express | Comma-separated allowed origins |
 | `OPENAI_API_KEY` | Express | Node-side `POST /api/verify-answer` (`gpt-4o-mini`) |
 | `PYTHON_SERVICE_URL` | Express | AI server. Local: `http://127.0.0.1:8000` |
@@ -92,6 +93,36 @@ Express loads `server/.env`, then falls back to the repo-root `.env`.
 | `NODE_ENV` | Express | Production cookies: `secure` + `sameSite: none` |
 
 Google Cloud Console: add `http://localhost:4000/auth/google/callback` (and the production Cloud Run callback) as authorized redirect URIs.
+
+### Google login from localhost and Vercel using the same GCP backend
+
+The Google buttons send the frontend's current origin to `/auth/google`. Express
+checks it against `AUTH_ALLOWED_ORIGINS`, stores it with a random session-bound
+OAuth state for ten minutes, and redirects back after Google login. A new login
+attempt in the same browser session replaces the previous pending attempt.
+Cancelled or failed logins return to that frontend's `/login` page. Invalid,
+expired, or reused callbacks are rejected before contacting Google.
+
+On the GCP backend, set the following (replace the example Vercel hostname):
+
+```dotenv
+CLIENT_URL=https://your-app.vercel.app
+AUTH_ALLOWED_ORIGINS=https://your-app.vercel.app,http://localhost:5173
+CORS_ORIGINS=https://your-app.vercel.app,http://localhost:5173
+NODE_ENV=production
+```
+
+Use exact origins without paths or trailing slashes; add any other development
+port explicitly. Keep `GOOGLE_CALLBACK_URL` pointed at the GCP backend's
+`/auth/google/callback` and registered in Google Cloud Console. No localhost Google
+callback is needed when both frontends use GCP. Set `VITE_API_BASE_URL` to that
+same GCP backend for both frontends, and retain the existing `SESSION_SECRET`
+and Mongo session store settings.
+
+Deploy the updated backend and frontend together. Verify both start origins,
+including that `/auth/check-auth` recognizes the user after returning. Cross-site
+session cookies require a browser that permits them; CORS alone does not override
+browser cookie restrictions.
 
 ## How requests flow
 

@@ -108,7 +108,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const loginWithGoogle = () => {
-    window.location.href = `${API_BASE_URL}/auth/google`;
+    const loginUrl = new URL(`${API_BASE_URL}/auth/google`, window.location.origin);
+    loginUrl.searchParams.set('returnTo', window.location.origin);
+    window.location.href = loginUrl.toString();
   };
 
   const logout = async () => {
