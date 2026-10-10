@@ -1,21 +1,22 @@
 //GraphVisualization.tsx
-import React, { useCallback, useEffect, memo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import ReactFlow, {
   Node,
   Edge,
   Background,
   Controls,
   MiniMap,
+  NodeMouseHandler,
+  NodeProps,
   useNodesState,
   useEdgesState,
-  NodeProps,
-  Handle,
-  Position,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Search, X } from 'lucide-react';
 import { computeNodeSizes } from '../lib/nodesizing';
 import { API_BASE_URL } from '../config/api';
+import { GraphNode, NodeEditState, NODE_EDIT_POPUP_WIDTH, NODE_EDIT_POPUP_HEIGHT, VIEWPORT_PADDING } from './graph/GraphNode';
 
 interface GraphData {
   status: string;
@@ -49,22 +50,6 @@ interface GraphVisualizationProps {
   isLoading?: boolean;
 }
 
-interface CustomNodeProps extends NodeProps {
-  style?: React.CSSProperties;
-}
-
-// Node edit popup state interface
-interface NodeEditState {
-  nodeId: string;
-  label: string;
-  color: string;
-  x: number;
-  y: number;
-}
-
-const NODE_EDIT_POPUP_WIDTH = 260;
-const NODE_EDIT_POPUP_HEIGHT = 340;
-const VIEWPORT_PADDING = 12;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -177,53 +162,6 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Source: COLOR_PALETTE.SLATE,
     Application: COLOR_PALETTE.ORANGE,
   },
-};
-
-const nodeStyles = {
-  padding: '12px 20px',
-  fontSize: '18px',
-  fontWeight: '500' as const,
-  textAlign: 'center' as const,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: 'white',
-  letterSpacing: '0.5px',
-  lineHeight: '1.3',
-  width: '100%',
-  height: '100%',
-  margin: 0,
-  boxSizing: 'border-box' as const,
-  borderRadius: '24px',
-};
-
-const NodeTooltip = ({ content }: { content: string }) => {
-  if (!content) return null;
-  
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        bottom: '80px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        background: 'rgba(0, 0, 0, 0.85)',
-        color: 'white',
-        padding: '8px 12px',
-        borderRadius: '4px',
-        fontSize: '13px',
-        pointerEvents: 'none',
-        zIndex: 1000,
-        maxWidth: '250px',
-        whiteSpace: 'normal',
-        wordBreak: 'break-word',
-        textAlign: 'left',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-      }}
-    >
-      {content}
-    </div>
-  );
 };
 
 // Loading screen component
@@ -404,8 +342,9 @@ const NodeEditPopup = ({
         background: 'white',
         borderRadius: '10px',
         boxShadow: '0 8px 30px rgba(0,0,0,0.18)',
-        padding: '16px',
+        padding: '12px',
         width: `${NODE_EDIT_POPUP_WIDTH}px`,
+        boxSizing: 'border-box',
         border: '1px solid #e5e7eb',
       }}
     >
@@ -416,24 +355,24 @@ const NodeEditPopup = ({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          marginBottom: '12px',
+          marginBottom: '8px',
           cursor: 'move',
           userSelect: 'none',
         }}
       >
-        <span style={{ fontWeight: '600', fontSize: '14px', color: '#111827' }}>Edit Node</span>
+        <span style={{ fontWeight: '600', fontSize: '13px', color: '#111827' }}>Edit Node</span>
         <button
           onMouseDown={(e) => e.stopPropagation()}
           onClick={onClose}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}
         >
-          <X className="w-4 h-4" style={{ color: '#6b7280' }} />
+          <X className="w-3.5 h-3.5" style={{ color: '#6b7280' }} />
         </button>
       </div>
 
       {/* Label field */}
-      <div style={{ marginBottom: '12px' }}>
-        <label style={{ fontSize: '12px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '4px' }}>
+      <div style={{ marginBottom: '8px' }}>
+        <label style={{ fontSize: '11px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '3px' }}>
           Label
         </label>
         <input
@@ -442,10 +381,10 @@ const NodeEditPopup = ({
           onChange={(e) => setLabel(e.target.value)}
           style={{
             width: '100%',
-            padding: '7px 10px',
+            padding: '5px 8px',
             borderRadius: '6px',
             border: '1px solid #d1d5db',
-            fontSize: '13px',
+            fontSize: '12px',
             color: '#111827',
             outline: 'none',
             boxSizing: 'border-box',
@@ -456,18 +395,18 @@ const NodeEditPopup = ({
       </div>
 
       {/* Color picker */}
-      <div style={{ marginBottom: '14px' }}>
-        <label style={{ fontSize: '12px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '6px' }}>
+      <div style={{ marginBottom: '10px' }}>
+        <label style={{ fontSize: '11px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '3px' }}>
           Color
         </label>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
           {colorOptions.map((c) => (
             <button
               key={c}
               onClick={() => setColor(c)}
               style={{
-                width: '22px',
-                height: '22px',
+                width: '18px',
+                height: '18px',
                 borderRadius: '50%',
                 background: c,
                 border: color === c ? '2px solid #111827' : '2px solid transparent',
@@ -483,16 +422,16 @@ const NodeEditPopup = ({
       </div>
 
       {/* Preview */}
-      <div style={{ marginBottom: '14px' }}>
-        <label style={{ fontSize: '12px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '6px' }}>
+      <div style={{ marginBottom: '10px' }}>
+        <label style={{ fontSize: '11px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '3px' }}>
           Preview
         </label>
         <div style={{
           background: color,
           color: 'white',
-          padding: '8px 12px',
+          padding: '6px 10px',
           borderRadius: '6px',
-          fontSize: '13px',
+          fontSize: '12px',
           fontWeight: '500',
           textAlign: 'center',
           wordBreak: 'break-word',
@@ -507,12 +446,12 @@ const NodeEditPopup = ({
           onClick={onClose}
           style={{
             flex: 1,
-            padding: '7px',
+            padding: '5px',
             borderRadius: '6px',
             border: '1px solid #d1d5db',
             background: 'white',
             color: '#374151',
-            fontSize: '13px',
+            fontSize: '12px',
             cursor: 'pointer',
             fontWeight: '500',
           }}
@@ -523,12 +462,12 @@ const NodeEditPopup = ({
           onClick={() => { onSave(editState.nodeId, label, color); onClose(); }}
           style={{
             flex: 1,
-            padding: '7px',
+            padding: '5px',
             borderRadius: '6px',
             border: 'none',
             background: '#14b8a6',
             color: 'white',
-            fontSize: '13px',
+            fontSize: '12px',
             cursor: 'pointer',
             fontWeight: '500',
           }}
@@ -538,142 +477,6 @@ const NodeEditPopup = ({
       </div>
     </div>
   );
-};
-
-// Function to render confidence circles based on score
-const renderConfidenceCircles = (confidenceScore: number | null) => {
-  if (confidenceScore === null || confidenceScore === undefined) {
-    return (
-      <div style={{
-        position: 'absolute',
-        top: '6px',
-        left: '6px',
-        display: 'flex',
-        gap: '3px',
-        zIndex: 10,
-      }}>
-        {[1, 2, 3].map(i => (
-          <div
-            key={i}
-            style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: 'transparent',
-              border: '1.5px solid rgba(255, 255, 255, 0.7)',
-            }}
-          />
-        ))}
-      </div>
-    );
-  }
-
-  let filledCircles = 0;
-  if (confidenceScore > 0.7) {
-    filledCircles = 3;
-  } else if (confidenceScore > 0.4) {
-    filledCircles = 2;
-  } else if (confidenceScore > 0.0) {
-    filledCircles = 1;
-  } else {
-    filledCircles = 0;
-  }
-
-  return (
-    <div style={{
-      position: 'absolute',
-      top: '6px',
-      left: '6px',
-      display: 'flex',
-      gap: '3px',
-      zIndex: 10,
-    }}>
-      {[1, 2, 3].map(i => (
-        <div
-          key={i}
-          style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
-            backgroundColor: i <= filledCircles ? 'rgba(255, 255, 255, 0.9)' : 'transparent',
-            border: '1.5px solid rgba(255, 255, 255, 0.7)',
-          }}
-        />
-      ))}
-    </div>
-  );
-};
-
-// We need a global callback ref for the node edit popup trigger
-// This lets CustomNode (which doesn't have direct access to parent state) fire an event upward
-const nodeClickCallbacks = new Map<string, (e: React.MouseEvent) => void>();
-
-const CustomNode = memo((props: CustomNodeProps) => {
-  const { data, style = {}, id } = props;
-  const [showTooltip, setShowTooltip] = useState(false);
-  
-  const truncateText = (text: string) => {
-    if (!text) return '';
-    if (text.length <= 30) return text;
-    return text.substring(0, 30) + '...';
-  };
-
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const cb = nodeClickCallbacks.get('onNodeEdit');
-    if (cb) cb({ ...e, currentTarget: e.currentTarget, target: e.target } as React.MouseEvent);
-    // Store node info for the popup
-    const preferredX = e.clientX - NODE_EDIT_POPUP_WIDTH / 2;
-    const preferredYAbove = e.clientY - NODE_EDIT_POPUP_HEIGHT - 12;
-    const preferredYBelow = e.clientY + 12;
-    const maxX = window.innerWidth - NODE_EDIT_POPUP_WIDTH - VIEWPORT_PADDING;
-    const maxY = window.innerHeight - NODE_EDIT_POPUP_HEIGHT - VIEWPORT_PADDING;
-    const x = clamp(preferredX, VIEWPORT_PADDING, maxX);
-    const y = clamp(preferredYAbove > VIEWPORT_PADDING ? preferredYAbove : preferredYBelow, VIEWPORT_PADDING, maxY);
-    (window as any).__pendingNodeEdit = {
-      nodeId: id,
-      label: data.label,
-      color: (style as any).background || '#3b82f6',
-      x,
-      y,
-    };
-    window.dispatchEvent(new CustomEvent('node-edit-request'));
-  };
-  
-  return (
-    <>
-      <Handle 
-        type="target" 
-        position={Position.Top} 
-        style={{ background: '#555', width: '8px', height: '8px', top: '-4px' }} 
-      />
-      <div
-        style={{
-          ...nodeStyles,
-          ...style,
-          position: 'relative',
-          cursor: 'pointer',
-        }}
-        onMouseEnter={() => setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
-        onDoubleClick={handleDoubleClick}
-        title="Double-click to edit"
-      >
-        {renderConfidenceCircles(data.confidenceScore)}
-        {data.customLabel || truncateText(data.label)}
-      </div>
-      {showTooltip && !data.customLabel && <NodeTooltip content={data.description} />}
-      <Handle 
-        type="source" 
-        position={Position.Bottom} 
-        style={{ background: '#555', width: '8px', height: '8px', bottom: '-4px' }} 
-      />
-    </>
-  );
-});
-
-const nodeTypes = {
-  default: CustomNode,
 };
 
 const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptProgress, isLoading = false }) => {
@@ -692,17 +495,14 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
   // Node edit popup state
   const [nodeEditState, setNodeEditState] = useState<NodeEditState | null>(null);
 
-  // Listen for node edit requests from CustomNode
-  useEffect(() => {
-    const handler = () => {
-      const pending = (window as any).__pendingNodeEdit;
-      if (pending) {
-        setNodeEditState(pending);
-        (window as any).__pendingNodeEdit = null;
-      }
-    };
-    window.addEventListener('node-edit-request', handler);
-    return () => window.removeEventListener('node-edit-request', handler);
+  // Passes the edit callback to every GraphNode as a prop. Memoized so React Flow gets the same nodeTypes each render.
+  const nodeTypes = useMemo(() => ({
+    default: (props: NodeProps) => <GraphNode {...props} onEditRequest={setNodeEditState} />,
+  }), []);
+
+  // Single click on a node (pencil clicks don't reach here). P1 (path highlight) fills this in.
+  const handleNodeClick = useCallback<NodeMouseHandler>(() => {
+    // Intentionally empty until P1
   }, []);
 
   // Close popup when clicking elsewhere
@@ -1112,13 +912,15 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* Node Edit Popup */}
-      {nodeEditState && (
+      {/* Node Edit Popup. Portaled to <body> because the Chat page wraps the graph in a
+          backdrop-blur panel, which would make position: fixed relative to that panel. */}
+      {nodeEditState && createPortal(
         <NodeEditPopup
           editState={nodeEditState}
           onClose={() => setNodeEditState(null)}
           onSave={handleNodeEditSave}
-        />
+        />,
+        document.body
       )}
 
       {/* Hint tooltip */}
@@ -1135,7 +937,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
         borderRadius: '20px',
         pointerEvents: 'none',
       }}>
-        Double-click a node to edit
+        Click a node to see its path
       </div>
 
       {/* Search Bar */}
@@ -1289,6 +1091,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeClick={handleNodeClick}
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.5, minZoom: 0.1, maxZoom: 1, duration: 800 }}
