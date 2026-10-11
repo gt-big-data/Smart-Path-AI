@@ -14,6 +14,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Search, X } from 'lucide-react';
+import PathBar from './graph/PathBar';
 import { computeNodeSizes } from '../lib/nodesizing';
 import { API_BASE_URL } from '../config/api';
 
@@ -31,6 +32,9 @@ interface ConceptProgress {
   confidenceScore: number;
   lastAttempted?: Date;
 }
+
+// Path bar preview with hardcoded steps; wired up in P2b
+const SHOW_PATH_BAR = false;
 
 const SUBJECT_MAP: { [key: string]: string } = {
   'math': 'math',
@@ -1221,6 +1225,19 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
             </button>
           </div>
         </div>
+        {SHOW_PATH_BAR && (
+          <div style={{ marginTop: '10px' }}>
+            <PathBar
+              steps={[
+                { id: 'linear-algebra', label: 'Linear Algebra' },
+                { id: 'vector-spaces', label: 'Vector spaces' },
+                { id: 'eigenvalues', label: 'Eigenvalues' },
+              ]}
+              onStepClick={() => {}}
+              onFocus={() => {}}
+              onClear={() => {}}
+            />
+          </div>
         {searchResults.length > 0 && (
           <div style={{
             marginTop: '8px',
