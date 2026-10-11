@@ -1238,6 +1238,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
               onClear={() => {}}
             />
           </div>
+        )}
         {searchResults.length > 0 && (
           <div style={{
             marginTop: '8px',
