@@ -9,6 +9,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build": "vite build",
     "lint": "eslint .",
+    "test": "jest",
     "preview": "vite preview"
   },
   "dependencies": {
