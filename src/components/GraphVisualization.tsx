@@ -16,6 +16,8 @@ import 'reactflow/dist/style.css';
 import { Search, X } from 'lucide-react';
 import PathBar from './graph/PathBar';
 import { computeNodeSizes } from '../lib/nodesizing';
+import { buildGraphTree } from '../lib/graphTree';
+import { getPathHighlight } from '../lib/pathHighlight';
 import { API_BASE_URL } from '../config/api';
 import { GraphNode, NodeEditState, NODE_EDIT_POPUP_WIDTH, NODE_EDIT_POPUP_HEIGHT, VIEWPORT_PADDING } from './graph/GraphNode';
 
@@ -87,7 +89,7 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Source: COLOR_PALETTE.SLATE,
     Application: COLOR_PALETTE.ORANGE,
   },
-  
+
   english: {
     Topic: COLOR_PALETTE.BLUE,
     Subtopic: COLOR_PALETTE.TEAL,
@@ -101,7 +103,7 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Application: COLOR_PALETTE.ORANGE,
     Genre: COLOR_PALETTE.CYAN,
   },
-  
+
   history: {
     Topic: COLOR_PALETTE.BLUE,
     Event: COLOR_PALETTE.RED,
@@ -114,7 +116,7 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Definition: COLOR_PALETTE.TEAL,
     Source: COLOR_PALETTE.SLATE,
   },
-  
+
   math: {
     Topic: COLOR_PALETTE.BLUE,
     Subtopic: COLOR_PALETTE.TEAL,
@@ -126,7 +128,7 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Proof: COLOR_PALETTE.ORANGE,
     Application: COLOR_PALETTE.VIOLET,
   },
-  
+
   mathematics: {
     Topic: COLOR_PALETTE.BLUE,
     Subtopic: COLOR_PALETTE.TEAL,
@@ -138,7 +140,7 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Proof: COLOR_PALETTE.ORANGE,
     Application: COLOR_PALETTE.VIOLET,
   },
-  
+
   science: {
     Topic: COLOR_PALETTE.BLUE,
     Subtopic: COLOR_PALETTE.TEAL,
@@ -157,7 +159,7 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Evolution: COLOR_PALETTE.ROSE,
     Discovery: COLOR_PALETTE.FUCHSIA,
   },
-  
+
   default: {
     Topic: COLOR_PALETTE.BLUE,
     Subtopic: COLOR_PALETTE.TEAL,
@@ -486,10 +488,11 @@ const NodeEditPopup = ({
 const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptProgress, isLoading = false }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [activePathTargetId, setActivePathTargetId] = useState<string | null>(null);
   const [minimapLocked, setMinimapLocked] = useState(false);
   const [currentSubject, setCurrentSubject] = useState<string>('default');
   const [nodeTypesInGraph, setNodeTypesInGraph] = useState<Set<string>>(new Set());
-  
+
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<string[]>([]);
@@ -504,10 +507,63 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     default: (props: NodeProps) => <GraphNode {...props} onEditRequest={setNodeEditState} />,
   }), []);
 
-  // Single click on a node (pencil clicks don't reach here). P1 (path highlight) fills this in.
-  const handleNodeClick = useCallback<NodeMouseHandler>(() => {
-    // Intentionally empty until P1
-  }, []);
+const graphTree = useMemo(
+  () =>
+    buildGraphTree(
+      data?.graph ?? {
+        nodes: [],
+        relationships: [],
+      }
+    ),
+  [data?.graph]
+);
+
+const activePath = useMemo(
+  () =>
+    activePathTargetId
+      ? getPathHighlight(graphTree, activePathTargetId)
+      : null,
+  [activePathTargetId, graphTree]
+);
+
+const clearActivePath = useCallback(() => {
+  setActivePathTargetId(null);
+}, []);
+
+const handleNodeClick = useCallback<NodeMouseHandler>(
+  (_, node) => {
+    if (node.id === graphTree.centerId) {
+      clearActivePath();
+      return;
+    }
+
+    setActivePathTargetId(node.id);
+  },
+  [clearActivePath, graphTree.centerId]
+);
+
+useEffect(() => {
+  const handleEscape = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      clearActivePath();
+    }
+  };
+
+  window.addEventListener('keydown', handleEscape);
+
+  return () => {
+    window.removeEventListener('keydown', handleEscape);
+  };
+}, [clearActivePath]);
+
+useEffect(() => {
+  if (
+    activePathTargetId &&
+    !graphTree.nodes.has(activePathTargetId)
+  ) {
+    clearActivePath();
+  }
+}, [activePathTargetId, clearActivePath, graphTree]);
 
   // Close popup when clicking elsewhere
   useEffect(() => {
@@ -531,45 +587,45 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
   const getNodeLabel = (node: any) => {
     const nameBasedNodeTypes = [
-      'Topic', 'Subtopic', 'Event', 'Figure', 'Location', 
+      'Topic', 'Subtopic', 'Event', 'Figure', 'Location',
       'Concept', 'Document', 'Work', 'Author', 'LiteraryDevice',
       'Theme', 'CriticalTheory', 'Genre', 'Formula', 'Property',
       'Theorem', 'Proof', 'Equation', 'Principle', 'Theory',
       'Evidence', 'Scientist'
     ];
-    
+
     const shouldUseName = node.labels.some(label => nameBasedNodeTypes.includes(label));
-    
+
     const truncateText = (text: string, maxWords: number = 4): string => {
       const words = text.split(' ');
       if (words.length <= maxWords) return text;
       return words.slice(0, maxWords).join(' ') + '...';
     };
-    
+
     if (shouldUseName) {
       if (node.properties.name && node.properties.name.trim()) {
         return truncateText(node.properties.name.trim());
       }
     }
-    
+
     const possibleProperties = [
       'text', 'description', 'illustration', 'explanation',
       'content', 'title', 'label', 'summary', 'definition', 'name',
     ];
-    
+
     for (const prop of possibleProperties) {
       const value = node.properties[prop];
       if (value && typeof value === 'string' && value.trim()) {
         return truncateText(value.trim());
       }
     }
-    
+
     for (const [key, value] of Object.entries(node.properties || {})) {
       if (typeof value === 'string' && value.trim() && key !== 'id') {
         return truncateText(value.trim());
       }
     }
-    
+
     const nodeType = node.labels?.[0] || 'Node';
     console.warn('Node with no displayable properties, using fallback:', {
       labels: node.labels,
@@ -577,7 +633,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       id: node.id,
       fallback: nodeType
     });
-    
+
     return nodeType;
   };
 
@@ -624,38 +680,6 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     return () => clearTimeout(timer);
   }, [searchQuery, handleSearch]);
 
-  useEffect(() => {
-    if (searchResults.length > 0) {
-      setNodes(prevNodes => 
-        prevNodes.map(node => ({
-          ...node,
-          style: {
-            ...node.style,
-            border: searchResults.includes(node.id) 
-              ? '3px solid #fbbf24' 
-              : '1px solid rgba(255,255,255,0.2)',
-            boxShadow: searchResults.includes(node.id)
-              ? '0 0 15px rgba(251, 191, 36, 0.6)'
-              : 'none',
-            borderRadius: '24px',
-          }
-        }))
-      );
-    } else {
-      setNodes(prevNodes => 
-        prevNodes.map(node => ({
-          ...node,
-          style: {
-            ...node.style,
-            border: '1px solid rgba(255,255,255,0.2)',
-            boxShadow: 'none',
-            borderRadius: '24px',
-          }
-        }))
-      );
-    }
-  }, [searchResults, setNodes]);
-
   const processGraphData = useCallback((graphData: GraphData) => {
     if (!graphData) return;
 
@@ -664,7 +688,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
     const confidenceMap = new Map<string, number>();
     const confidenceByName = new Map<string, number>();
-    
+
     conceptProgress.forEach(progress => {
       confidenceMap.set(progress.conceptId, progress.confidenceScore);
       const namePart = progress.conceptId.split('_').pop() || progress.conceptId;
@@ -689,6 +713,9 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       style: { stroke: '#888', strokeWidth: 2 },
       labelStyle: { fill: '#888', fontSize: 10 },
       animated: true,
+      data: {
+        graphEdgeIndex: i,
+      },
     }));
 
     // Node Sizing
@@ -720,36 +747,36 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
     const isFallbackLabel = (label: string, nodeType: string): boolean => {
       const normalizedLabel = label.toLowerCase().trim();
-      return label === nodeType || 
-             label === 'Node' || 
-             normalizedLabel === 'other' ||
-             normalizedLabel === 'unknown' ||
-             normalizedLabel === 'undefined' ||
-             normalizedLabel === 'null' ||
-             normalizedLabel === '';
+      return label === nodeType ||
+        label === 'Node' ||
+        normalizedLabel === 'other' ||
+        normalizedLabel === 'unknown' ||
+        normalizedLabel === 'undefined' ||
+        normalizedLabel === 'null' ||
+        normalizedLabel === '';
     };
 
     const nodeTypeColorMap = new Map<string, string>();
-    
+
     const processedNodes: Node[] = nodesInput
       .map((node) => {
         const nodeType = node.labels[0];
         const nodeColor = getNodeColor(nodeType, subject);
         const nodeLabel = getNodeLabel(node);
-        
+
         if (!nodeTypeColorMap.has(nodeType)) {
           nodeTypeColorMap.set(nodeType, nodeColor);
         }
-        
+
         const hasFallbackLabel = isFallbackLabel(nodeLabel, nodeType);
         const hasConnections = connectedNodeIds.has(node.id);
-        
+
         if (hasFallbackLabel && !hasConnections) {
           return null;
         }
-        
+
         let confidenceScore = confidenceMap.get(node.id) ?? null;
-        
+
         if (confidenceScore === null) {
           const possibleIds = [
             node.properties.conceptId,
@@ -759,18 +786,18 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
             node.properties.concept_id,
             node.properties.id,
           ].filter(Boolean);
-          
+
           for (const possibleId of possibleIds) {
             confidenceScore = confidenceMap.get(String(possibleId)) ?? null;
             if (confidenceScore !== null) break;
           }
         }
-        
+
         if (confidenceScore === null && node.properties.name) {
           const nodeName = node.properties.name.toLowerCase();
           confidenceScore = confidenceByName.get(nodeName) ?? null;
         }
-        
+
         if (confidenceScore === null) {
           for (const [conceptId, score] of confidenceMap.entries()) {
             if (conceptId.includes(node.id) || node.id.includes(conceptId)) {
@@ -779,7 +806,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
             }
           }
         }
-        
+
         const size = sizes.get(node.id) ?? { width: 200, height: 70 };
         return {
           id: node.id,
@@ -822,7 +849,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
     setNodes(processedNodes);
     setEdges(validEdges);
-    
+
     const typesInGraph = new Set<string>();
     processedNodes.forEach(node => {
       if (node.data?.type) typesInGraph.add(node.data.type);
@@ -836,11 +863,98 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     }
   }, [data, processGraphData]);
 
+  const visibleNodes = useMemo(() => {
+    const searchResultIds = new Set(searchResults.map(String));
+    const hasActivePath =
+      activePath !== null && activePath.nodeIds.length > 0;
+
+    return nodes.map(node => {
+      const pathStep = activePath?.nodeSteps.get(node.id);
+      const onPath = pathStep !== undefined;
+      const searchMatch = searchResultIds.has(node.id);
+
+      const pathShadow = onPath
+        ? '0 0 16px rgba(212, 88, 28, 0.58)'
+        : '';
+
+      const searchShadow = searchMatch
+        ? '0 0 0 3px #fbbf24, 0 0 15px rgba(251, 191, 36, 0.6)'
+        : '';
+
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          pathStep,
+        },
+        style: {
+          ...node.style,
+          opacity:
+            hasActivePath && !onPath
+              ? searchMatch
+                ? 0.55
+                : 0.18
+              : 1,
+          border: onPath
+            ? '3px solid #d4581c'
+            : searchMatch && !hasActivePath
+              ? '3px solid #fbbf24'
+              : '1px solid rgba(255,255,255,0.2)',
+          boxShadow:
+            [searchShadow, pathShadow]
+              .filter(Boolean)
+              .join(', ') || 'none',
+          borderRadius: '24px',
+          transition:
+            'opacity 160ms ease, border-color 160ms ease, box-shadow 160ms ease',
+        },
+      };
+    });
+  }, [activePath, nodes, searchResults]);
+
+  const visibleEdges = useMemo(() => {
+    const hasActivePath =
+      activePath !== null && activePath.nodeIds.length > 0;
+
+    return edges.map(edge => {
+      const edgeIndex = edge.data?.graphEdgeIndex;
+
+      const onPath =
+        hasActivePath &&
+        typeof edgeIndex === 'number' &&
+        activePath.edgeIndices.has(edgeIndex);
+
+      return {
+        ...edge,
+        animated: onPath,
+        label: onPath ? edge.label : undefined,
+        style: {
+          ...edge.style,
+          stroke: onPath ? '#d4581c' : '#888',
+          strokeWidth: onPath ? 4 : 1.5,
+          opacity: hasActivePath
+            ? onPath
+              ? 1
+              : 0.14
+            : 1,
+          transition:
+            'opacity 160ms ease, stroke 160ms ease, stroke-width 160ms ease',
+        },
+        labelStyle: {
+          ...edge.labelStyle,
+          fill: onPath ? '#d4581c' : 'transparent',
+          fontWeight: onPath ? 700 : 400,
+        },
+        zIndex: onPath ? 1 : 0,
+      };
+    });
+  }, [activePath, edges]);
+
   const forceDirectedLayout = (nodes: Node[], edges: Edge[], spacing: number = 360) => {
     const positions: { x: number; y: number }[] = [];
     const width = Math.max(1000, nodes.length * 200);
     const height = Math.max(800, nodes.length * 150);
-    
+
     const cols = Math.ceil(Math.sqrt(nodes.length));
     nodes.forEach((_, index) => {
       const row = Math.floor(index / cols);
@@ -896,7 +1010,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     const maxY = Math.max(...positions.map(p => p.y));
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
-    
+
     positions.forEach(pos => {
       pos.x = pos.x - centerX + width / 2;
       pos.y = pos.y - centerY + height / 2;
@@ -1036,9 +1150,9 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
                 { id: 'vector-spaces', label: 'Vector spaces' },
                 { id: 'eigenvalues', label: 'Eigenvalues' },
               ]}
-              onStepClick={() => {}}
-              onFocus={() => {}}
-              onClear={() => {}}
+              onStepClick={() => { }}
+              onFocus={() => { }}
+              onClear={() => { }}
             />
           </div>
         )}
@@ -1056,7 +1170,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
           </div>
         )}
       </div>
-      
+
       {/* Legend */}
       {legendEntries.length > 0 && (
         <div style={{
@@ -1106,11 +1220,12 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       )}
 
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={visibleNodes}
+        edges={visibleEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={handleNodeClick}
+        onPaneClick={clearActivePath}
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.5, minZoom: 0.1, maxZoom: 1, duration: 800 }}
@@ -1125,7 +1240,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
         }}
       >
         <Background color="#888" gap={16} />
-        <Controls 
+        <Controls
           showZoom={true}
           showFitView={true}
           position="bottom-right"
@@ -1151,14 +1266,14 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
             {minimapLocked ? '🔒' : '🔓'}
           </button>
         </Controls>
-        <MiniMap 
-          style={{ 
+        <MiniMap
+          style={{
             background: 'rgba(255,255,255,0.1)',
             position: 'absolute',
             right: minimapLocked ? '0' : '20px',
             bottom: minimapLocked ? '0' : '20px',
           }}
-          nodeColor={(n) => (n.style?.background as string) || '#fff'} 
+          nodeColor={(n) => (n.style?.background as string) || '#fff'}
           zoomable={!minimapLocked}
           pannable={!minimapLocked}
           maskColor="rgba(0, 0, 0, 0.2)"
