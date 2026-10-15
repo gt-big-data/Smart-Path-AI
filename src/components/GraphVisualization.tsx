@@ -519,7 +519,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       if (node.id !== nodeId) return node;
       return {
         ...node,
-        data: { ...node.data, customLabel: label },
+        data: { ...node.data, customLabel: label, color },
         style: { ...node.style, background: color },
       };
     }));
@@ -787,6 +787,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
             subject: subject,
             confidenceScore: confidenceScore,
             connections: connectionCount.get(node.id) ?? 0,  // expose for tooltip
+            color: nodeColor,
           },
           position: { x: 0, y: 0 },
           style: {

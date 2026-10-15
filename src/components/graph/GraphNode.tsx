@@ -183,8 +183,8 @@ export const GraphNode = memo((props: GraphNodeProps) => {
     const y = clamp(preferredYAbove > VIEWPORT_PADDING ? preferredYAbove : preferredYBelow, VIEWPORT_PADDING, maxY);
     onEditRequest?.({
       nodeId: id,
-      label: data.label,
-      color: (style.background as string | undefined) || '#3b82f6',
+      label: data.customLabel || data.label,
+      color: data.color || '#3b82f6',
       x,
       y,
     });
