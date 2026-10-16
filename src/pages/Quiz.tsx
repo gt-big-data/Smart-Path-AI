@@ -102,15 +102,17 @@ function QuizRunner() {
   };
 
   const finish = async (next: QuizState) => {
-    const valid = next.qaData.map((question, index) => ({ question, index })).filter(item => item.question.conceptId.trim());
+    const valid = next.qaData
+      .map((question, index) => ({ question, result: next.results[index], index }))
+      .filter(item => item.question.conceptId.trim());
     if (valid.length) {
       try {
         await axios.post(`${API_BASE_URL}/api/quiz-history`, {
-          concepts: valid.map(({ question }, index) => ({ conceptID: question.conceptId, name: `Question ${index + 1} Concept` })),
-          questions: valid.map(({ question, index }) => ({
+          concepts: valid.map(({ question, index }) => ({ conceptID: question.conceptId, name: `Question ${index + 1} Concept` })),
+          questions: valid.map(({ question, result }) => ({
             questionText: question.question,
             // Quiz history compares exact strings against the stored letter, so send "A" rather than "A) ATP"
-            userAnswer: choiceLetter(next.results[index]?.answer || 'No answer provided'),
+            userAnswer: choiceLetter(result?.answer || 'No answer provided'),
             correctAnswer: question.answer,
             explanation: question.explanation || 'Review the correct answer for this question.',
             timestamp: new Date().toISOString(),
@@ -118,10 +120,23 @@ function QuizRunner() {
         }, { withCredentials: true });
       } catch (err) {
         console.error('Could not save quiz history', err);
-        setError('Your review is ready, but quiz history could not be saved.');
+        save({ ...next, completed: false });
+        setError('Your final answer was saved, but quiz history could not be saved. Please retry.');
+        return;
       }
     }
     save({ ...next, completed: true });
+  };
+
+  const retryFinish = async () => {
+    if (!quiz || busy || quiz.completed) return;
+    setBusy(true);
+    setError('');
+    try {
+      await finish(quiz);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submit = async (skip = false) => {
@@ -258,6 +273,7 @@ function QuizRunner() {
                 <button type="button" disabled={index === 0 || busy} onClick={() => goTo(index - 1)} className="px-4 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 font-medium disabled:opacity-50 flex items-center gap-1"><ChevronLeft size={16} /> Back</button>
                 {quiz.results[index] && <button type="button" disabled={busy} onClick={() => goTo(Math.min(index + 1, quiz.qaData.length - 1))} className="px-4 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 font-medium flex items-center gap-1">Next <ChevronRight size={16} /></button>}
                 <div className="flex-1" />
+                {quiz.results[index] && index === quiz.qaData.length - 1 && <button type="button" disabled={busy} onClick={() => void retryFinish()} className="px-5 py-2 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 text-white font-medium shadow-md shadow-teal-500/20 disabled:opacity-50">{busy ? 'Saving...' : 'Finish quiz'}</button>}
                 <button type="button" disabled={busy || !!quiz.results[index]} onClick={() => submit(true)} className="px-4 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 font-medium disabled:opacity-50">Skip</button>
                 <button type="button" disabled={busy || !!quiz.results[index] || !draft.trim()} onClick={() => submit()} className="px-5 py-2 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 text-white font-medium shadow-md shadow-teal-500/20 disabled:opacity-50">{busy ? 'Submitting...' : 'Submit'}</button>
               </div>
