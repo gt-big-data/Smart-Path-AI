@@ -40,7 +40,9 @@ interface ConceptProgress {
 }
 
 // Path bar preview with hardcoded steps; wired up in P2b
-const SHOW_PATH_BAR = true;
+// The current PathBar is a P2b preview with hardcoded steps and no handlers.
+// Keep it hidden until it is wired to the loaded graph and active path.
+const SHOW_PATH_BAR = false;
 
 // Must match the fallback size nodes are rendered at below
 const DEFAULT_NODE_SIZE: NodeSize = { width: 200, height: 70 };
