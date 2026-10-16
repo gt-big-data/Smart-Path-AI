@@ -18,6 +18,7 @@ import PathBar from './graph/PathBar';
 import { computeNodeSizes } from '../lib/nodesizing';
 import { buildGraphTree } from '../lib/graphTree';
 import { getPathHighlight } from '../lib/pathHighlight';
+import { applyGraphStyles, BaseGraph, ConfidenceKeys, DEFAULT_NODE_BORDER, NodeEdit, resolveConfidenceScores } from '../lib/graphStyles';
 import { API_BASE_URL } from '../config/api';
 import { GraphNode, NodeEditState, NODE_EDIT_POPUP_WIDTH, NODE_EDIT_POPUP_HEIGHT, VIEWPORT_PADDING } from './graph/GraphNode';
 
@@ -490,8 +491,9 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [activePathTargetId, setActivePathTargetId] = useState<string | null>(null);
   const [minimapLocked, setMinimapLocked] = useState(false);
-  const [currentSubject, setCurrentSubject] = useState<string>('default');
-  const [nodeTypesInGraph, setNodeTypesInGraph] = useState<Set<string>>(new Set());
+
+  // Custom label/color edits by node id. Kept apart from the nodes so a rebuild doesn't drop them.
+  const [nodeEdits, setNodeEdits] = useState<Record<string, NodeEdit>>({});
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -575,14 +577,7 @@ useEffect(() => {
   }, [nodeEditState]);
 
   const handleNodeEditSave = (nodeId: string, label: string, color: string) => {
-    setNodes(prev => prev.map(node => {
-      if (node.id !== nodeId) return node;
-      return {
-        ...node,
-        data: { ...node.data, customLabel: label, color },
-        style: { ...node.style, background: color },
-      };
-    }));
+    setNodeEdits(prev => ({ ...prev, [nodeId]: { label, color } }));
   };
 
   const getNodeLabel = (node: any) => {
@@ -679,189 +674,6 @@ useEffect(() => {
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery, handleSearch]);
-
-  const processGraphData = useCallback((graphData: GraphData) => {
-    if (!graphData) return;
-
-    const subject = graphData.subject || 'default';
-    setCurrentSubject(subject);
-
-    const confidenceMap = new Map<string, number>();
-    const confidenceByName = new Map<string, number>();
-
-    conceptProgress.forEach(progress => {
-      confidenceMap.set(progress.conceptId, progress.confidenceScore);
-      const namePart = progress.conceptId.split('_').pop() || progress.conceptId;
-      confidenceByName.set(namePart.toLowerCase(), progress.confidenceScore);
-    });
-
-    // One row per id: duplicate ids break React keys and inflate the graph.
-    const seenNodeIds = new Set<string>();
-    const nodesInput = graphData.graph.nodes.filter((n) => {
-      const id = String(n.id);
-      if (seenNodeIds.has(id)) return false;
-      seenNodeIds.add(id);
-      return true;
-    });
-
-    const processedEdges: Edge[] = graphData.graph.relationships.map((rel, i) => ({
-      id: `${rel.source}-${rel.target}-${String(rel.type)}-${i}`,
-      source: rel.source,
-      target: rel.target,
-      label: rel.type.replace(/_/g, ' '),
-      type: 'smoothstep',
-      style: { stroke: '#888', strokeWidth: 2 },
-      labelStyle: { fill: '#888', fontSize: 10 },
-      animated: true,
-      data: {
-        graphEdgeIndex: i,
-      },
-    }));
-
-    // Node Sizing
-    const nodeIds = nodesInput.map(n => n.id);
-
-    // Guard: only pass edges whose endpoints exist in nodeIds so phantom IDs
-    // (e.g. stale refs after deduplication) don't pollute connectionCount stats.
-    const nodeIdSet = new Set(nodeIds);
-    const safeEdges = processedEdges.filter(
-      e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target)
-    );
-
-    const { sizes, connectionCount } = computeNodeSizes(
-      nodeIds,
-      safeEdges,
-      confidenceMap,
-      { scale: 'log' }
-    );
-
-    const allWidths = [...sizes.values()].map(s => s.width).sort((a, b) => a - b);
-    const medianWidth = allWidths[Math.floor(allWidths.length / 2)] ?? 200;
-    const layoutSpacing = Math.max(360, medianWidth + 100);
-
-    const connectedNodeIds = new Set<string>();
-    safeEdges.forEach(edge => {
-      connectedNodeIds.add(edge.source);
-      connectedNodeIds.add(edge.target);
-    });
-
-    const isFallbackLabel = (label: string, nodeType: string): boolean => {
-      const normalizedLabel = label.toLowerCase().trim();
-      return label === nodeType ||
-        label === 'Node' ||
-        normalizedLabel === 'other' ||
-        normalizedLabel === 'unknown' ||
-        normalizedLabel === 'undefined' ||
-        normalizedLabel === 'null' ||
-        normalizedLabel === '';
-    };
-
-    const nodeTypeColorMap = new Map<string, string>();
-
-    const processedNodes: Node[] = nodesInput
-      .map((node) => {
-        const nodeType = node.labels[0];
-        const nodeColor = getNodeColor(nodeType, subject);
-        const nodeLabel = getNodeLabel(node);
-
-        if (!nodeTypeColorMap.has(nodeType)) {
-          nodeTypeColorMap.set(nodeType, nodeColor);
-        }
-
-        const hasFallbackLabel = isFallbackLabel(nodeLabel, nodeType);
-        const hasConnections = connectedNodeIds.has(node.id);
-
-        if (hasFallbackLabel && !hasConnections) {
-          return null;
-        }
-
-        let confidenceScore = confidenceMap.get(node.id) ?? null;
-
-        if (confidenceScore === null) {
-          const possibleIds = [
-            node.properties.conceptId,
-            node.properties.topicId,
-            node.properties.topicID,
-            node.properties.topic_id,
-            node.properties.concept_id,
-            node.properties.id,
-          ].filter(Boolean);
-
-          for (const possibleId of possibleIds) {
-            confidenceScore = confidenceMap.get(String(possibleId)) ?? null;
-            if (confidenceScore !== null) break;
-          }
-        }
-
-        if (confidenceScore === null && node.properties.name) {
-          const nodeName = node.properties.name.toLowerCase();
-          confidenceScore = confidenceByName.get(nodeName) ?? null;
-        }
-
-        if (confidenceScore === null) {
-          for (const [conceptId, score] of confidenceMap.entries()) {
-            if (conceptId.includes(node.id) || node.id.includes(conceptId)) {
-              confidenceScore = score;
-              break;
-            }
-          }
-        }
-
-        const size = sizes.get(node.id) ?? { width: 200, height: 70 };
-        return {
-          id: node.id,
-          type: 'default',
-          data: {
-            label: nodeLabel,
-            description: node.properties.description || node.properties.text,
-            type: nodeType,
-            subject: subject,
-            confidenceScore: confidenceScore,
-            connections: connectionCount.get(node.id) ?? 0,  // expose for tooltip
-            color: nodeColor,
-          },
-          position: { x: 0, y: 0 },
-          style: {
-            background: nodeColor,
-            color: '#ffffff',
-            border: '1px solid rgba(255,255,255,0.2)',
-            width: `${size.width}px`,
-            height: `${size.height}px`,
-            padding: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: '24px',
-          },
-        };
-      })
-      .filter((node): node is Node => node !== null);
-
-    const validNodeIds = new Set(processedNodes.map(node => node.id));
-    const validEdges = processedEdges.filter(edge =>
-      validNodeIds.has(edge.source) && validNodeIds.has(edge.target)
-    );
-
-    const nodePositions = forceDirectedLayout(processedNodes, validEdges, layoutSpacing);
-    processedNodes.forEach((node, index) => {
-      node.position = nodePositions[index];
-    });
-
-    setNodes(processedNodes);
-    setEdges(validEdges);
-
-    const typesInGraph = new Set<string>();
-    processedNodes.forEach(node => {
-      if (node.data?.type) typesInGraph.add(node.data.type);
-    });
-    setNodeTypesInGraph(typesInGraph);
-  }, [setNodes, setEdges, conceptProgress]);
-
-  useEffect(() => {
-    if (data?.graph) {
-      processGraphData(data);
-    }
-  }, [data, processGraphData]);
 
   const visibleNodes = useMemo(() => {
     const searchResultIds = new Set(searchResults.map(String));
@@ -1019,14 +831,199 @@ useEffect(() => {
     return positions;
   };
 
+  // Graph structure: labels, colors, sizes and positions. Depends on the graph data only,
+  // so quiz answers, edits and search never re-run the layout. Styling is layered on below.
+  const baseGraph = useMemo((): BaseGraph | null => {
+    if (!data?.graph) return null;
+
+    const subject = data.subject || 'default';
+
+    // One row per id: duplicate ids break React keys and inflate the graph.
+    const seenNodeIds = new Set<string>();
+    const nodesInput = data.graph.nodes.filter((n) => {
+      const id = String(n.id);
+      if (seenNodeIds.has(id)) return false;
+      seenNodeIds.add(id);
+      return true;
+    });
+
+    // Edge ids end in the index into relationships[], which graphTree's parentEdgeIndex refers to
+    const processedEdges: Edge[] = data.graph.relationships.map((rel, i) => ({
+      id: `${rel.source}-${rel.target}-${String(rel.type)}-${i}`,
+      source: rel.source,
+      target: rel.target,
+      label: rel.type.replace(/_/g, ' '),
+      type: 'smoothstep',
+      style: { stroke: '#888', strokeWidth: 2 },
+      labelStyle: { fill: '#888', fontSize: 10 },
+      animated: true,
+      data: {
+        graphEdgeIndex: i,
+      },
+    }));
+
+    // Node Sizing
+    const nodeIds = nodesInput.map(n => n.id);
+
+    // Guard: only pass edges whose endpoints exist in nodeIds so phantom IDs
+    // (e.g. stale refs after deduplication) don't pollute connectionCount stats.
+    const nodeIdSet = new Set(nodeIds);
+    const safeEdges = processedEdges.filter(
+      e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target)
+    );
+
+    // Sizing ignores confidence (confidenceWeight defaults to 0), so it doesn't need scores here
+    const { sizes, connectionCount } = computeNodeSizes(
+      nodeIds,
+      safeEdges,
+      new Map(),
+      { scale: 'log' }
+    );
+
+    const allWidths = [...sizes.values()].map(s => s.width).sort((a, b) => a - b);
+    const medianWidth = allWidths[Math.floor(allWidths.length / 2)] ?? 200;
+    const layoutSpacing = Math.max(360, medianWidth + 100);
+
+    const connectedNodeIds = new Set<string>();
+    safeEdges.forEach(edge => {
+      connectedNodeIds.add(edge.source);
+      connectedNodeIds.add(edge.target);
+    });
+
+    const isFallbackLabel = (label: string, nodeType: string): boolean => {
+      const normalizedLabel = label.toLowerCase().trim();
+      return label === nodeType ||
+             label === 'Node' ||
+             normalizedLabel === 'other' ||
+             normalizedLabel === 'unknown' ||
+             normalizedLabel === 'undefined' ||
+             normalizedLabel === 'null' ||
+             normalizedLabel === '';
+    };
+
+    const confidenceKeys: ConfidenceKeys[] = [];
+    const nodeTypes: string[] = [];
+
+    const processedNodes: Node[] = nodesInput
+      .map((node) => {
+        const nodeType = node.labels[0];
+        const nodeColor = getNodeColor(nodeType, subject);
+        const nodeLabel = getNodeLabel(node);
+
+        const hasFallbackLabel = isFallbackLabel(nodeLabel, nodeType);
+        const hasConnections = connectedNodeIds.has(node.id);
+
+        if (hasFallbackLabel && !hasConnections) {
+          return null;
+        }
+
+        if (!nodeTypes.includes(nodeType)) nodeTypes.push(nodeType);
+
+        confidenceKeys.push({
+          nodeId: node.id,
+          altIds: [
+            node.properties.conceptId,
+            node.properties.topicId,
+            node.properties.topicID,
+            node.properties.topic_id,
+            node.properties.concept_id,
+            node.properties.id,
+          ].filter(Boolean).map(String),
+          name: node.properties.name || undefined,
+        });
+
+        const size = sizes.get(node.id) ?? { width: 200, height: 70 };
+        return {
+          id: node.id,
+          type: 'default',
+          data: {
+            label: nodeLabel,
+            description: node.properties.description || node.properties.text,
+            type: nodeType,
+            subject: subject,
+            connections: connectionCount.get(node.id) ?? 0,  // expose for tooltip
+            color: nodeColor,
+          },
+          position: { x: 0, y: 0 },
+          style: {
+            background: nodeColor,
+            color: '#ffffff',
+            border: DEFAULT_NODE_BORDER,
+            width: `${size.width}px`,
+            height: `${size.height}px`,
+            padding: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: '24px',
+          },
+        };
+      })
+      .filter((node): node is Node => node !== null);
+
+    const validNodeIds = new Set(processedNodes.map(node => node.id));
+    const validEdges = processedEdges.filter(edge =>
+      validNodeIds.has(edge.source) && validNodeIds.has(edge.target)
+    );
+
+    const nodePositions = forceDirectedLayout(processedNodes, validEdges, layoutSpacing);
+    processedNodes.forEach((node, index) => {
+      node.position = nodePositions[index];
+    });
+
+    return { subject, nodes: processedNodes, edges: validEdges, confidenceKeys, nodeTypes };
+  }, [data]);
+
+  // Styling layers, each its own piece of state, combined in one place
+  const confidenceScores = useMemo(
+    () => resolveConfidenceScores(baseGraph?.confidenceKeys ?? [], conceptProgress),
+    [baseGraph, conceptProgress]
+  );
+  const searchHits = useMemo(() => new Set(searchResults), [searchResults]);
+
+  const styledGraph = useMemo(
+    () => baseGraph && applyGraphStyles(baseGraph, { confidenceScores, nodeEdits, searchHits }),
+    [baseGraph, confidenceScores, nodeEdits, searchHits]
+  );
+
+  // Push the styled graph into React Flow. A new base graph replaces everything; a style-only
+  // change keeps what React Flow tracks itself (dragged positions, measured sizes, selection).
+  const syncedBaseRef = useRef<BaseGraph | null>(null);
+  useEffect(() => {
+    if (!styledGraph) return;
+
+    if (syncedBaseRef.current !== baseGraph) {
+      syncedBaseRef.current = baseGraph;
+      setNodes(styledGraph.nodes);
+      setEdges(styledGraph.edges);
+      return;
+    }
+
+    setNodes(prev => {
+      const prevById = new Map(prev.map(node => [node.id, node]));
+      return styledGraph.nodes.map(node => {
+        const current = prevById.get(node.id);
+        return current ? { ...current, data: node.data, style: node.style, hidden: node.hidden } : node;
+      });
+    });
+    setEdges(prev => {
+      const prevById = new Map(prev.map(edge => [edge.id, edge]));
+      return styledGraph.edges.map(edge => {
+        const current = prevById.get(edge.id);
+        return current ? { ...edge, selected: current.selected } : edge;
+      });
+    });
+  }, [baseGraph, styledGraph, setNodes, setEdges]);
+
+
   // Show loading/empty state
   if (!data?.graph) {
     return <GraphLoadingScreen isLoading={isLoading} />;
   }
 
-  const legendEntries = Array.from(nodeTypesInGraph).map(type => ({
+  const legendEntries = (baseGraph?.nodeTypes ?? []).map(type => ({
     type,
-    color: getNodeColor(type, currentSubject)
+    color: getNodeColor(type, baseGraph?.subject)
   })).sort((a, b) => a.type.localeCompare(b.type));
 
   return (
