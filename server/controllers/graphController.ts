@@ -538,6 +538,10 @@ export const clarifyQuizQuestion = async (req: Request, res: Response) => {
   if (!userId) {
     return res.status(401).json({ error: 'User not authenticated' });
   }
+  if (!process.env.QUIZ_CLARIFY_SERVICE_TOKEN) {
+    console.error('QUIZ_CLARIFY_SERVICE_TOKEN is not configured');
+    return res.status(503).json({ error: 'Quiz clarification service is not configured' });
+  }
 
   const { question, studentQuestion, correctAnswer } = req.body || {};
   if (!question || !studentQuestion?.trim() || !correctAnswer) {

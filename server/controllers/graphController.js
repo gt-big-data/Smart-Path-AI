@@ -486,6 +486,10 @@ const clarifyQuizQuestion = (req, res) => __awaiter(void 0, void 0, void 0, func
     if (!userId) {
         return res.status(401).json({ error: 'User not authenticated' });
     }
+    if (!process.env.QUIZ_CLARIFY_SERVICE_TOKEN) {
+        console.error('QUIZ_CLARIFY_SERVICE_TOKEN is not configured');
+        return res.status(503).json({ error: 'Quiz clarification service is not configured' });
+    }
     const { question, studentQuestion, correctAnswer } = req.body || {};
     if (!question || !(studentQuestion === null || studentQuestion === void 0 ? void 0 : studentQuestion.trim()) || !correctAnswer) {
         return res.status(400).json({ error: 'question, studentQuestion and correctAnswer are required' });
