@@ -51,8 +51,18 @@ function makeStar(count: number) {
   return { rootId: 'root', tree, sizes };
 }
 
-/** Checks every pair of boxes. Slow on purpose: it must not share code with the layout. */
-function countOverlaps(positions: Map<string, { x: number; y: number }>, sizes: Map<string, NodeSize>) {
+/** Default nodeGap in radialLayout: boxes must keep this much clear space. */
+const NODE_GAP = 24;
+
+/**
+ * Pairs of boxes closer than `gap`. Checks every pair. Slow on purpose: it must
+ * not share code with the layout.
+ */
+function countOverlaps(
+  positions: Map<string, { x: number; y: number }>,
+  sizes: Map<string, NodeSize>,
+  gap = NODE_GAP
+) {
   const ids = [...positions.keys()];
   let overlaps = 0;
   for (let i = 0; i < ids.length; i++) {
@@ -62,8 +72,8 @@ function countOverlaps(positions: Map<string, { x: number; y: number }>, sizes: 
       const sa = sizes.get(ids[i])!;
       const sb = sizes.get(ids[j])!;
       if (
-        Math.abs(a.x - b.x) < (sa.width + sb.width) / 2 &&
-        Math.abs(a.y - b.y) < (sa.height + sb.height) / 2
+        Math.abs(a.x - b.x) < (sa.width + sb.width) / 2 + gap - 1e-6 &&
+        Math.abs(a.y - b.y) < (sa.height + sb.height) / 2 + gap - 1e-6
       ) {
         overlaps++;
       }
@@ -72,19 +82,48 @@ function countOverlaps(positions: Map<string, { x: number; y: number }>, sizes: 
   return overlaps;
 }
 
+/**
+ * Median time of a few runs after a warm-up, so one GC pause or a busy CI
+ * machine doesn't fail the suite.
+ */
+function medianMs(run: () => void, runs = 5) {
+  run();
+  const times: number[] = [];
+  for (let i = 0; i < runs; i++) {
+    const start = performance.now();
+    run();
+    times.push(performance.now() - start);
+  }
+  return times.sort((a, b) => a - b)[Math.floor(runs / 2)];
+}
+
 describe('radialLayout', () => {
   const large = makeTree(600, 42);
 
-  it('lays out the large fixture with no overlapping nodes', () => {
-    const { positions } = radialLayout(large.rootId, large.tree, large.sizes);
+  it('lays out the large fixture with nodeGap between every pair of boxes', () => {
+    const { positions, converged } = radialLayout(large.rootId, large.tree, large.sizes);
     expect(positions.size).toBe(600);
+    expect(converged).toBe(true);
+    expect(countOverlaps(positions, large.sizes)).toBe(0);
+  });
+
+  it('keeps nodeGap from the ring placement alone, before the overlap pass', () => {
+    const { positions } = radialLayout(large.rootId, large.tree, large.sizes, { maxOverlapPasses: 0 });
     expect(countOverlaps(positions, large.sizes)).toBe(0);
   });
 
   it('lays out the large fixture in under 200 ms', () => {
-    const start = performance.now();
-    radialLayout(large.rootId, large.tree, large.sizes);
-    expect(performance.now() - start).toBeLessThan(200);
+    expect(medianMs(() => radialLayout(large.rootId, large.tree, large.sizes))).toBeLessThan(200);
+  });
+
+  it('uses the default for an option passed as undefined', () => {
+    const { positions } = radialLayout(large.rootId, large.tree, large.sizes, {
+      nodeGap: undefined,
+      ringGap: undefined,
+    });
+    for (const p of positions.values()) {
+      expect(Number.isFinite(p.x) && Number.isFinite(p.y)).toBe(true);
+    }
   });
 
   it('puts the center at the origin and deeper rings farther out', () => {
@@ -178,9 +217,7 @@ if (fixtures.length > 0) {
     });
 
     it('runs in under 200 ms', () => {
-      const start = performance.now();
-      radialLayout(tree.centerId!, tree.nodes, sizes);
-      expect(performance.now() - start).toBeLessThan(200);
+      expect(medianMs(() => radialLayout(tree.centerId!, tree.nodes, sizes))).toBeLessThan(200);
     });
   });
 } else {

@@ -46,6 +46,8 @@ export interface RadialLayoutResult {
   depths: Map<string, number>;
   /** Overlap passes that had to move something. 0 means the rings were enough. */
   overlapPasses: number;
+  /** False if boxes still overlapped when maxOverlapPasses ran out. */
+  converged: boolean;
 }
 
 const DEFAULTS: Required<RadialLayoutOptions> = {
@@ -56,6 +58,8 @@ const DEFAULTS: Required<RadialLayoutOptions> = {
 };
 
 const TWO_PI = Math.PI * 2;
+// Rounding slack when checking that the branches fit in one circle.
+const FIT_EPSILON = 1e-9;
 
 export function radialLayout(
   rootId: string,
@@ -63,20 +67,27 @@ export function radialLayout(
   sizes: Map<string, NodeSize>,
   options: RadialLayoutOptions = {}
 ): RadialLayoutResult {
-  const opts = { ...DEFAULTS, ...options };
+  // `??` per field, so an option passed as undefined still gets its default.
+  const opts: Required<RadialLayoutOptions> = {
+    nodeGap: options.nodeGap ?? DEFAULTS.nodeGap,
+    ringGap: options.ringGap ?? DEFAULTS.ringGap,
+    maxOverlapPasses: options.maxOverlapPasses ?? DEFAULTS.maxOverlapPasses,
+    defaultSize: options.defaultSize ?? DEFAULTS.defaultSize,
+  };
   const positions = new Map<string, Point>();
   const depths = new Map<string, number>();
 
   if (!tree.has(rootId)) {
-    return { positions, ringRadii: [], depths, overlapPasses: 0 };
+    return { positions, ringRadii: [], depths, overlapPasses: 0, converged: true };
   }
 
   const sizeOf = (id: string): NodeSize => sizes.get(id) ?? opts.defaultSize;
-  // Room a node needs along its ring. The diagonal is the widest a box can
-  // be in any direction, so two nodes this far apart can't touch.
+  // Room a node needs from its neighbours: the diagonal of its box grown by
+  // the gap. That is the widest the padded box gets in any direction, so two
+  // centers half of each other's footprint apart keep nodeGap between boxes.
   const footprint = (id: string): number => {
     const s = sizeOf(id);
-    return Math.hypot(s.width, s.height) + opts.nodeGap;
+    return Math.hypot(s.width + opts.nodeGap, s.height + opts.nodeGap);
   };
 
   // Breadth-first walk from the root. Depth is derived here, and a node
@@ -115,23 +126,30 @@ export function radialLayout(
 
   // Angle each branch needs: enough for the node itself and for all of its
   // descendants on their own rings. Bigger branches need bigger slices.
+  // Neighbours are measured along the chord, which is shorter than the arc,
+  // so a node's own angle uses asin rather than footprint / radius.
   const need = new Map<string, number>();
-  for (let i = order.length - 1; i >= 0; i--) {
-    const id = order[i];
-    const d = depths.get(id)!;
-    let fromChildren = 0;
-    for (const child of kids.get(id)!) fromChildren += need.get(child)!;
-    const own = d === 0 ? 0 : footprint(id) / ringRadii[d];
-    need.set(id, Math.max(own, fromChildren));
-  }
+  const rootNeed = (): number => {
+    for (let i = order.length - 1; i >= 0; i--) {
+      const id = order[i];
+      const d = depths.get(id)!;
+      let fromChildren = 0;
+      for (const child of kids.get(id)!) fromChildren += need.get(child)!;
+      const own = d === 0 ? 0 : 2 * Math.asin(Math.min(1, footprint(id) / (2 * ringRadii[d])));
+      need.set(id, Math.max(own, fromChildren));
+    }
+    return need.get(rootId)!;
+  };
 
   // If the branches need more than a full circle, grow every ring by the
-  // same factor. Needs shrink by that factor, so they then fit exactly.
-  const total = need.get(rootId)!;
-  let shrink = 1;
-  if (total > TWO_PI) {
-    shrink = total / TWO_PI;
-    for (let d = 1; d < ringCount; d++) ringRadii[d] *= shrink;
+  // same factor. Needs shrink by about that factor (a little less, because
+  // of the asin), so repeat until they fit. Growing only the outer rings
+  // looks cheaper but is far worse: tight inner rings squeeze each subtree
+  // into a thin wedge, and every ring beyond it has to grow to compensate.
+  for (let total = rootNeed(), tries = 0; total > TWO_PI + FIT_EPSILON && tries < 50; tries++) {
+    const grow = total / TWO_PI;
+    for (let d = 1; d < ringCount; d++) ringRadii[d] *= grow;
+    total = rootNeed();
   }
 
   // Hand out slices from the root outward. Each child gets a share of its
@@ -157,13 +175,18 @@ export function radialLayout(
     }
   }
 
-  const overlapPasses = separateOverlaps(order, positions, sizeOf, rootId, opts);
-  return { positions, ringRadii, depths, overlapPasses };
+  const { passes, converged } = separateOverlaps(order, positions, sizeOf, rootId, opts);
+  return { positions, ringRadii, depths, overlapPasses: passes, converged };
 }
 
 /**
  * Push apart node boxes that overlap. Uses a grid so each pass only compares
  * nearby nodes instead of every pair. The root never moves.
+ *
+ * Moves are applied right away, so later pairs in the same pass see them.
+ * The grid can go stale within a pass, but the next pass rebuilds it, and
+ * this converges about twice as fast as collecting moves and applying them
+ * at the end of each pass.
  */
 function separateOverlaps(
   ids: string[],
@@ -171,16 +194,16 @@ function separateOverlaps(
   sizeOf: (id: string) => NodeSize,
   rootId: string,
   opts: Required<RadialLayoutOptions>
-): number {
-  const gap = opts.nodeGap / 2;
+): { passes: number; converged: boolean } {
+  const gap = opts.nodeGap;
   let cell = 1;
   for (const id of ids) {
     const s = sizeOf(id);
     cell = Math.max(cell, s.width + gap, s.height + gap);
   }
 
-  let passes = 0;
-  for (; passes < opts.maxOverlapPasses; passes++) {
+  // The pass after the last allowed one only checks, so `converged` is exact.
+  for (let passes = 0; ; passes++) {
     const grid = new Map<string, string[]>();
     for (const id of ids) {
       const p = positions.get(id)!;
@@ -207,6 +230,7 @@ function separateOverlaps(
             const overlapX = (sa.width + sb.width) / 2 + gap - Math.abs(dx);
             const overlapY = (sa.height + sb.height) / 2 + gap - Math.abs(dy);
             if (overlapX <= 0 || overlapY <= 0) continue;
+            if (passes === opts.maxOverlapPasses) return { passes, converged: false };
 
             // Separate along the axis that needs the smaller move.
             const alongX = overlapX < overlapY;
@@ -226,9 +250,8 @@ function separateOverlaps(
         }
       }
     }
-    if (!moved) break;
+    if (!moved) return { passes, converged: true };
   }
-  return passes;
 }
 
 /** Convert a center position to the top-left corner ReactFlow expects. */
