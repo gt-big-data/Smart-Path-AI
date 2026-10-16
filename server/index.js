@@ -41,6 +41,8 @@ const express_session_1 = __importDefault(require("express-session"));
 const connect_mongo_1 = __importDefault(require("connect-mongo"));
 const axios_1 = __importDefault(require("axios"));
 const User_1 = __importDefault(require("./models/User"));
+const ChatConceptProgress_1 = __importDefault(require("./models/ChatConceptProgress"));
+const QuizHistory_1 = __importDefault(require("./models/QuizHistory"));
 require("./config/passport");
 const app = (0, express_1.default)();
 const isProduction = process.env.NODE_ENV === 'production';
@@ -61,6 +63,7 @@ const sessionStore = process.env.MONGO_URI
 const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
     try {
         yield mongoose_1.default.connect(process.env.MONGO_URI);
+        yield Promise.all([ChatConceptProgress_1.default.init(), QuizHistory_1.default.init()]);
         console.log('MongoDB connected');
     }
     catch (err) {

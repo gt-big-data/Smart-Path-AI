@@ -2,7 +2,7 @@
 export type Question = {
   question: string;
   answer: string;
-  conceptId: string;
+  concept_id: string;
   explanation?: string;
   format?: string;
 };
@@ -10,6 +10,7 @@ export type Question = {
 export type Result = { answer: string; isCorrect: boolean; feedback: string; skipped: boolean };
 export type ClarifyMessage = { sender: 'user' | 'ai'; text: string };
 export type QuizState = {
+  quizId: string;
   qaData: Question[];
   currentQuestionIndex: number;
   results: (Result | null)[];
@@ -19,16 +20,26 @@ export type QuizState = {
 
 export const quizKey = (chatId: string) => `quizState:${chatId}`;
 
+export const createQuizId = () => {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+};
+
 export function readQuiz(chatId: string): QuizState | null {
   try {
     const raw = localStorage.getItem(quizKey(chatId));
     if (!raw) return null;
     const saved = JSON.parse(raw);
     if (!Array.isArray(saved.qaData) || !saved.qaData.length) return null;
-    return {
-      qaData: saved.qaData,
-      currentQuestionIndex: Math.min(saved.currentQuestionIndex || 0, saved.qaData.length - 1),
-      results: Array.isArray(saved.results) ? saved.results : saved.qaData.map((_: Question, index: number) => {
+    const qaData = saved.qaData.map((question: any) => ({
+      ...question,
+      concept_id: String(question.concept_id || question.topic_id || question.topicID || question.conceptId || question.topicId || '').trim(),
+    }));
+    const restored = {
+      quizId: typeof saved.quizId === 'string' && saved.quizId ? saved.quizId : createQuizId(),
+      qaData,
+      currentQuestionIndex: Math.min(saved.currentQuestionIndex || 0, qaData.length - 1),
+      results: Array.isArray(saved.results) ? saved.results : qaData.map((_: Question, index: number) => {
         if (index >= (saved.currentQuestionIndex || 0)) return null;
         const answer = saved.userAnswers?.[index] || 'SKIPPED';
         return { answer, isCorrect: answer !== 'SKIPPED', feedback: '', skipped: answer === 'SKIPPED' };
@@ -36,6 +47,8 @@ export function readQuiz(chatId: string): QuizState | null {
       completed: !!saved.completed,
       clarifications: Array.isArray(saved.clarifications) ? saved.clarifications : undefined,
     };
+    if (!saved.quizId) localStorage.setItem(quizKey(chatId), JSON.stringify(restored));
+    return restored;
   } catch {
     return null;
   }

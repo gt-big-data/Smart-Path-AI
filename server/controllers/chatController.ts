@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import User, { IChat } from '../models/User';
 import { v4 as uuidv4 } from 'uuid';
 import mongoose from 'mongoose';
+import { deleteChatProgressAndHistory } from '../services/progressService';
+import { normalizeSessionUserId } from '../services/chatService';
 
 /**
  * Get current logged in user's ID
@@ -9,16 +11,14 @@ import mongoose from 'mongoose';
  */
 export const getCurrentUserId = async (req: Request, res: Response) => {
   try {
-    const userId = (req.session as any)?.passport?.user;
+    const userId = normalizeSessionUserId((req.session as any)?.passport?.user);
 
     if (!userId) {
       res.status(401).json({ message: 'Unauthorized' });
       return; // CRITICAL: Stop execution after sending error response
     }
     console.log("userId from backend", userId);
-    const idString = typeof userId === 'object' ? userId._id : userId;
-
-    res.status(200).send(idString);
+    res.status(200).send(userId);
   } catch (err) {
     console.error('Get current user ID error:', err);
     res.status(500).json({ message: 'Internal server error' });
@@ -153,7 +153,12 @@ export const addMessageToChat = async (req: Request, res: Response) => {
 // GET /chat/chats
 export const getUserChats = async (req: Request, res: Response) => {
   try {
-    const userId = req.params.userId;
+    const userId = normalizeSessionUserId((req.session as any)?.passport?.user);
+    if (!userId) {
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
+    }
+
     const user = await User.findById(userId);
     
     if (!user) {
@@ -178,7 +183,7 @@ export const getUserGraphIds = async (req: Request, res: Response): Promise<void
     console.log('[getUserGraphIds] Session passport:', (req.session as any)?.passport);
     
     // Use the exact same pattern as addMessageToChat which works
-    const userId = (req.session as any)?.passport?.user;
+    const userId = normalizeSessionUserId((req.session as any)?.passport?.user);
 
     console.log('[getUserGraphIds] Request received, userId:', userId);
     console.log('[getUserGraphIds] userId type:', typeof userId);
@@ -236,7 +241,7 @@ export const deleteChat = async (req: Request, res: Response): Promise<void> => 
   console.log("Request URL:", req.url);
 
   try {
-    const userId = (req.session as any)?.passport?.user;
+    const userId = normalizeSessionUserId((req.session as any)?.passport?.user);
     const { chat_id } = req.params;
 
     console.log("User ID from session:", userId);
@@ -269,22 +274,26 @@ export const deleteChat = async (req: Request, res: Response): Promise<void> => 
     // Find the chat index
     const chatIndex = user.chats.findIndex((chat) => chat.chat_id === chat_id);
 
+    const cleanup = await deleteChatProgressAndHistory(String(userId), chat_id);
+
     if (chatIndex === -1) {
-      console.log("ERROR: Chat not found in user's chats");
-      res.status(404).json({ message: 'Chat not found' });
+      res.status(200).json({
+        message: 'Chat was already deleted; associated records were checked again',
+        chat_id,
+        ...cleanup,
+      });
       return;
     }
 
-    console.log(`Found chat at index ${chatIndex}, deleting...`);
-
-    // Remove the chat from the array
     user.chats.splice(chatIndex, 1);
+    user.markModified('chats');
     await user.save();
 
-    console.log(`✅ Chat ${chat_id} deleted successfully. User now has ${user.chats.length} chats.`);
+    console.log(`✅ Chat ${chat_id} and its scoped progress/history deleted. User now has ${user.chats.length} chats.`);
     res.status(200).json({
       message: 'Chat deleted successfully',
       chat_id: chat_id,
+      ...cleanup,
     });
 
   } catch (error) {

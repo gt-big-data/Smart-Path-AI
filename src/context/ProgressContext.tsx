@@ -6,11 +6,12 @@ import { API_BASE_URL } from '../config/api';
 interface IConceptProgress {
   conceptId: string;
   confidenceScore: number;
+  chat_id?: string | null;
 }
 
 interface ProgressContextType {
   progress: IConceptProgress[];
-  updateProgress: (conceptId: string, isCorrect: boolean, isRetry: boolean) => Promise<void>;
+  updateProgress: (chatId: string, conceptId: string, isCorrect: boolean, isRetry: boolean, attemptId: string) => Promise<void>;
   loading: boolean;
 }
 
@@ -34,41 +35,7 @@ export const ProgressProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       try {
         setLoading(true);
         const response = await axios.get(`${API_BASE_URL}/api/concept-progress`, { withCredentials: true });
-        const progressData = response.data;
-        setProgress(progressData);
-        
-        // If no progress records exist, try to process existing quiz history
-        if (Array.isArray(progressData) && progressData.length === 0) {
-          console.log('[Progress] ⚠️ No progress records found, checking for quiz history to process...');
-          try {
-            // First check if there's any quiz history
-            const quizHistoryResponse = await axios.get(`${API_BASE_URL}/api/quiz-history`, { withCredentials: true });
-            const quizHistories = quizHistoryResponse.data?.quizHistories || [];
-            console.log(`[Progress] Found ${quizHistories.length} quiz history records`);
-            
-            if (quizHistories.length > 0) {
-              console.log('[Progress] 🔄 Processing quiz history to create progress records...');
-              const processResponse = await axios.post(`${API_BASE_URL}/api/quiz-history/process-all`, {}, { withCredentials: true });
-              console.log('[Progress] ✅ Processed quiz history:', processResponse.data);
-              
-              // Refetch progress after processing
-              console.log('[Progress] 🔄 Refetching progress after processing...');
-              const newResponse = await axios.get(`${API_BASE_URL}/api/concept-progress`, { withCredentials: true });
-              const newProgressData = newResponse.data;
-              console.log(`[Progress] ✅ Now have ${newProgressData.length} progress records`);
-              setProgress(newProgressData);
-            } else {
-              console.log('[Progress] ℹ️ No quiz history found to process');
-            }
-          } catch (processError: any) {
-            console.error('[Progress] ❌ Failed to process quiz history:', processError);
-            console.error('[Progress] Error details:', {
-              message: processError.message,
-              status: processError.response?.status,
-              data: processError.response?.data
-            });
-          }
-        }
+        setProgress(Array.isArray(response.data) ? response.data : []);
       } catch (error) {
         console.error('Failed to fetch progress', error);
       } finally {
@@ -81,12 +48,14 @@ export const ProgressProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     fetchProgress();
   }, [fetchProgress]);
 
-  const updateProgress = async (conceptId: string, isCorrect: boolean, isRetry: boolean) => {
+  const updateProgress = async (chatId: string, conceptId: string, isCorrect: boolean, isRetry: boolean, attemptId: string) => {
     try {
       await axios.post(`${API_BASE_URL}/api/progress/update`, {
-        conceptId,
+        chat_id: chatId,
+        concept_id: conceptId,
         isCorrect,
         isRetry,
+        attempt_id: attemptId,
       }, { withCredentials: true });
       // Refetch progress to get the latest scores
       fetchProgress();

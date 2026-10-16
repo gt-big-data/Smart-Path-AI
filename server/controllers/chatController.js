@@ -15,6 +15,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.renameChat = exports.deleteChat = exports.getUserGraphIds = exports.getUserChats = exports.addMessageToChat = exports.createNewChat = exports.getCurrentUserId = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const uuid_1 = require("uuid");
+const progressService_1 = require("../services/progressService");
+const chatService_1 = require("../services/chatService");
 /**
  * Get current logged in user's ID
  * GET /chat/user
@@ -22,14 +24,13 @@ const uuid_1 = require("uuid");
 const getCurrentUserId = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
-        const userId = (_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user;
+        const userId = (0, chatService_1.normalizeSessionUserId)((_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user);
         if (!userId) {
             res.status(401).json({ message: 'Unauthorized' });
             return; // CRITICAL: Stop execution after sending error response
         }
         console.log("userId from backend", userId);
-        const idString = typeof userId === 'object' ? userId._id : userId;
-        res.status(200).send(idString);
+        res.status(200).send(userId);
     }
     catch (err) {
         console.error('Get current user ID error:', err);
@@ -153,8 +154,13 @@ const addMessageToChat = (req, res) => __awaiter(void 0, void 0, void 0, functio
 exports.addMessageToChat = addMessageToChat;
 // GET /chat/chats
 const getUserChats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     try {
-        const userId = req.params.userId;
+        const userId = (0, chatService_1.normalizeSessionUserId)((_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user);
+        if (!userId) {
+            res.status(401).json({ message: 'Unauthorized' });
+            return;
+        }
         const user = yield User_1.default.findById(userId);
         if (!user) {
             res.status(404).json({ message: 'User not found' });
@@ -178,7 +184,7 @@ const getUserGraphIds = (req, res) => __awaiter(void 0, void 0, void 0, function
         console.log('[getUserGraphIds] Session:', req.session);
         console.log('[getUserGraphIds] Session passport:', (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport);
         // Use the exact same pattern as addMessageToChat which works
-        const userId = (_c = (_b = req.session) === null || _b === void 0 ? void 0 : _b.passport) === null || _c === void 0 ? void 0 : _c.user;
+        const userId = (0, chatService_1.normalizeSessionUserId)((_c = (_b = req.session) === null || _b === void 0 ? void 0 : _b.passport) === null || _c === void 0 ? void 0 : _c.user);
         console.log('[getUserGraphIds] Request received, userId:', userId);
         console.log('[getUserGraphIds] userId type:', typeof userId);
         if (!userId) {
@@ -228,7 +234,7 @@ const deleteChat = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     console.log("Request method:", req.method);
     console.log("Request URL:", req.url);
     try {
-        const userId = (_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user;
+        const userId = (0, chatService_1.normalizeSessionUserId)((_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user);
         const { chat_id } = req.params;
         console.log("User ID from session:", userId);
         console.log("Chat ID from params:", chat_id);
@@ -253,20 +259,16 @@ const deleteChat = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         console.log("Available chat_ids:", user.chats.map(c => c.chat_id));
         // Find the chat index
         const chatIndex = user.chats.findIndex((chat) => chat.chat_id === chat_id);
+        const cleanup = yield (0, progressService_1.deleteChatProgressAndHistory)(String(userId), chat_id);
         if (chatIndex === -1) {
-            console.log("ERROR: Chat not found in user's chats");
-            res.status(404).json({ message: 'Chat not found' });
+            res.status(200).json(Object.assign({ message: 'Chat was already deleted; associated records were checked again', chat_id }, cleanup));
             return;
         }
-        console.log(`Found chat at index ${chatIndex}, deleting...`);
-        // Remove the chat from the array
         user.chats.splice(chatIndex, 1);
+        user.markModified('chats');
         yield user.save();
-        console.log(`✅ Chat ${chat_id} deleted successfully. User now has ${user.chats.length} chats.`);
-        res.status(200).json({
-            message: 'Chat deleted successfully',
-            chat_id: chat_id,
-        });
+        console.log(`✅ Chat ${chat_id} and its scoped progress/history deleted. User now has ${user.chats.length} chats.`);
+        res.status(200).json(Object.assign({ message: 'Chat deleted successfully', chat_id: chat_id }, cleanup));
     }
     catch (error) {
         console.error('❌ Delete chat error:', error);

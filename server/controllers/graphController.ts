@@ -1,8 +1,9 @@
 //graphController.ts
 import { Request, Response } from 'express';
 import OpenAI from 'openai';
-import ConceptProgress from '../models/ConceptProgress';
 import { pythonServiceClient } from '../utils/axiosConfig';
+import { findOwnedChat, normalizeSessionUserId } from '../services/chatService';
+import { getChatConfidenceMap, normalizeConceptId, updateChatConceptConfidence } from '../services/progressService';
 
 // Initialize OpenAI with explicit API key
 const openai = new OpenAI({
@@ -13,47 +14,6 @@ const openai = new OpenAI({
 if (!process.env.OPENAI_API_KEY) {
   console.error('Warning: OPENAI_API_KEY is not set in environment variables');
 }
-
-// Helper function to update confidence score
-const updateConfidenceScore = async (userId: string, conceptId: string, isCorrect: boolean, isRetry: boolean) => {
-  if (!userId || !conceptId) {
-    console.log('Skipping confidence score update: missing userId or conceptId.');
-    return;
-  }
-
-  let progress = await ConceptProgress.findOne({ user: userId, conceptId });
-
-  if (!progress) {
-    progress = new ConceptProgress({ user: userId, conceptId, confidenceScore: 0.5 });
-  }
-
-  if (isCorrect) {
-    progress.confidenceScore += isRetry ? 0.05 : 0.1;
-  } else {
-    progress.confidenceScore -= 0.1;
-  }
-
-  // Clamp the score between 0 and 1
-  progress.confidenceScore = Math.max(0, Math.min(1, progress.confidenceScore));
-
-  await progress.save();
-  console.log(`Updated confidence score for concept ${conceptId} to ${progress.confidenceScore}`);
-};
-
-const updateConfidenceScoreSafe = async (
-  userId: string | undefined,
-  conceptId: string | undefined,
-  isCorrect: boolean,
-  isRetry: boolean
-) => {
-  if (!userId || !conceptId) return;
-  try {
-    await updateConfidenceScore(userId, conceptId, isCorrect, isRetry);
-  } catch (err) {
-    console.error('Non-fatal confidence update error:', err);
-  }
-};
-
 
 export const viewGraph = async (req: Request, res: Response) => {
   try {
@@ -80,7 +40,8 @@ export const viewGraph = async (req: Request, res: Response) => {
 export const generateQuestionsWithAnswers = async (req: Request, res: Response) => {
   try {
     const graph_id = req.query.graph_id;
-    const userId = (req.session as any)?.passport?.user;
+    const userId = normalizeSessionUserId((req.session as any)?.passport?.user);
+    const chatId = String(req.query.chat_id || req.query.chatId || '');
     const rawLength = req.query.length as string | undefined;
     const parsedLength = Number(rawLength);
     const allowed = [5, 10, 15];
@@ -96,19 +57,28 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
     }
 
     if (!userId) {
-      // The Python server needs a user_id to fetch progress.
-      // If the user is not authenticated, we cannot generate personalized questions.
-      // We could either return an error or generate generic questions.
-      // For now, let's return an error to make the dependency clear.
       return res.status(401).json({ error: 'User not authenticated. Cannot generate personalized questions.' });
     }
 
+    if (!chatId) {
+      return res.status(400).json({ error: 'chat_id is required' });
+    }
+
+    const ownedChat = await findOwnedChat(userId, chatId, String(graph_id));
+    if (!ownedChat) {
+      return res.status(404).json({ error: 'Chat or graph not found for this user' });
+    }
+
+    const confidenceByConcept = await getChatConfidenceMap(userId, chatId);
+
     const id = encodeURIComponent(String(graph_id));
-    const url = `/questions/${id}?user_id=${userId}&length=${length}&format=${questionFormat}`;
+    const url = `/questions/${id}?length=${length}&format=${questionFormat}`;
 
     console.log(`Requesting questions from AI server: ${url}`);
 
-    const response = await pythonServiceClient.post(url, {});
+    const response = await pythonServiceClient.post(url, {
+      confidence_by_concept: confidenceByConcept,
+    });
 
     // The AI server returns { questions: [ { text, correct_answer, topic_id }, ... ] }
     const questions = response.data?.questions;
@@ -118,12 +88,16 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
     }
 
     const qa_pairs = questions.map((q: any, idx: number) => {
-      const conceptId = q.conceptId || q.concept_id || q.topic_id || q.topicID || q.id || '';
-      const sourceField = q.conceptId ? 'conceptId' : 
-                         q.concept_id ? 'concept_id' : 
-                         q.topic_id ? 'topic_id' : 
-                         q.topicID ? 'topicID' : 
-                         q.id ? 'id' : 'NONE';
+      const conceptId = normalizeConceptId({
+        concept_id: q.concept_id,
+        topic_id: q.topic_id,
+        topicID: q.topicID,
+        conceptId: q.conceptId,
+      });
+      const sourceField = q.concept_id ? 'concept_id' :
+        q.topic_id ? 'topic_id' :
+        q.topicID ? 'topicID' :
+        q.conceptId ? 'conceptId' : 'NONE';
       
       console.log(`[Backend] Question ${idx + 1} - conceptId extracted from field: ${sourceField}, value: ${conceptId}`);
       console.log(`[Backend] Question ${idx + 1} - Available fields:`, {
@@ -137,7 +111,8 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
       return {
         question: q.text || '',
         answer: q.correct_answer || '',
-        conceptId: conceptId,
+        concept_id: conceptId,
+        conceptId,
         // Optional metadata for future UI use
         id: q.id,
         explanation: q.explanation,
@@ -163,7 +138,11 @@ interface VerifyAnswerRequest {
   question: string;
   userAnswer: string;
   correctAnswer: string;
+  concept_id?: string;
   conceptId?: string;
+  chat_id?: string;
+  graph_id?: string;
+  attempt_id?: string;
   isRetry?: boolean;
 }
 
@@ -206,26 +185,50 @@ const evaluateAnswerFallback = (userAnswer: string, correctAnswer: string) => {
 };
 
 export const verifyAnswer = async (req: Request, res: Response) => {
-  const userId = (req.session as any)?.passport?.user;
+  const userId = normalizeSessionUserId((req.session as any)?.passport?.user);
   if (!userId) {
     return res.status(401).json({ error: 'User not authenticated' });
   }
 
-  try {
-    const { question, userAnswer, correctAnswer, conceptId, isRetry }: VerifyAnswerRequest = req.body;
+  const {
+    question = '',
+    userAnswer = '',
+    correctAnswer = '',
+    isRetry = false,
+  }: VerifyAnswerRequest = req.body || {};
+  const chatId = String(req.body?.chat_id || req.body?.chatId || '');
+  const conceptId = normalizeConceptId(req.body);
+  const attemptId = String(req.body?.attempt_id || req.body?.attemptId || '');
 
-    // Handle skipped questions - treat as incorrect
-    if (userAnswer === 'SKIPPED' || userAnswer.trim().toUpperCase() === 'SKIP') {
-      await updateConfidenceScoreSafe(userId, conceptId, false, false);
-      return res.json({
-        isCorrect: false,
-        feedback: `You skipped this question. Skipped questions are counted as incorrect for confidence tracking.`,
-        followUpQuestion: ''
-      });
+  if (!chatId || !conceptId || !attemptId || attemptId.length > 200) {
+    return res.status(400).json({ error: 'chat_id, concept_id, and attempt_id are required' });
+  }
+  if (
+    typeof question !== 'string' ||
+    typeof userAnswer !== 'string' ||
+    typeof correctAnswer !== 'string' ||
+    typeof isRetry !== 'boolean'
+  ) {
+    return res.status(400).json({ error: 'question, userAnswer, correctAnswer, and isRetry are required' });
+  }
+
+  try {
+    const ownedChat = await findOwnedChat(userId, chatId, req.body?.graph_id ? String(req.body.graph_id) : undefined);
+    if (!ownedChat) {
+      return res.status(404).json({ error: 'Chat not found for this user' });
     }
 
-    // Construct the prompt for GPT
-    const systemPrompt = `You are an educational assistant that evaluates student answers based on conceptual understanding rather than exact wording.
+    const isSkipped = userAnswer === 'SKIPPED' || String(userAnswer).trim().toUpperCase() === 'SKIP';
+    let result: { isCorrect: boolean; feedback: string; followUpQuestion: string };
+
+    if (isSkipped) {
+      result = {
+        isCorrect: false,
+        feedback: 'You skipped this question. Skipped questions are counted as incorrect for confidence tracking.',
+        followUpQuestion: '',
+      };
+    } else {
+      const systemPrompt = `You are an educational assistant that evaluates student answers based on conceptual understanding rather than exact wording.
 Your role is to:
 1. Focus on the core concepts and key points in the answer
 2. Be lenient with different phrasings as long as they convey the same meaning
@@ -241,7 +244,7 @@ Evaluate answers based on:
 Even partially correct answers should receive encouraging feedback.
 Return valid JSON only.`;
 
-    const userPrompt = `Evaluate this answer conceptually:
+  const userPrompt = `Evaluate this answer conceptually:
 
 Question: "${question}"
 Student's Answer: "${userAnswer}"
@@ -256,57 +259,55 @@ Provide feedback in this JSON format:
   "thinkingPrompt": "A question to help the student think deeper about the topic"
 }`;
 
-    try {
-      // Prefer LLM conceptual grading, but keep a deterministic fallback if formatting/service fails.
-      const completion = await openai.chat.completions.create({
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
-        model: "gpt-4o-mini",
-        temperature: 0.3,
-        max_tokens: 500,
-        response_format: { type: "json_object" },
-      });
+      try {
+        const completion = await openai.chat.completions.create({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          model: 'gpt-4o-mini',
+          temperature: 0.3,
+          max_tokens: 500,
+          response_format: { type: 'json_object' },
+        });
 
-      const responseContent = completion.choices[0]?.message?.content;
-      if (!responseContent) {
-        throw new Error('No response from OpenAI');
+        const responseContent = completion.choices[0]?.message?.content;
+        if (!responseContent) throw new Error('No response from OpenAI');
+
+        const cleaned = responseContent
+          .replace(/^```json\s*/i, '')
+          .replace(/^```\s*/i, '')
+          .replace(/\s*```$/, '')
+          .trim();
+        const evaluation = JSON.parse(cleaned);
+        const isCorrect = Number(evaluation.score) >= 70;
+
+        result = {
+          isCorrect,
+          feedback: String(evaluation.feedback || 'Answer evaluated.'),
+          followUpQuestion: isCorrect
+            ? String(evaluation.thinkingPrompt || '')
+            : `Hint: ${String(evaluation.conceptualHint || '')}`,
+        };
+      } catch (llmError) {
+        console.error('LLM verify fallback engaged:', llmError);
+        result = evaluateAnswerFallback(String(userAnswer), String(correctAnswer || ''));
       }
-
-      const cleaned = responseContent
-        .replace(/^```json\s*/i, '')
-        .replace(/^```\s*/i, '')
-        .replace(/\s*```$/, '')
-        .trim();
-      const result = JSON.parse(cleaned);
-      const isCorrect = result.score >= 70;
-
-      // Update confidence score
-      await updateConfidenceScoreSafe(userId, conceptId, isCorrect, isRetry || false);
-
-      // Transform the result to match the expected frontend format while preserving the new evaluation approach
-      const transformedResult = {
-        isCorrect, // Consider answers with 70% or higher understanding as correct
-        feedback: result.feedback,
-        followUpQuestion: result.score >= 70 
-          ? result.thinkingPrompt 
-          : `Hint: ${result.conceptualHint}`
-      };
-      res.json(transformedResult);
-    } catch (llmError) {
-      console.error('LLM verify fallback engaged:', llmError);
-      const fallback = evaluateAnswerFallback(userAnswer, correctAnswer || '');
-      await updateConfidenceScoreSafe(userId, conceptId, fallback.isCorrect, isRetry || false);
-      res.json(fallback);
     }
 
+    const progress = await updateChatConceptConfidence({
+      userId,
+      chatId,
+      conceptId,
+      isCorrect: result.isCorrect,
+      isRetry: isSkipped ? false : Boolean(isRetry),
+      attemptId,
+    });
+
+    return res.json({ ...result, confidence_score: progress.confidence_score });
   } catch (error) {
-    console.error('Error verifying answer:', error);
-    const { userAnswer, correctAnswer, conceptId, isRetry }: VerifyAnswerRequest = req.body || {};
-    const fallback = evaluateAnswerFallback(String(userAnswer || ''), String(correctAnswer || ''));
-    await updateConfidenceScoreSafe(userId, conceptId, fallback.isCorrect, Boolean(isRetry));
-    res.json(fallback);
+    console.error('Error verifying answer or updating progress:', error);
+    return res.status(500).json({ error: 'Could not verify answer and save progress' });
   }
 };
 

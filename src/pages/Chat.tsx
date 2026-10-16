@@ -37,6 +37,7 @@ interface Chat {
 interface ConceptProgress {
   conceptId: string;
   confidenceScore: number;
+  chat_id?: string | null;
   lastAttempted?: Date;
 }
 
@@ -108,8 +109,14 @@ function App() {
 
   // Add function to fetch concept progress
   const fetchConceptProgress = useCallback(async () => {
+    if (!currentChatId) {
+      setConceptProgress([]);
+      return;
+    }
+
     try {
       const response = await axios.get(`${API_BASE_URL}/api/concept-progress`, {
+        params: { chat_id: currentChatId },
         withCredentials: true
       });
       setConceptProgress(response.data);
@@ -119,7 +126,11 @@ function App() {
       // Set empty array on error to avoid breaking the UI
       setConceptProgress([]);
     }
-  }, []);
+  }, [currentChatId]);
+
+  useEffect(() => {
+    void fetchConceptProgress();
+  }, [fetchConceptProgress]);
 
   const generateAIResponse = async (userMessage: string, fileType?: string) => {
     let aiResponse = '';
@@ -841,6 +852,8 @@ function App() {
       console.log('✅ Delete response received:', response.data);
       console.log('Response status:', response.status);
       console.log('✅ Chat deleted successfully on server');
+      clearQuiz(chatId);
+      setConceptProgress(previous => previous.filter(progress => progress.chat_id !== chatId));
       
       deletingChatRef.current = null;
       

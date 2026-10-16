@@ -28,6 +28,8 @@ import session from 'express-session';
 import MongoStore from 'connect-mongo';
 import axios from 'axios';
 import User from './models/User';
+import ChatConceptProgress from './models/ChatConceptProgress';
+import QuizHistory from './models/QuizHistory';
 
 import './config/passport';
 
@@ -51,6 +53,7 @@ const sessionStore = process.env.MONGO_URI
 const connectDB = async () => {
     try {
         await mongoose.connect(process.env.MONGO_URI!);
+        await Promise.all([ChatConceptProgress.init(), QuizHistory.init()]);
         console.log('MongoDB connected');
     } catch (err) {
         console.error('Could not connect to MongoDB', err);

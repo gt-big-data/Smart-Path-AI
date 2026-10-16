@@ -3,10 +3,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Circle, ChevronLeft, ChevronRight, HelpCircle, Send } from 'lucide-react';
 import axios from 'axios';
 import { API_BASE_URL } from '../config/api';
-import { quizKey, readQuiz, type ClarifyMessage, type Question, type QuizState, type Result } from '../lib/quizState';
+import { createQuizId, quizKey, readQuiz, type ClarifyMessage, type Question, type QuizState, type Result } from '../lib/quizState';
 
 // The AI server isn't consistent about the concept id field name
-type RawPair = { question?: string; answer?: string; conceptId?: string; concept_id?: string; topicId?: string; topic_id?: string; id?: string; explanation?: string; format?: string };
+type RawPair = { question?: string; answer?: string; concept_id?: string; conceptId?: string; topicId?: string; topic_id?: string; topicID?: string; explanation?: string; format?: string };
 
 function splitQuestion(question: Question) {
   const lines = question.question.split('\n');
@@ -54,7 +54,7 @@ function QuizRunner() {
     const length = params.get('length') || '5';
     const format = params.get('format') || 'mixed';
     axios.get(`${API_BASE_URL}/api/generate-questions-with-answers`, {
-      params: { graph_id: graphId, length, format }, withCredentials: true,
+      params: { graph_id: graphId, chat_id: chatId, length, format }, withCredentials: true,
     }).then(response => {
       const pairs = response.data?.qa_pairs;
       if (response.data?.status !== 'success' || !Array.isArray(pairs) || !pairs.length) {
@@ -63,11 +63,11 @@ function QuizRunner() {
       const qaData: Question[] = pairs.map((pair: RawPair) => ({
         question: pair.question || '',
         answer: pair.answer === 'T' ? 'True' : pair.answer === 'F' ? 'False' : String(pair.answer || ''),
-        conceptId: String(pair.conceptId || pair.concept_id || pair.topicId || pair.topic_id || pair.id || ''),
+        concept_id: String(pair.concept_id || pair.topic_id || pair.topicID || pair.conceptId || pair.topicId || ''),
         explanation: pair.explanation,
         format: pair.format,
       }));
-      const next = { qaData, currentQuestionIndex: 0, results: qaData.map(() => null), completed: false };
+      const next = { quizId: createQuizId(), qaData, currentQuestionIndex: 0, results: qaData.map(() => null), completed: false };
       localStorage.setItem(quizKey(chatId), JSON.stringify(next));
       setQuiz(next);
     }).catch(err => setError(err.message || 'Could not generate the quiz.')).finally(() => setLoading(false));
@@ -102,11 +102,13 @@ function QuizRunner() {
   };
 
   const finish = async (next: QuizState) => {
-    const valid = next.qaData.map((question, index) => ({ question, index })).filter(item => item.question.conceptId.trim());
+    const valid = next.qaData.map((question, index) => ({ question, index })).filter(item => item.question.concept_id.trim());
     if (valid.length) {
       try {
         await axios.post(`${API_BASE_URL}/api/quiz-history`, {
-          concepts: valid.map(({ question }, index) => ({ conceptID: question.conceptId, name: `Question ${index + 1} Concept` })),
+          chat_id: chatId,
+          quiz_id: next.quizId,
+          concepts: valid.map(({ question }, index) => ({ concept_id: question.concept_id, name: `Question ${index + 1} Concept` })),
           questions: valid.map(({ question, index }) => ({
             questionText: question.question,
             // Quiz history compares exact strings against the stored letter, so send "A" rather than "A) ATP"
@@ -137,7 +139,9 @@ function QuizRunner() {
         question: question.question,
         userAnswer: answer,
         correctAnswer: question.answer,
-        conceptId: question.conceptId,
+        concept_id: question.concept_id,
+        chat_id: chatId,
+        attempt_id: `${quiz.quizId}:${index}`,
         isRetry: false,
         graph_id: graphId,
       }, { withCredentials: true });

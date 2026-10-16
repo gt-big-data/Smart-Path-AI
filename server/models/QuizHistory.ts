@@ -1,7 +1,8 @@
 import { Schema, model, Document } from 'mongoose';
 
 interface IConcept {
-  conceptID: string;
+  concept_id?: string;
+  conceptID?: string;
   name: string;
 }
 
@@ -15,6 +16,8 @@ interface IQuestion {
 
 interface IQuizHistory extends Document {
   userID: string;
+  chat_id?: string;
+  quiz_id?: string;
   concepts: IConcept[];
   questions: IQuestion[];
   createdAt: Date;
@@ -22,7 +25,8 @@ interface IQuizHistory extends Document {
 }
 
 const conceptSchema = new Schema<IConcept>({
-  conceptID: { type: String, required: true },
+  concept_id: { type: String },
+  conceptID: { type: String },
   name: { type: String, required: true }
 }, { _id: false });
 
@@ -36,6 +40,8 @@ const questionSchema = new Schema<IQuestion>({
 
 const QuizHistorySchema = new Schema<IQuizHistory>({
   userID: { type: String, required: true },
+  chat_id: { type: String },
+  quiz_id: { type: String },
   concepts: [conceptSchema],
   questions: [questionSchema],
   createdAt: { type: Date, default: Date.now },
@@ -44,6 +50,10 @@ const QuizHistorySchema = new Schema<IQuizHistory>({
 
 // Index for efficient queries by userID
 QuizHistorySchema.index({ userID: 1 });
+QuizHistorySchema.index({ userID: 1, chat_id: 1, quiz_id: 1 }, {
+  unique: true,
+  partialFilterExpression: { chat_id: { $type: 'string' }, quiz_id: { $type: 'string' } },
+});
 
 // Update the updatedAt field before saving
 QuizHistorySchema.pre('save', function(next) {

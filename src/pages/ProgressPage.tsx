@@ -10,6 +10,7 @@ interface ProgressItem {
   confidence_score: number;
   last_practiced: string;
   graph_id?: string;
+  legacy?: boolean;
 }
 
 interface ProfileData {
@@ -92,6 +93,7 @@ const ProgressPage: React.FC = () => {
 
         // Fetch chat titles to label accordion sections
         const localChatTitleMap = new Map<string, string>();
+        const localChatGraphMap = new Map<string, string>();
         try {
           const userRes = await axios.get(`${API_BASE_URL}/chat/user`, { withCredentials: true });
           const userId = userRes.data;
@@ -99,7 +101,10 @@ const ProgressPage: React.FC = () => {
             const chatsRes = await axios.get(`${API_BASE_URL}/chat/${userId}/chats`, { withCredentials: true });
             const chats = Array.isArray(chatsRes.data) ? chatsRes.data : [];
             chats.forEach((chat: any) => {
-              if (chat.graph_id) localChatTitleMap.set(chat.graph_id, chat.title || 'Untitled Chat');
+              if (chat.graph_id) {
+                localChatTitleMap.set(chat.graph_id, chat.title || 'Untitled Chat');
+                if (chat.chat_id) localChatGraphMap.set(chat.chat_id, chat.graph_id);
+              }
             });
           }
         } catch (err) {
@@ -218,6 +223,9 @@ const ProgressPage: React.FC = () => {
         });
 
         const graphData = { graph: { nodes: allNodes } };
+        const chatToGraphId = new Map(
+          Array.from(localChatGraphMap, ([chatId, graphId]) => [chatId, graphId])
+        );
 
         // DEBUG: log raw responses to help diagnose missing labels
         console.debug('ProgressPage: raw graph response', graphData);
@@ -324,7 +332,12 @@ const ProgressPage: React.FC = () => {
             topic_name: name,
             confidence_score: typeof p.confidenceScore === 'number' ? p.confidenceScore : (p.confidence_score ?? 0),
             last_practiced: p.lastAttempted || p.last_practiced || p.updatedAt || new Date().toISOString(),
-            graph_id: conceptToGraphId.get(conceptId),
+            graph_id: p.chat_id
+              ? chatToGraphId.get(String(p.chat_id))
+              : p.legacy
+                ? '__legacy_unassigned__'
+                : conceptToGraphId.get(conceptId),
+            legacy: p.legacy === true,
           };
         });
 
@@ -621,7 +634,9 @@ const ProgressPage: React.FC = () => {
                       return acc;
                     }, new Map<string, typeof profileData.full_progress>())
                   ).map(([graphId, items]) => {
-                    const chatTitle = chatTitleMap.get(graphId) || 'Untitled Chat';
+                    const chatTitle = graphId === '__legacy_unassigned__'
+                      ? 'Legacy progress (unassigned)'
+                      : chatTitleMap.get(graphId) || 'Untitled Chat';
                     const lastPracticed = items.reduce((latest, item) =>
                       new Date(item.last_practiced) > new Date(latest) ? item.last_practiced : latest,
                       items[0].last_practiced
