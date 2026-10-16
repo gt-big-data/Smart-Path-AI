@@ -479,3 +479,28 @@ const semanticSearchGraph = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.semanticSearchGraph = semanticSearchGraph;
+// Quiz clarifications use their own AI endpoint: the chat one answers directly and pulls in graph facts that give answers away
+const clarifyQuizQuestion = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    const userId = (_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user;
+    if (!userId) {
+        return res.status(401).json({ error: 'User not authenticated' });
+    }
+    const { question, studentQuestion, correctAnswer } = req.body || {};
+    if (!question || !(studentQuestion === null || studentQuestion === void 0 ? void 0 : studentQuestion.trim()) || !correctAnswer) {
+        return res.status(400).json({ error: 'question, studentQuestion and correctAnswer are required' });
+    }
+    try {
+        const response = yield axiosConfig_1.pythonServiceClient.post('/clarify-quiz-question', {
+            question,
+            student_question: studentQuestion,
+            correct_answer: correctAnswer,
+        });
+        res.json({ message: response.data.message });
+    }
+    catch (error) {
+        console.error('Error clarifying quiz question:', ((_c = error.response) === null || _c === void 0 ? void 0 : _c.data) || error.message);
+        res.status(((_d = error.response) === null || _d === void 0 ? void 0 : _d.status) || 500).json({ error: 'Failed to clarify quiz question' });
+    }
+});
+exports.clarifyQuizQuestion = clarifyQuizQuestion;

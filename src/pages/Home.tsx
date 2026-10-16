@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, LayoutDashboard, TrendingUp, UserCircle, Users } from 'lucide-react';
+import { ArrowRight, ClipboardList, LayoutDashboard, TrendingUp, UserCircle, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Navigation from '../components/Navigation';
 import { useAuth } from '../context/AuthContext';
@@ -10,6 +10,15 @@ const featureCards = [
     description: 'Upload PDFs, chat with AI, and explore interactive knowledge graphs.',
     icon: LayoutDashboard,
     to: '/chat',
+    requiresAuth: true,
+    color: 'teal',
+    iconClass: 'h-6 w-6',
+  },
+  {
+    title: 'Quizzes',
+    description: 'Answer questions from your uploaded documents and review your results.',
+    icon: ClipboardList,
+    to: '/quiz',
     requiresAuth: true,
     color: 'teal',
     iconClass: 'h-6 w-6',
@@ -116,7 +125,7 @@ export default function Home() {
         </div>
 
         {/* Navigation Cards */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-16 max-w-5xl mx-auto">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-6 mt-16 max-w-6xl mx-auto">
           {featureCards.map((card) => {
             const colors = colorMap[card.color];
             const Icon = card.icon;

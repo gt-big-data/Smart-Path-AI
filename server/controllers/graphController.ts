@@ -531,3 +531,28 @@ export const semanticSearchGraph = async (req: Request, res: Response) => {
     res.status(error.response?.status || 500).json({ error: errorMessage });
   }
 };
+
+// Quiz clarifications use their own AI endpoint: the chat one answers directly and pulls in graph facts that give answers away
+export const clarifyQuizQuestion = async (req: Request, res: Response) => {
+  const userId = (req.session as any)?.passport?.user;
+  if (!userId) {
+    return res.status(401).json({ error: 'User not authenticated' });
+  }
+
+  const { question, studentQuestion, correctAnswer } = req.body || {};
+  if (!question || !studentQuestion?.trim() || !correctAnswer) {
+    return res.status(400).json({ error: 'question, studentQuestion and correctAnswer are required' });
+  }
+
+  try {
+    const response = await pythonServiceClient.post('/clarify-quiz-question', {
+      question,
+      student_question: studentQuestion,
+      correct_answer: correctAnswer,
+    });
+    res.json({ message: response.data.message });
+  } catch (error: any) {
+    console.error('Error clarifying quiz question:', error.response?.data || error.message);
+    res.status(error.response?.status || 500).json({ error: 'Failed to clarify quiz question' });
+  }
+};
