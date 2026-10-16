@@ -151,6 +151,27 @@ const pencilButtonStyle: React.CSSProperties = {
   zIndex: 11,
 };
 
+const pathStepStyle: React.CSSProperties = {
+  position: 'absolute',
+  right: '-10px',
+  top: '-12px',
+  width: '28px',
+  height: '28px',
+  borderRadius: '50%',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: '#d4581c',
+  border: '2px solid #ffffff',
+  boxShadow: '0 2px 8px rgba(212, 88, 28, 0.45)',
+  color: '#ffffff',
+  fontSize: '13px',
+  fontWeight: 700,
+  lineHeight: 1,
+  zIndex: 12,
+  pointerEvents: 'none',
+};
+
 export const GraphNode = memo((props: GraphNodeProps) => {
   const { data, style = {}, id, onEditRequest } = props;
   const [showTooltip, setShowTooltip] = useState(false);
@@ -209,6 +230,14 @@ export const GraphNode = memo((props: GraphNodeProps) => {
       >
         {renderConfidenceCircles(data.confidenceScore)}
         {data.customLabel || truncateText(data.label)}
+        {data.pathStep != null && (
+          <span
+            style={pathStepStyle}
+            aria-label={`Path step ${data.pathStep}`}
+          >
+            {data.pathStep}
+          </span>
+        )}
         <button
           type="button"
           className="nodrag nopan"
