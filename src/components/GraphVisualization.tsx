@@ -492,8 +492,11 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
   const [activePathTargetId, setActivePathTargetId] = useState<string | null>(null);
   const [minimapLocked, setMinimapLocked] = useState(false);
 
-  // Custom label/color edits by node id. Kept apart from the nodes so a rebuild doesn't drop them.
-  const [nodeEdits, setNodeEdits] = useState<Record<string, NodeEdit>>({});
+  // Custom label/color edits by node id. Kept apart from the nodes so a restyle doesn't drop them,
+  // and tagged with the graph they were made on so a newly loaded graph doesn't inherit them.
+  const [nodeEditsState, setNodeEditsState] = useState<{ graph: BaseGraph | null; byId: Record<string, NodeEdit> }>(
+    { graph: null, byId: {} }
+  );
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -577,7 +580,10 @@ useEffect(() => {
   }, [nodeEditState]);
 
   const handleNodeEditSave = (nodeId: string, label: string, color: string) => {
-    setNodeEdits(prev => ({ ...prev, [nodeId]: { label, color } }));
+    setNodeEditsState(prev => ({
+      graph: baseGraph,
+      byId: { ...(prev.graph === baseGraph ? prev.byId : {}), [nodeId]: { label, color } },
+    }));
   };
 
   const getNodeLabel = (node: any) => {
@@ -674,93 +680,6 @@ useEffect(() => {
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery, handleSearch]);
-
-  const visibleNodes = useMemo(() => {
-    const searchResultIds = new Set(searchResults.map(String));
-    const hasActivePath =
-      activePath !== null && activePath.nodeIds.length > 0;
-
-    return nodes.map(node => {
-      const pathStep = activePath?.nodeSteps.get(node.id);
-      const onPath = pathStep !== undefined;
-      const searchMatch = searchResultIds.has(node.id);
-
-      const pathShadow = onPath
-        ? '0 0 16px rgba(212, 88, 28, 0.58)'
-        : '';
-
-      const searchShadow = searchMatch
-        ? '0 0 0 3px #fbbf24, 0 0 15px rgba(251, 191, 36, 0.6)'
-        : '';
-
-      return {
-        ...node,
-        data: {
-          ...node.data,
-          pathStep,
-        },
-        style: {
-          ...node.style,
-          opacity:
-            hasActivePath && !onPath
-              ? searchMatch
-                ? 0.55
-                : 0.18
-              : 1,
-          border: onPath
-            ? '3px solid #d4581c'
-            : searchMatch && !hasActivePath
-              ? '3px solid #fbbf24'
-              : '1px solid rgba(255,255,255,0.2)',
-          boxShadow:
-            [searchShadow, pathShadow]
-              .filter(Boolean)
-              .join(', ') || 'none',
-          borderRadius: '24px',
-          transition:
-            'opacity 160ms ease, border-color 160ms ease, box-shadow 160ms ease',
-        },
-      };
-    });
-  }, [activePath, nodes, searchResults]);
-
-  const visibleEdges = useMemo(() => {
-    const hasActivePath =
-      activePath !== null && activePath.nodeIds.length > 0;
-
-    return edges.map(edge => {
-      const edgeIndex = edge.data?.graphEdgeIndex;
-
-      const onPath =
-        hasActivePath &&
-        typeof edgeIndex === 'number' &&
-        activePath.edgeIndices.has(edgeIndex);
-
-      return {
-        ...edge,
-        animated: onPath,
-        label: onPath ? edge.label : undefined,
-        style: {
-          ...edge.style,
-          stroke: onPath ? '#d4581c' : '#888',
-          strokeWidth: onPath ? 4 : 1.5,
-          opacity: hasActivePath
-            ? onPath
-              ? 1
-              : 0.14
-            : 1,
-          transition:
-            'opacity 160ms ease, stroke 160ms ease, stroke-width 160ms ease',
-        },
-        labelStyle: {
-          ...edge.labelStyle,
-          fill: onPath ? '#d4581c' : 'transparent',
-          fontWeight: onPath ? 700 : 400,
-        },
-        zIndex: onPath ? 1 : 0,
-      };
-    });
-  }, [activePath, edges]);
 
   const forceDirectedLayout = (nodes: Node[], edges: Edge[], spacing: number = 360) => {
     const positions: { x: number; y: number }[] = [];
@@ -979,11 +898,16 @@ useEffect(() => {
     () => resolveConfidenceScores(baseGraph?.confidenceKeys ?? [], conceptProgress),
     [baseGraph, conceptProgress]
   );
-  const searchHits = useMemo(() => new Set(searchResults), [searchResults]);
+  const nodeEdits = useMemo(
+    () => (nodeEditsState.graph === baseGraph ? nodeEditsState.byId : {}),
+    [nodeEditsState, baseGraph]
+  );
+  // The search API may return numeric ids; node ids are strings
+  const searchHits = useMemo(() => new Set(searchResults.map(String)), [searchResults]);
 
   const styledGraph = useMemo(
-    () => baseGraph && applyGraphStyles(baseGraph, { confidenceScores, nodeEdits, searchHits }),
-    [baseGraph, confidenceScores, nodeEdits, searchHits]
+    () => baseGraph && applyGraphStyles(baseGraph, { confidenceScores, nodeEdits, searchHits, activePath }),
+    [baseGraph, confidenceScores, nodeEdits, searchHits, activePath]
   );
 
   // Push the styled graph into React Flow. A new base graph replaces everything; a style-only
@@ -1217,8 +1141,8 @@ useEffect(() => {
       )}
 
       <ReactFlow
-        nodes={visibleNodes}
-        edges={visibleEdges}
+        nodes={nodes}
+        edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={handleNodeClick}
