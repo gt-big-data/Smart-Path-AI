@@ -9,6 +9,7 @@ import ReactFlow, {
   MiniMap,
   NodeMouseHandler,
   NodeProps,
+  ReactFlowInstance,
   useNodesState,
   useEdgesState,
 } from 'reactflow';
@@ -16,7 +17,8 @@ import 'reactflow/dist/style.css';
 import { Search, X } from 'lucide-react';
 import PathBar from './graph/PathBar';
 import { computeNodeSizes } from '../lib/nodesizing';
-import { buildGraphTree } from '../lib/graphTree';
+import { buildGraphTree, GraphTree } from '../lib/graphTree';
+import { radialLayout, toTopLeft, NodeSize, Point, RadialTreeNode } from '../lib/radialLayout';
 import { getPathHighlight } from '../lib/pathHighlight';
 import { applyGraphStyles, BaseGraph, ConfidenceKeys, DEFAULT_NODE_BORDER, NodeEdit, resolveConfidenceScores } from '../lib/graphStyles';
 import { API_BASE_URL } from '../config/api';
@@ -38,7 +40,46 @@ interface ConceptProgress {
 }
 
 // Path bar preview with hardcoded steps; wired up in P2b
-const SHOW_PATH_BAR = false;
+const SHOW_PATH_BAR = true;
+
+// Must match the fallback size nodes are rendered at below
+const DEFAULT_NODE_SIZE: NodeSize = { width: 200, height: 70 };
+
+// Rings from the center that the first view zooms to; the rest of the graph is a pan away
+const INITIAL_FOCUS_DEPTH = 2;
+
+/**
+ * Top-left positions for React Flow: the center in the middle and one ring per depth
+ * (src/lib/radialLayout.ts). Nodes the tree doesn't reach go in a row under the outer ring.
+ */
+function layoutRadially(nodes: Node[], tree: GraphTree, sizes: Map<string, NodeSize>): Map<string, Point> {
+  const ids = new Set(nodes.map(node => node.id));
+  const sizeOf = (id: string) => sizes.get(id) ?? DEFAULT_NODE_SIZE;
+
+  // The tree is built from the raw graph; drop nodes that weren't rendered
+  const radialTree = new Map<string, RadialTreeNode>();
+  tree.nodes.forEach((treeNode, id) => {
+    if (ids.has(id)) radialTree.set(id, { id, children: treeNode.children.filter(child => ids.has(child)) });
+  });
+
+  const positions = new Map<string, Point>();
+  if (tree.centerId && radialTree.has(tree.centerId)) {
+    const { positions: centers } = radialLayout(tree.centerId, radialTree, sizes, { defaultSize: DEFAULT_NODE_SIZE });
+    centers.forEach((center, id) => positions.set(id, toTopLeft(center, sizeOf(id))));
+  }
+
+  const unplaced = nodes.filter(node => !positions.has(node.id));
+  if (unplaced.length > 0) {
+    let bottom = 0;
+    positions.forEach((pos, id) => { bottom = Math.max(bottom, pos.y + sizeOf(id).height); });
+    let x = 0;
+    unplaced.forEach(node => {
+      positions.set(node.id, { x, y: bottom + 200 });
+      x += sizeOf(node.id).width + 40;
+    });
+  }
+  return positions;
+}
 
 const SUBJECT_MAP: { [key: string]: string } = {
   'math': 'math',
@@ -681,75 +722,6 @@ useEffect(() => {
     return () => clearTimeout(timer);
   }, [searchQuery, handleSearch]);
 
-  const forceDirectedLayout = (nodes: Node[], edges: Edge[], spacing: number = 360) => {
-    const positions: { x: number; y: number }[] = [];
-    const width = Math.max(1000, nodes.length * 200);
-    const height = Math.max(800, nodes.length * 150);
-
-    const cols = Math.ceil(Math.sqrt(nodes.length));
-    nodes.forEach((_, index) => {
-      const row = Math.floor(index / cols);
-      const col = index % cols;
-      positions.push({
-        x: col * spacing + (Math.random() * 50 - 25),
-        y: row * spacing + (Math.random() * 50 - 25),
-      });
-    });
-
-    const iterations = 50;
-    for (let i = 0; i < iterations; i++) {
-      for (let j = 0; j < nodes.length; j++) {
-        for (let k = j + 1; k < nodes.length; k++) {
-          const dx = positions[k].x - positions[j].x;
-          const dy = positions[k].y - positions[j].y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          if (distance < spacing) {
-            const force = (spacing - distance) / distance;
-            const moveX = dx * force * 0.1;
-            const moveY = dy * force * 0.1;
-            positions[k].x += moveX;
-            positions[k].y += moveY;
-            positions[j].x -= moveX;
-            positions[j].y -= moveY;
-          }
-        }
-      }
-
-      edges.forEach(edge => {
-        const sourceIndex = nodes.findIndex(n => n.id === edge.source);
-        const targetIndex = nodes.findIndex(n => n.id === edge.target);
-        if (sourceIndex >= 0 && targetIndex >= 0) {
-          const dx = positions[targetIndex].x - positions[sourceIndex].x;
-          const dy = positions[targetIndex].y - positions[sourceIndex].y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          if (distance > spacing) {
-            const force = (distance - spacing) / distance;
-            const moveX = dx * force * 0.05;
-            const moveY = dy * force * 0.05;
-            positions[sourceIndex].x += moveX;
-            positions[sourceIndex].y += moveY;
-            positions[targetIndex].x -= moveX;
-            positions[targetIndex].y -= moveY;
-          }
-        }
-      });
-    }
-
-    const minX = Math.min(...positions.map(p => p.x));
-    const maxX = Math.max(...positions.map(p => p.x));
-    const minY = Math.min(...positions.map(p => p.y));
-    const maxY = Math.max(...positions.map(p => p.y));
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-
-    positions.forEach(pos => {
-      pos.x = pos.x - centerX + width / 2;
-      pos.y = pos.y - centerY + height / 2;
-    });
-
-    return positions;
-  };
-
   // Graph structure: labels, colors, sizes and positions. Depends on the graph data only,
   // so quiz answers, edits and search never re-run the layout. Styling is layered on below.
   const baseGraph = useMemo((): BaseGraph | null => {
@@ -799,10 +771,6 @@ useEffect(() => {
       { scale: 'log' }
     );
 
-    const allWidths = [...sizes.values()].map(s => s.width).sort((a, b) => a - b);
-    const medianWidth = allWidths[Math.floor(allWidths.length / 2)] ?? 200;
-    const layoutSpacing = Math.max(360, medianWidth + 100);
-
     const connectedNodeIds = new Set<string>();
     safeEdges.forEach(edge => {
       connectedNodeIds.add(edge.source);
@@ -851,7 +819,7 @@ useEffect(() => {
           name: node.properties.name || undefined,
         });
 
-        const size = sizes.get(node.id) ?? { width: 200, height: 70 };
+        const size = sizes.get(node.id) ?? DEFAULT_NODE_SIZE;
         return {
           id: node.id,
           type: 'default',
@@ -885,13 +853,22 @@ useEffect(() => {
       validNodeIds.has(edge.source) && validNodeIds.has(edge.target)
     );
 
-    const nodePositions = forceDirectedLayout(processedNodes, validEdges, layoutSpacing);
-    processedNodes.forEach((node, index) => {
-      node.position = nodePositions[index];
+    const nodePositions = layoutRadially(processedNodes, graphTree, sizes);
+    processedNodes.forEach(node => {
+      node.position = nodePositions.get(node.id) ?? { x: 0, y: 0 };
     });
 
     return { subject, nodes: processedNodes, edges: validEdges, confidenceKeys, nodeTypes };
-  }, [data]);
+  }, [data, graphTree]);
+
+  // The center and its nearest rings, for the first view of each graph
+  const initialFocusNodes = useMemo(() => {
+    if (!baseGraph) return [];
+    const rendered = new Set(baseGraph.nodes.map(node => node.id));
+    return graphTree.order
+      .filter(id => rendered.has(id) && (graphTree.nodes.get(id)?.depth ?? Infinity) <= INITIAL_FOCUS_DEPTH)
+      .map(id => ({ id }));
+  }, [baseGraph, graphTree]);
 
   // Styling layers, each its own piece of state, combined in one place
   const confidenceScores = useMemo(
@@ -938,6 +915,18 @@ useEffect(() => {
       });
     });
   }, [baseGraph, styledGraph, setNodes, setEdges]);
+
+  // Zoom to the center's nearest rings once per graph, after its nodes reach React Flow
+  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const fittedBaseRef = useRef<BaseGraph | null>(null);
+  useEffect(() => {
+    if (!flowInstance || !baseGraph || fittedBaseRef.current === baseGraph || initialFocusNodes.length === 0) return;
+    fittedBaseRef.current = baseGraph;
+    const frame = requestAnimationFrame(() => {
+      flowInstance.fitView({ nodes: initialFocusNodes, padding: 0.2, minZoom: 0.1, maxZoom: 1, duration: 600 });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [flowInstance, baseGraph, initialFocusNodes]);
 
 
   // Show loading/empty state
@@ -1148,8 +1137,7 @@ useEffect(() => {
         onNodeClick={handleNodeClick}
         onPaneClick={clearActivePath}
         nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.5, minZoom: 0.1, maxZoom: 1, duration: 800 }}
+        onInit={setFlowInstance}
         minZoom={0.1}
         maxZoom={4}
         defaultViewport={{ x: 0, y: 0, zoom: 0.2 }}
