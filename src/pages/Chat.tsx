@@ -1,6 +1,6 @@
 //Chat.tsx
 import React, { useState, useEffect, useRef, ChangeEvent, useCallback } from 'react';
-import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File, Trash2, Pencil, Check, Home, Settings, UserCircle } from 'lucide-react';
+import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File, Trash2, Pencil, Check, Home, Settings, UserCircle, ClipboardList } from 'lucide-react';
 import {
   Panel,
   PanelGroup,
@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import GraphVisualization from '../components/GraphVisualization';
 import { API_BASE_URL } from '../config/api';
+import { clearQuiz, readQuiz } from '../lib/quizState';
 
 interface Message {
   id: string;
@@ -21,14 +22,6 @@ interface Message {
     type: string;
     url: string;
   };
-  isQuestion?: boolean;
-  questionData?: {
-    question: string;
-    correctAnswer: string;
-    conceptId: string;
-    questionIndex?: number;
-    totalQuestions?: number;
-  };
 }
 
 interface Chat {
@@ -38,16 +31,6 @@ interface Chat {
   timestamp: Date;
   messages: Message[];
   graph_id?: string;
-}
-
-interface QAPair {
-  question: string;
-  answer: string;
-  conceptId: string;
-  concept_id?: string; // Alternative field name from Python AI server
-  topicId?: string; // Alternative field name
-  topic_id?: string; // Alternative field name
-  id?: string; // Generic ID field (used as fallback if conceptId is empty)
 }
 
 // Add interface for concept progress
@@ -67,12 +50,9 @@ function App() {
   const [progressMessage, setProgressMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [graphData, setGraphData] = useState<any>(null);
-  const [qaData, setQaData] = useState<QAPair[]>([]);
   const [conceptProgress, setConceptProgress] = useState<ConceptProgress[]>([]); // Add state for concept progress
   const [quizLength, setQuizLength] = useState<5 | 10 | 15>(5);
   const [questionFormat, setQuestionFormat] = useState<'mixed' | 'mcq' | 'true-false' | 'open-ended'>('mixed');
-  const [shouldStartQuiz, setShouldStartQuiz] = useState(false);
-  const [quizCompleted, setQuizCompleted] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -83,10 +63,6 @@ function App() {
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [loadingDots, setLoadingDots] = useState('');
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
-  const [isAnswering, setIsAnswering] = useState<boolean>(false);
-  const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
-  const [userAnswers, setUserAnswers] = useState<string[]>([]);
 
   const navigate = useNavigate();
   
@@ -94,6 +70,7 @@ function App() {
   const [chatsLoading, setChatsLoading] = useState(true);
 
   const currentChat = chats.find(chat => chat.id === currentChatId) ?? null;
+  const savedQuiz = currentChatId ? readQuiz(currentChatId) : null;
   const [input, setInput] = useState('');
   const [isGraphLoading, setIsGraphLoading] = useState(false);
 
@@ -107,35 +84,6 @@ function App() {
       // ignore and fallback
     }
     return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  };
-
-  // Local persistence helpers for quiz state per chat
-  const quizStateKey = (chatId: string) => `quizState:${chatId}`;
-
-  const saveQuizState = (chatId: string, state: any) => {
-    try {
-      localStorage.setItem(quizStateKey(chatId), JSON.stringify(state));
-    } catch (err) {
-      console.warn('Failed to save quiz state', err);
-    }
-  };
-
-  const loadQuizState = (chatId: string) => {
-    try {
-      const raw = localStorage.getItem(quizStateKey(chatId));
-      return raw ? JSON.parse(raw) : null;
-    } catch (err) {
-      console.warn('Failed to load quiz state', err);
-      return null;
-    }
-  };
-
-  const clearQuizState = (chatId: string) => {
-    try {
-      localStorage.removeItem(quizStateKey(chatId));
-    } catch (err) {
-      console.warn('Failed to clear quiz state', err);
-    }
   };
 
   const scrollToBottom = () => {
@@ -315,7 +263,6 @@ function App() {
 
       setSelectedFile(file);
       setGraphData(null);
-      setQaData([]);
       try {
         setIsProcessingFile(true);
         const formData = new FormData();
@@ -469,9 +416,6 @@ function App() {
           await fetchGraphData(responseData.graph_id, currentChatId);
         }
         
-        // Show the "Start Quiz" button after document upload
-        // User can now choose quiz settings before starting
-        setShouldStartQuiz(true);
 
       } catch (error) {
         // If the user cancelled, just silently exit — no error message needed
@@ -553,12 +497,6 @@ function App() {
     const trimmedInput = input.trim();
     if (!trimmedInput) return;
 
-    // --- Start of Fix ---
-
-  // 1. Capture current messages BEFORE updating the chat state.
-  // `currentChat` is from the current render, so its `messages` array is what's currently displayed.
-  const currentMessages = currentChat?.messages ?? [];
-
     // 2. Create the user message object.
     const userMessage: Message = {
       id: generateMessageId(),
@@ -594,283 +532,7 @@ function App() {
       console.error('Error saving message:', error);
     }
 
-    // 6. Now, decide what to do based on whether we are in a quiz.
-    // --- End of Fix ---
-
-    // Prefer authoritative quiz state over inferring from chat history
-    const currentQA = qaData[currentQuestionIndex];
-    if (isAnswering && currentQA) {
-      try {
-        setIsTyping(true);
-        console.log('[Quiz] Submitting answer', {
-          isAnswering,
-          currentQuestionIndex,
-          totalQuestions: qaData.length,
-          question: currentQA.question,
-          expectedAnswer: currentQA.answer,
-          userAnswer: trimmedInput
-        });
-        // Simple retry detection: count how many times this question appears as a question message
-        const isRetry = currentMessages.filter(m => m.isQuestion && m.questionData?.question === currentQA.question).length > 1;
-
-        console.log('Submitting answer for conceptId:', currentQA.conceptId);
-        
-        const response = await axios.post(`${API_BASE_URL}/api/verify-answer`, {
-          question: currentQA.question,
-          userAnswer: trimmedInput,
-          correctAnswer: currentQA.answer,
-          conceptId: currentQA.conceptId,
-          isRetry: isRetry,
-          graph_id: currentChat?.graph_id
-        }, { withCredentials: true });
-
-        const verificationResult = response.data;
-        console.log('[Quiz] Verification raw result:', verificationResult);
-
-        // Defensive shape check
-        const hasIsCorrect = typeof verificationResult?.isCorrect === 'boolean';
-        const hasFeedback = typeof verificationResult?.feedback === 'string' && verificationResult.feedback.length > 0;
-        if (!hasIsCorrect || !hasFeedback) {
-          const diagnosticContent = `Verification response missing expected keys.\nExpected: { isCorrect: boolean, feedback: string, followUpQuestion?: string }\nReceived: ${JSON.stringify(verificationResult, null, 2)}`;
-          const diagnosticMessage: Message = {
-            id: generateMessageId(),
-            content: diagnosticContent,
-            sender: 'ai',
-            timestamp: new Date()
-          };
-          setChats(prevChats => prevChats.map(chat =>
-            chat.id === currentChatId
-              ? { ...chat, messages: [...chat.messages, diagnosticMessage] }
-              : chat
-          ));
-          try {
-            await axios.post(`${API_BASE_URL}/chat/message`, {
-              chat_id: currentChatId,
-              sender: 'ai',
-              text: diagnosticMessage.content,
-            }, { withCredentials: true });
-          } catch (persistErr) {
-            console.error('[Quiz] Failed to persist diagnostic message', persistErr);
-          }
-          return; // Abort normal flow
-        }
-        
-        console.log('Verification result:', verificationResult);
-        
-        // Refresh concept progress after answering
-        await fetchConceptProgress();
-
-        if (verificationResult.isCorrect) {
-          // Track this answer
-          setUserAnswers(prev => [...prev, trimmedInput]);
-          // Persist updated answers
-          if (currentChatId) {
-            const existing = loadQuizState(currentChatId) || {};
-            const updated = {
-              ...(existing || {}),
-              userAnswers: [...(existing.userAnswers || []), trimmedInput],
-            };
-            saveQuizState(currentChatId, updated);
-          }
-          
-          if (qaData.length > currentQuestionIndex + 1) {
-            const nextQuestionMessage: Message = {
-              id: generateMessageId(),
-              content: `Correct! Let's move on to the next question:\n\n${qaData[currentQuestionIndex + 1].question}`,
-              sender: 'ai',
-              timestamp: new Date(),
-              isQuestion: true,
-              questionData: {
-                question: qaData[currentQuestionIndex + 1].question,
-                correctAnswer: qaData[currentQuestionIndex + 1].answer,
-                conceptId: qaData[currentQuestionIndex + 1].conceptId,
-                questionIndex: currentQuestionIndex + 1,
-                totalQuestions: qaData.length
-              }
-            };
-
-            const feedbackMessage: Message = {
-              id: generateMessageId(),
-              content: verificationResult.feedback,
-              sender: 'ai',
-              timestamp: new Date(),
-            };
-
-            setChats(prevChats => prevChats.map(chat =>
-              chat.id === currentChatId
-                ? {
-                    ...chat,
-                    messages: [...chat.messages, feedbackMessage, nextQuestionMessage],
-                  }
-                : chat
-            ));
-
-            await axios.post(`${API_BASE_URL}/chat/message`, {
-              chat_id: currentChatId,
-              sender: 'ai',
-              text: feedbackMessage.content,
-            }, { withCredentials: true });
-
-            await axios.post(`${API_BASE_URL}/chat/message`, {
-              chat_id: currentChatId,
-              sender: 'ai',
-              text: nextQuestionMessage.content,
-            }, { withCredentials: true });
-
-            setCurrentQuestionIndex(prev => prev + 1);
-            // update persisted index
-            if (currentChatId) {
-              const existing = loadQuizState(currentChatId) || {};
-              existing.currentQuestionIndex = (existing.currentQuestionIndex || 0) + 1;
-              saveQuizState(currentChatId, existing);
-            }
-            console.log('[Quiz] Advanced to next question index', currentQuestionIndex + 1);
-          } else {
-            const finalMessage: Message = {
-              id: generateMessageId(),
-              content: `${verificationResult.feedback}\n\nCongratulations! You've successfully answered all the questions. You have a good understanding of the material.`,
-              sender: 'ai',
-              timestamp: new Date(),
-            };
-
-            setChats(prevChats => prevChats.map(chat =>
-              chat.id === currentChatId
-                ? {
-                    ...chat,
-                    messages: [...chat.messages, finalMessage],
-                  }
-                : chat
-            ));
-
-            await axios.post(`${API_BASE_URL}/chat/message`, {
-              chat_id: currentChatId,
-              sender: 'ai',
-              text: finalMessage.content,
-            }, { withCredentials: true });
-
-            try {
-              // Add the final answer to userAnswers
-              const allAnswers = [...userAnswers, trimmedInput];
-              
-              // Filter out questions with empty conceptIds
-              const validQaData = qaData.filter((qa, index) => {
-                const hasConceptId = qa.conceptId && qa.conceptId.trim() !== '';
-                if (!hasConceptId) {
-                  console.warn(`⚠️ Skipping question ${index + 1} - empty conceptId:`, qa);
-                }
-                return hasConceptId;
-              });
-
-              if (validQaData.length === 0) {
-                console.error('❌ Cannot save quiz history: All questions have empty conceptIds!');
-                console.error('Raw qaData:', qaData);
-              } else {
-                const quizHistoryData = {
-                concepts: validQaData.map((qa, idx) => ({
-                  conceptID: qa.conceptId, // Use the actual conceptId from the question
-                  name: `Question ${idx + 1} Concept`
-                })),
-                  questions: validQaData.map((qa, index) => {
-                    const originalIndex = qaData.indexOf(qa);
-                    return {
-                      questionText: qa.question,
-                      userAnswer: allAnswers[originalIndex] || 'No answer provided',
-                      correctAnswer: qa.answer,
-                      explanation: `This question tests understanding of the material covered in the graph.`,
-                      timestamp: new Date().toISOString()
-                    };
-                  })
-                };
-
-                console.log('💾 Saving quiz history with conceptIds:', validQaData.map(qa => qa.conceptId));
-                console.log(`📊 Valid questions: ${validQaData.length}/${qaData.length}`);
-                
-                try {
-                  const response = await axios.post(`${API_BASE_URL}/api/quiz-history`, quizHistoryData, { 
-                    withCredentials: true 
-                  });
-                  
-                  console.log('✅ Quiz history saved successfully:', response.data);
-                  console.log(`✅ Progress records created: ${response.data.progressRecordsCreated || 0}`);
-                } catch (error: any) {
-                  console.error('❌ Error saving quiz history:', error);
-                  console.error('Error details:', {
-                    message: error.message,
-                    status: error.response?.status,
-                    data: error.response?.data
-                  });
-                }
-              }
-            } catch (error) {
-              console.error('❌ Error in quiz completion:', error);
-            }
-
-            setIsAnswering(false);
-            console.log('[Quiz] Quiz completed successfully');
-            // Allow the user to start a new quiz after finishing the previous one
-            setShouldStartQuiz(true);
-            setQuizCompleted(true);
-            // Clear persisted quiz state when finished
-            if (currentChatId) clearQuizState(currentChatId);
-          }
-        } else {
-          const feedbackMessage: Message = {
-            id: generateMessageId(),
-            content: `${verificationResult.feedback}\n\n${verificationResult.followUpQuestion}\n\nTry answering the original question again:`,
-            sender: 'ai',
-            timestamp: new Date(),
-            isQuestion: true,
-            questionData: {
-              question: currentQA.question,
-              correctAnswer: currentQA.answer,
-              conceptId: currentQA.conceptId,
-              questionIndex: currentQuestionIndex,
-              totalQuestions: qaData.length
-            }
-          };
-
-          setChats(prevChats => prevChats.map(chat =>
-            chat.id === currentChatId
-              ? {
-                  ...chat,
-                  messages: [...chat.messages, feedbackMessage],
-                }
-              : chat
-          ));
-
-          await axios.post(`${API_BASE_URL}/chat/message`, {
-            chat_id: currentChatId,
-            sender: 'ai',
-            text: feedbackMessage.content,
-          }, { withCredentials: true });
-        }
-      } catch (error) {
-        console.error('Error verifying answer:', error);
-        const errorMessage: Message = {
-          id: generateMessageId(),
-          content: "Sorry, I encountered an error while verifying your answer. Please try again.",
-          sender: 'ai',
-          timestamp: new Date(),
-        };
-
-        setChats(prevChats => prevChats.map(chat =>
-          chat.id === currentChatId
-            ? {
-                ...chat,
-                messages: [...chat.messages, errorMessage],
-              }
-            : chat
-        ));
-
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'ai',
-          text: errorMessage.content,
-        }, { withCredentials: true });
-      } finally {
-        setIsTyping(false);
-      }
-    } else if (currentChat?.graph_id) {
+    if (currentChat?.graph_id) {
     try {
       setIsTyping(true);
         console.log('[Conversation] Sending request', { message: trimmedInput, graph_id: currentChat.graph_id });
@@ -979,191 +641,9 @@ function App() {
     }
   };
 
-  const handleSkip = async () => {
-    const currentQA = qaData[currentQuestionIndex];
-    if (!isAnswering || !currentQA) return;
-
-    try {
-      setIsTyping(true);
-      console.log('[Quiz] Skipping question', {
-        currentQuestionIndex,
-        totalQuestions: qaData.length,
-        question: currentQA.question,
-        conceptId: currentQA.conceptId
-      });
-
-      // Treat skip as incorrect answer for confidence tracking
-      await axios.post(`${API_BASE_URL}/api/verify-answer`, {
-        question: currentQA.question,
-        userAnswer: 'SKIPPED',
-        correctAnswer: currentQA.answer,
-        conceptId: currentQA.conceptId,
-        isRetry: false,
-        graph_id: currentChat?.graph_id
-      }, { withCredentials: true });
-
-      // Track skipped answer
-      setUserAnswers(prev => [...prev, 'SKIPPED']);
-      if (currentChatId) {
-        const existing = loadQuizState(currentChatId) || {};
-        const updated = {
-          ...existing,
-          userAnswers: [...(existing.userAnswers || []), 'SKIPPED'],
-        };
-        saveQuizState(currentChatId, updated);
-      }
-
-      // Refresh concept progress after skipping
-      await fetchConceptProgress();
-
-      // Add skip message
-      const skipMessage: Message = {
-        id: generateMessageId(),
-        content: `You skipped this question. The correct answer was: ${currentQA.answer}\n\nLet's move on to the next question.`,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-
-      if (qaData.length > currentQuestionIndex + 1) {
-        const nextQuestionMessage: Message = {
-          id: generateMessageId(),
-          content: `Question ${currentQuestionIndex + 2} of ${qaData.length}:\n\n${qaData[currentQuestionIndex + 1].question}`,
-          sender: 'ai',
-          timestamp: new Date(),
-          isQuestion: true,
-          questionData: {
-            question: qaData[currentQuestionIndex + 1].question,
-            correctAnswer: qaData[currentQuestionIndex + 1].answer,
-            conceptId: qaData[currentQuestionIndex + 1].conceptId,
-            questionIndex: currentQuestionIndex + 1,
-            totalQuestions: qaData.length
-          }
-        };
-
-        setChats(prevChats => prevChats.map(chat =>
-          chat.id === currentChatId
-            ? {
-                ...chat,
-                messages: [...chat.messages, skipMessage, nextQuestionMessage],
-              }
-            : chat
-        ));
-
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'ai',
-          text: skipMessage.content,
-        }, { withCredentials: true });
-
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'ai',
-          text: nextQuestionMessage.content,
-        }, { withCredentials: true });
-
-        setCurrentQuestionIndex(prev => prev + 1);
-        if (currentChatId) {
-          const existing = loadQuizState(currentChatId) || {};
-          existing.currentQuestionIndex = (existing.currentQuestionIndex || 0) + 1;
-          saveQuizState(currentChatId, existing);
-        }
-      } else {
-        // Quiz completed
-        const finalMessage: Message = {
-          id: generateMessageId(),
-          content: `${skipMessage.content}\n\nYou've completed all the questions.`,
-          sender: 'ai',
-          timestamp: new Date(),
-        };
-
-        setChats(prevChats => prevChats.map(chat =>
-          chat.id === currentChatId
-            ? {
-                ...chat,
-                messages: [...chat.messages, finalMessage],
-              }
-            : chat
-        ));
-
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'ai',
-          text: finalMessage.content,
-        }, { withCredentials: true });
-
-        // Save quiz history
-        try {
-          const allAnswers = [...userAnswers, 'SKIPPED'];
-          const validQaData = qaData.filter((qa) => qa.conceptId && qa.conceptId.trim() !== '');
-          
-          if (validQaData.length > 0) {
-            const quizHistoryData = {
-              concepts: validQaData.map((qa, idx) => ({
-                conceptID: qa.conceptId,
-                name: `Question ${idx + 1} Concept`
-              })),
-              questions: validQaData.map((qa, index) => {
-                const originalIndex = qaData.indexOf(qa);
-                return {
-                  questionText: qa.question,
-                  userAnswer: allAnswers[originalIndex] || 'SKIPPED',
-                  correctAnswer: qa.answer,
-                  explanation: `This question tests understanding of the material covered in the graph.`,
-                  timestamp: new Date().toISOString()
-                };
-              })
-            };
-
-            await axios.post(`${API_BASE_URL}/api/quiz-history`, quizHistoryData, { 
-              withCredentials: true 
-            });
-            console.log('✅ Quiz history saved with skipped question');
-          }
-        } catch (error) {
-          console.error('❌ Error saving quiz history:', error);
-        }
-
-        setIsAnswering(false);
-        setShouldStartQuiz(true);
-        setQuizCompleted(true);
-        if (currentChatId) clearQuizState(currentChatId);
-      }
-    } catch (error: any) {
-      console.error('[Quiz] Error skipping question:', error);
-      const errorMessage: Message = {
-        id: generateMessageId(),
-        content: 'Sorry, there was an error processing your skip. Please try again.',
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-
-      setChats(prevChats => prevChats.map(chat =>
-        chat.id === currentChatId
-          ? {
-              ...chat,
-              messages: [...chat.messages, errorMessage],
-            }
-          : chat
-      ));
-
-      await axios.post(`${API_BASE_URL}/chat/message`, {
-        chat_id: currentChatId,
-        sender: 'ai',
-        text: errorMessage.content,
-      }, { withCredentials: true });
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
   const handleChatSelect = (chatId: string) => {
     // Clear graph data immediately when switching chats to prevent showing wrong graph
     setGraphData(null);
-    setQaData([]);
-    setIsAnswering(false);
-    setCurrentQuestionIndex(0);
-    setUserAnswers([]);
-    setQuizCompleted(false);
     setCurrentChatId(chatId);
   };
 
@@ -1171,14 +651,8 @@ function App() {
     try {
       console.log('Creating new chat...');
       
-      // Clear all graph and quiz state immediately when creating new chat
+      // Clear graph state immediately when creating new chat
       setGraphData(null);
-      setQaData([]);
-      setIsAnswering(false);
-      setCurrentQuestionIndex(0);
-      setUserAnswers([]);
-      setQuizCompleted(false);
-      setIsGeneratingQuestions(false);
   
       const response = await axios.post(`${API_BASE_URL}/chat/new`, {}, { withCredentials: true });
 
@@ -1294,13 +768,6 @@ function App() {
     }
   }, [chats, currentChatId]);
 
-  // DEBUG: Log when isAnswering changes
-  useEffect(() => {
-    console.log('🟢 isAnswering state changed:', isAnswering);
-    console.log('🟢 qaData length:', qaData.length);
-    console.log('🟢 Should show End Quiz button:', isAnswering);
-  }, [isAnswering, qaData]);
-
   const getFileIcon = (type: string) => {
     if (type.startsWith('image/')) {
       return <Image className="w-5 h-5" />;
@@ -1308,66 +775,6 @@ function App() {
       return <FileText className="w-5 h-5" />;
     }
     return <File className="w-5 h-5" />;
-  };
-
-  const formatQuestion = (text: string): React.ReactNode => {
-    if (!text) return text;
-
-    const lines = text.split('\n');
-    const formattedLines: React.ReactNode[] = [];
-
-    lines.forEach((line, lineIndex) => {
-      const multipleChoicePattern = /\b([A-Z])[\)\.]\s+([^A-Z\)\.]+?)(?=\s+[A-Z][\)\.]|$)/g;
-      let matches = Array.from(line.matchAll(multipleChoicePattern));
-      
-      if (matches.length < 2) {
-        const altPattern = /\b([A-Z])[\)\.]([^A-Z\)\.]+?)(?=\s*[A-Z][\)\.]|$)/g;
-        matches = Array.from(line.matchAll(altPattern));
-      }
-      
-      if (matches.length >= 2) {
-        const firstMatch = matches[0];
-        const firstMatchIndex = line.indexOf(firstMatch[0]);
-        const questionPart = line.substring(0, firstMatchIndex).trim();
-        
-        if (questionPart) {
-          formattedLines.push(
-            <div key={`q-${lineIndex}`} className="mb-3 font-medium">
-              {questionPart}
-            </div>
-          );
-        }
-
-        matches.forEach((match, matchIndex) => {
-          const choiceLetter = match[1];
-          const choiceText = match[2].trim();
-          formattedLines.push(
-            <div key={`choice-${lineIndex}-${matchIndex}`} className="ml-1 mb-2 px-3 py-2 rounded-lg border border-slate-200/80 bg-slate-50/50 hover:bg-teal-50 hover:border-teal-300 transition-all duration-150 cursor-default flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-bold flex-shrink-0">{choiceLetter}</span>
-              <span className="text-sm">{choiceText}</span>
-            </div>
-          );
-        });
-      } else {
-        if (line.trim()) {
-          if (line.match(/Question\s+\d+\s+of\s+\d+/i)) {
-            formattedLines.push(
-              <div key={`q-header-${lineIndex}`} className="mb-3 font-semibold text-teal-600">
-                {line}
-              </div>
-            );
-          } else {
-            formattedLines.push(
-              <div key={`line-${lineIndex}`} className={lineIndex > 0 ? 'mt-2' : ''}>
-                {line}
-              </div>
-            );
-          }
-        }
-      }
-    });
-
-    return formattedLines.length > 0 ? <div className="space-y-1">{formattedLines}</div> : text;
   };
 
   const handleRenameChat = async (chatId: string) => {
@@ -1471,188 +878,31 @@ function App() {
     </PanelResizeHandle>
   );
 
-  useEffect(() => {
-    const currentChat = chats.find(chat => chat.id === currentChatId);
-    
-    // Check if there's already quiz state for this chat (user may have ended it or is in progress)
-    const existingQuizState = currentChat ? loadQuizState(currentChat.id) : null;
+  const startQuiz = () => {
+    if (!currentChat?.graph_id) return;
+    if (savedQuiz?.completed) clearQuiz(currentChatId);
+    const query = new URLSearchParams({
+      chatId: currentChatId,
+      graphId: currentChat.graph_id,
+      title: currentChat.title,
+      length: String(quizLength),
+      format: questionFormat,
+    });
+    navigate(`/quiz?${query.toString()}`);
+  };
 
-    if (currentChat?.graph_id) {
-      // Check if there's an existing quiz in progress
-      if (existingQuizState) {
-        // Restore quiz state if it exists
-        setShouldStartQuiz(false);
-      } else {
-        // Show start quiz button - user must manually start the quiz
-        setShouldStartQuiz(true);
-      }
-    } else {
-      latestGraphRequestRef.current = null;
-      setIsGraphLoading(false);
-      setGraphData(null);
-      setQaData([]);
-      setIsAnswering(false);
-      setShouldStartQuiz(false);
-    }
-
-    return () => {
-      setIsGeneratingQuestions(false);
-    };
-  }, [currentChatId, chats]);
-
-  const startQuiz = async () => {
-      if (isGeneratingQuestions || !currentChat?.graph_id) return;
-    // clear completed flag when starting a new quiz
-    setQuizCompleted(false);
-      
-      try {
-        setIsGeneratingQuestions(true);
-      const qaResponse = await axios.get(
-        `${API_BASE_URL}/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}&length=${quizLength}&format=${questionFormat}`,
-        { withCredentials: true }
-      );
-        const qaResponseData = qaResponse.data;
-
-        if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
-          console.log('🔍 Raw QA Pairs from API:', qaResponseData.qa_pairs);
-          console.log('🔍 First QA Pair structure:', qaResponseData.qa_pairs[0]);
-          console.log('🔍 COMPLETE First QA Pair (JSON):', JSON.stringify(qaResponseData.qa_pairs[0], null, 2));
-          console.log('🔍 All keys in first QA pair:', Object.keys(qaResponseData.qa_pairs[0]));
-          
-          const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair, idx: number) => {
-            const conceptId = p.conceptId || p.concept_id || p.topicId || p.topic_id || p.id || '';
-            const sourceField = p.conceptId ? 'conceptId' : 
-                               p.concept_id ? 'concept_id' : 
-                               p.topicId ? 'topicId' : 
-                               p.topic_id ? 'topic_id' : 
-                               p.id ? 'id' : 'NONE';
-            
-            console.log(`📝 Question ${idx + 1} - conceptId extracted from field: ${sourceField}, value: ${conceptId}`);
-            
-            return {
-              question: p.question,
-              answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
-              conceptId: conceptId
-            };
-          });
-          
-          console.log('🔍 Normalized pairs with conceptIds:', normalizedPairs.map((p: QAPair) => ({ q: p.question.substring(0, 50), conceptId: p.conceptId })));
-
-          setQaData(normalizedPairs);
-          setCurrentQuestionIndex(0);
-          setIsAnswering(true);
-        setUserAnswers([]); // Reset user answers for new quiz
-        setShouldStartQuiz(false); // Hide the start button
-        // Persist quiz state so navigating away doesn't lose it
-        if (currentChatId) {
-          saveQuizState(currentChatId, {
-            qaData: normalizedPairs,
-            currentQuestionIndex: 0,
-            userAnswers: [],
-            isAnswering: true,
-            quizCompleted: false,
-          });
-        }
-          const firstQuestionMessage: Message = {
-          id: generateMessageId(),
-            content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${normalizedPairs.length}:\n\n${normalizedPairs[0].question}`,
-            sender: 'ai',
-            timestamp: new Date(),
-            isQuestion: true,
-            questionData: {
-              question: normalizedPairs[0].question,
-              correctAnswer: normalizedPairs[0].answer,
-              conceptId: normalizedPairs[0].conceptId,
-              questionIndex: 0,
-              totalQuestions: normalizedPairs.length
-            }
-          };
-
-        // Remove any leftover question messages from previous quizzes before adding the new first question.
-            setChats(prevChats => prevChats.map(chat =>
-              chat.id === currentChatId
-                ? {
-                    ...chat,
-                messages: [...chat.messages.filter(m => !m.isQuestion), firstQuestionMessage],
-                  }
-                : chat
-            ));
-
-            await axios.post(`${API_BASE_URL}/chat/message`, {
-              chat_id: currentChatId,
-              sender: 'ai',
-              text: firstQuestionMessage.content,
-            }, { withCredentials: true });
-        }
-      } catch (error) {
-        console.error('Error fetching QA data:', error);
-      } finally {
-          setIsGeneratingQuestions(false);
-      }
-    };
-
-  // Add useEffect to load graph when chat changes
-  // Add useEffect to load graph and restore quiz state when chat changes
+  // Load the graph when the chat changes
   useEffect(() => {
       const currentChat = chats.find(chat => chat.id === currentChatId);
     if (currentChat?.graph_id) {
       setGraphData(null);
       setIsGraphLoading(true);
       fetchGraphData(currentChat.graph_id, currentChatId);
-
-          // Try to restore persisted quiz state first
-          const persisted = currentChatId ? loadQuizState(currentChatId) : null;
-          const hasExistingQuestions = currentChat.messages.some(m => m.isQuestion);
-
-          if (persisted && persisted.qaData) {
-            // Restore persisted state
-            setQaData(persisted.qaData);
-            setCurrentQuestionIndex(persisted.currentQuestionIndex || 0);
-            setUserAnswers(persisted.userAnswers || []);
-            setIsAnswering(!!persisted.isAnswering);
-            setQuizCompleted(!!persisted.quizCompleted);
-            setShouldStartQuiz(false);
-          } else if (hasExistingQuestions && qaData.length === 0) {
-              // Reconstruct quiz state from chat message history (do not call startQuiz which requests new questions)
-              const reconstructed: QAPair[] = currentChat.messages
-                .filter(m => m.isQuestion && m.questionData)
-                .map(m => ({ question: m.questionData!.question, answer: m.questionData!.correctAnswer, conceptId: m.questionData!.conceptId }));
-
-              if (reconstructed.length > 0) {
-                setQaData(reconstructed);
-                const lastQuestion = currentChat.messages.slice().reverse().find(m => m.isQuestion && m.questionData);
-                const lastIndex = lastQuestion?.questionData?.questionIndex ?? 0;
-                setCurrentQuestionIndex(lastIndex);
-                setIsAnswering(true);
-                setShouldStartQuiz(false);
-                // Persist reconstructed state for durability
-                if (currentChatId) {
-                  saveQuizState(currentChatId, {
-                    qaData: reconstructed,
-                    currentQuestionIndex: lastIndex,
-                    userAnswers: [],
-                    isAnswering: true,
-                    quizCompleted: false,
-                  });
-                }
-              }
-      } else if (!hasExistingQuestions) {
-        // If there are no questions in history, reset the quiz state and show the Start Quiz button.
-        setQaData([]);
-        setIsAnswering(false);
-        // If this chat has a graph, allow starting a quiz from the UI (e.g. after returning from Profile).
-        if (currentChat?.graph_id) {
-          setShouldStartQuiz(true);
-        }
-      }
     } else {
       // This is a chat without a document/graph, so reset everything.
       latestGraphRequestRef.current = null;
       setIsGraphLoading(false);
       setGraphData(null);
-      setQaData([]);
-      setIsAnswering(false);
-      setShouldStartQuiz(false);
     }
   }, [currentChatId, currentChat?.graph_id]); // Dependency array ensures this runs when the chat changes
 
@@ -1832,6 +1082,10 @@ function App() {
             <Home className="w-5 h-5" />
             {!isSidebarCollapsed && <span className="text-sm">Home</span>}
           </button>
+          <button onClick={() => navigate('/quiz')} className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200" title="Quizzes">
+            <ClipboardList className="w-5 h-5" />
+            {!isSidebarCollapsed && <span className="text-sm">Quizzes</span>}
+          </button>
           <button onClick={() => navigate('/profile')} className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200" title="Profile">
             <User className="w-5 h-5" />
             {!isSidebarCollapsed && <span className="text-sm">Profile</span>}
@@ -1909,7 +1163,6 @@ function App() {
                     onChange={(e) => setQuizLength(Number(e.target.value) as 5 | 10 | 15)}
                     className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 cursor-pointer bg-white hover:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 transition-all max-w-[9rem]"
                     style={{ zIndex: 101, position: 'relative', pointerEvents: 'auto' }}
-                    disabled={isAnswering}
                   >
                     <option value={5}>5 questions</option>
                     <option value={10}>10 questions</option>
@@ -1925,7 +1178,6 @@ function App() {
                     onChange={(e) => setQuestionFormat(e.target.value as 'mixed' | 'mcq' | 'true-false' | 'open-ended')}
                     className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 cursor-pointer bg-white hover:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 transition-all max-w-[11rem]"
                     style={{ zIndex: 101, position: 'relative', pointerEvents: 'auto' }}
-                    disabled={isAnswering}
                   >
                     <option value="mixed">Mixed (Random)</option>
                     <option value="mcq">Multiple Choice</option>
@@ -1952,104 +1204,29 @@ function App() {
                 
                 
                 
-                {/* Start Quiz button moved to header for better placement */}
-                {shouldStartQuiz && !isAnswering && currentChat?.graph_id && (
+                {currentChat?.graph_id && (
                   <button
                     onClick={startQuiz}
-                    disabled={isGeneratingQuestions}
-                    className={`px-4 py-2 ${isGeneratingQuestions ? 'bg-slate-200 text-slate-500' : 'bg-gradient-to-r from-teal-500 to-teal-600 text-white hover:from-teal-600 hover:to-teal-700 shadow-md shadow-teal-500/20 animate-gentle-pulse'} rounded-lg transition-all duration-200 flex items-center gap-2 font-medium btn-lift`}
-                    title={isGeneratingQuestions ? 'Generating questions...' : 'Start quiz based on this document'}
+                    className="px-4 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white hover:from-teal-600 hover:to-teal-700 shadow-md shadow-teal-500/20 animate-gentle-pulse rounded-lg transition-all duration-200 flex items-center gap-2 font-medium btn-lift"
+                    title="Start quiz based on this document"
                   >
-                    {isGeneratingQuestions ? 'Generating...' : (quizCompleted ? 'Start New Quiz' : 'Start Quiz')}
-                  </button>
-                )}
-                
-                {/* End Quiz button - shows when quiz is active */}
-                {isAnswering && (
-                  <button
-                    onClick={async () => {
-                      console.log('🔴 END QUIZ BUTTON CLICKED!');
-                      console.log('🟡 Resetting quiz state...');
-                      
-                      // Reset all quiz state
-                      setIsAnswering(false);
-                      setQaData([]);
-                      setCurrentQuestionIndex(0);
-                      setUserAnswers([]);
-                      setQuizCompleted(false);
-                      setShouldStartQuiz(true); // Show start quiz button again
-                      
-                      console.log('✅ Quiz state reset! isAnswering=false');
-                      
-                      // Clear persisted quiz state
-                      if (currentChatId) {
-                        clearQuizState(currentChatId);
-                        console.log('✅ Cleared persisted quiz state');
-                      }
-                      
-                      // Add a message to chat indicating quiz was ended
-                      const endMessage: Message = {
-                        id: generateMessageId(),
-                        content: 'Quiz ended. You can start a new quiz anytime by clicking "Start Quiz".',
-                        sender: 'ai',
-                        timestamp: new Date(),
-                      };
-                      
-                      setChats(prevChats => prevChats.map(chat =>
-                        chat.id === currentChatId
-                          ? { ...chat, messages: [...chat.messages, endMessage] }
-                          : chat
-                      ));
-
-                      // Save the end message to backend (consistent with other messages)
-                      try {
-                        await axios.post(`${API_BASE_URL}/chat/message`, {
-                          chat_id: currentChatId,
-                          sender: 'ai',
-                          text: endMessage.content,
-                        }, { withCredentials: true });
-                        console.log('✅ End quiz message saved to backend');
-                      } catch (error) {
-                        console.error('Error saving end quiz message:', error);
-                        // Don't show error to user since quiz state is already cleared locally
-                      }
-                    }}
-                    className="px-4 py-2 bg-red-500 text-white hover:bg-red-600 rounded-lg transition-colors duration-200 flex items-center gap-2 font-medium"
-                    style={{ 
-                      zIndex: 9999, 
-                      position: 'relative', 
-                      pointerEvents: 'auto',
-                      cursor: 'pointer'
-                    }}
-                    title="End the current quiz without finishing"
-                  >
-                    End Quiz
+                    {savedQuiz && !savedQuiz.completed ? 'Resume Quiz' : savedQuiz?.completed ? 'Start New Quiz' : 'Start Quiz'}
                   </button>
                 )}
               </div>
             </div>
 
-            {/* Quiz progress step bar */}
-            {isAnswering && qaData.length > 0 && (
-              <div className="px-4 py-2.5 bg-white/60 backdrop-blur-sm border-b border-slate-200/60">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-xs font-semibold text-slate-600">Question {currentQuestionIndex + 1} of {qaData.length}</span>
-                  <span className="text-xs text-slate-400">({Math.round(((currentQuestionIndex) / qaData.length) * 100)}% complete)</span>
-                </div>
-                <div className="flex gap-1">
-                  {qaData.map((_, idx) => (
-                    <div
-                      key={idx}
-                      className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
-                        idx < currentQuestionIndex
-                          ? 'bg-teal-500'
-                          : idx === currentQuestionIndex
-                          ? 'bg-teal-400 animate-pulse'
-                          : 'bg-slate-200'
-                      }`}
-                    />
-                  ))}
-                </div>
+            {/* Quiz lives on /quiz; chat only links back to it */}
+            {savedQuiz && !savedQuiz.completed && currentChat?.graph_id && (
+              <div className="mx-4 mt-3 px-4 py-2.5 bg-teal-50 border border-teal-200 rounded-lg flex items-center gap-3 text-sm text-teal-800">
+                <ClipboardList className="w-4 h-4 flex-shrink-0" />
+                <span className="flex-1">Quiz in progress · {savedQuiz.results.filter(Boolean).length} of {savedQuiz.qaData.length} answered</span>
+                <button
+                  onClick={startQuiz}
+                  className="px-3 py-1.5 bg-gradient-to-r from-teal-500 to-teal-600 text-white hover:from-teal-600 hover:to-teal-700 rounded-lg font-medium transition-all duration-200"
+                >
+                  Resume quiz
+                </button>
               </div>
             )}
 
@@ -2085,7 +1262,7 @@ function App() {
                       }`}
                     >
                       <div className="text-sm whitespace-pre-wrap leading-relaxed">
-                        {message.isQuestion ? formatQuestion(message.content) : message.content}
+                        {message.content}
                       </div>
                       {message.file && (
                         <div className={`mt-2 p-2 rounded-lg ${
@@ -2139,7 +1316,6 @@ function App() {
                   </div>
                 </div>
               )}
-              {/* Start Quiz button is now located in the header for improved UX */}
               <div ref={messagesEndRef} />
             </div>
 
@@ -2180,7 +1356,7 @@ function App() {
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder={isAnswering ? "Type your answer..." : "Type your message..."}
+                  placeholder="Type your message..."
                   className="flex-1 px-4 py-2 bg-white text-slate-900 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 placeholder-slate-400 transition-all"
                 />
                 <input
@@ -2189,27 +1365,14 @@ function App() {
                   onChange={handleFileSelect}
                   className="hidden"
                 />
-                {!isAnswering && (
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isProcessingFile}
-                    className="px-4 py-2 bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500/30 flex items-center transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Paperclip className="w-5 h-5" />
-                  </button>
-                )}
-                {isAnswering && (
-                  <button
-                    type="button"
-                    onClick={handleSkip}
-                    disabled={isTyping}
-                    className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 flex items-center transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                    title="Skip this question (counts as incorrect)"
-                  >
-                    Skip
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isProcessingFile}
+                  className="px-4 py-2 bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500/30 flex items-center transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Paperclip className="w-5 h-5" />
+                </button>
                 <button
                   type="submit"
                   disabled={isTyping}
