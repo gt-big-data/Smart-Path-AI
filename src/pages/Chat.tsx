@@ -11,6 +11,7 @@ import axios from 'axios';
 import GraphVisualization from '../components/GraphVisualization';
 import { API_BASE_URL } from '../config/api';
 import { clearQuiz, readQuiz } from '../lib/quizState';
+import { centerNodeName } from '../lib/graphTree';
 
 interface Message {
   id: string;
@@ -905,6 +906,21 @@ function App() {
       setGraphData(null);
     }
   }, [currentChatId, currentChat?.graph_id]); // Dependency array ensures this runs when the chat changes
+
+  // Name untitled chats after their graph's center topic. Only touches the default "New Chat"
+  // title, so chats the user renamed are left alone.
+  useEffect(() => {
+    if (!currentChat || currentChat.title !== 'New Chat' || !graphData?.graph || isPlaceholderGraph(graphData)) return;
+    if (graphData.graph_id !== currentChat.graph_id) return; // graph still belongs to the previous chat
+    const title = centerNodeName(graphData.graph);
+    if (!title) return;
+    const chatId = currentChat.id;
+    setChats(prev => prev.map(chat => chat.id === chatId ? { ...chat, title } : chat));
+    axios.patch(`${API_BASE_URL}/chat/rename/${chatId}`, { title }, { withCredentials: true }).catch(err => {
+      console.error('Could not auto-name chat', err);
+      setChats(prev => prev.map(chat => chat.id === chatId && chat.title === title ? { ...chat, title: 'New Chat' } : chat));
+    });
+  }, [graphData, currentChat]);
 
   // Show loading state while fetching chats
   if (chatsLoading) {
