@@ -12,10 +12,7 @@ const QUIZ_CLARIFY_SERVICE_TOKEN = process.env.QUIZ_CLARIFY_SERVICE_TOKEN;
 exports.pythonServiceClient = axios_1.default.create({
     baseURL: PYTHON_SERVICE_URL,
     timeout: 120000, // 120 seconds (2 minutes) timeout for AI operations
-    headers: {
-        'Content-Type': 'application/json',
-        ...(QUIZ_CLARIFY_SERVICE_TOKEN ? { 'X-Quiz-Clarify-Token': QUIZ_CLARIFY_SERVICE_TOKEN } : {}),
-    },
+    headers: Object.assign({ 'Content-Type': 'application/json' }, (QUIZ_CLARIFY_SERVICE_TOKEN ? { 'X-Quiz-Clarify-Token': QUIZ_CLARIFY_SERVICE_TOKEN } : {})),
 });
 // Add request interceptor for logging
 exports.pythonServiceClient.interceptors.request.use((config) => {
