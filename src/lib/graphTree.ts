@@ -198,6 +198,16 @@ function pickCenter(
   return pool.reduce((best, id) => (degree.get(id)! > degree.get(best)! ? id : best));
 }
 
+/** The center node's name, tidied for use as a chat title. null if the graph has no named center. */
+export function centerNodeName(graph: RawGraph, maxLength = 60): string | null {
+  const { centerId } = buildGraphTree(graph);
+  const center = graph.nodes.find(node => String(node.id) === centerId);
+  const raw = center?.properties?.name ?? center?.properties?.text;
+  const name = typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
+  if (!name) return null;
+  return name.length > maxLength ? `${name.slice(0, maxLength - 1).trimEnd()}…` : name;
+}
+
 /** Node ids from the center to nodeId, both included. [] if nodeId is not in the tree. */
 export function pathTo(tree: GraphTree, nodeId: string): string[] {
   if (!tree.nodes.has(nodeId)) return [];

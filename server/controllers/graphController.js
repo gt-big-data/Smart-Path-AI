@@ -129,6 +129,7 @@ const generateQuestionsWithAnswers = (req, res) => __awaiter(void 0, void 0, voi
                 question: q.text || '',
                 answer: q.correct_answer || '',
                 conceptId: conceptId,
+                conceptName: q.concept_name || '',
                 // Optional metadata for future UI use
                 id: q.id,
                 explanation: q.explanation,
@@ -155,6 +156,20 @@ const normalizeAnswer = (value = '') => value
     .toLowerCase()
     .replace(/[^\w\s]/g, '')
     .replace(/\s+/g, ' ');
+// Multiple-choice and true/false questions have exactly one right answer, so grade them exactly
+// instead of by LLM judgment. Returns null for open-ended questions.
+const exactChoiceVerdict = (userAnswer, correctAnswer) => {
+    var _a;
+    const correct = correctAnswer.trim().toUpperCase();
+    const user = userAnswer.trim().toUpperCase();
+    if (/^[A-D]$/.test(correct))
+        return ((_a = user.match(/^([A-D])(?:[).:\s]|$)/)) === null || _a === void 0 ? void 0 : _a[1]) === correct;
+    const trueFalse = (value) => (value === 'T' || value === 'TRUE' ? 'TRUE' : value === 'F' || value === 'FALSE' ? 'FALSE' : null);
+    if (trueFalse(correct))
+        return trueFalse(user) === trueFalse(correct);
+    return null;
+};
+exports.exactChoiceVerdict = exactChoiceVerdict;
 const evaluateAnswerFallback = (userAnswer, correctAnswer) => {
     const normalizedUser = normalizeAnswer(userAnswer);
     const normalizedCorrect = normalizeAnswer(correctAnswer);
@@ -201,6 +216,7 @@ const verifyAnswer = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 followUpQuestion: ''
             });
         }
+        const exact = exactChoiceVerdict(userAnswer, correctAnswer || '');
         // Construct the prompt for GPT
         const systemPrompt = `You are an educational assistant that evaluates student answers based on conceptual understanding rather than exact wording.
 Your role is to:
@@ -222,6 +238,9 @@ Return valid JSON only.`;
 Question: "${question}"
 Student's Answer: "${userAnswer}"
 Reference Correct Answer: "${correctAnswer || ''}"
+${exact === null ? '' : `
+This is a multiple-choice or true/false question, and the student's answer is ${exact ? 'CORRECT' : 'INCORRECT'}. Your feedback must match that.
+`}
 
 Provide feedback in this JSON format:
 {
@@ -253,14 +272,14 @@ Provide feedback in this JSON format:
                 .replace(/\s*```$/, '')
                 .trim();
             const result = JSON.parse(cleaned);
-            const isCorrect = result.score >= 70;
+            const isCorrect = exact !== null && exact !== void 0 ? exact : result.score >= 70;
             // Update confidence score
             yield updateConfidenceScoreSafe(userId, conceptId, isCorrect, isRetry || false);
             // Transform the result to match the expected frontend format while preserving the new evaluation approach
             const transformedResult = {
                 isCorrect, // Consider answers with 70% or higher understanding as correct
                 feedback: result.feedback,
-                followUpQuestion: result.score >= 70
+                followUpQuestion: isCorrect
                     ? result.thinkingPrompt
                     : `Hint: ${result.conceptualHint}`
             };

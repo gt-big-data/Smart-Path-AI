@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, Circle, ChevronLeft, ChevronRight, HelpCircle, Send } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Circle, ChevronLeft, ChevronRight, HelpCircle, Send, XCircle } from 'lucide-react';
 import axios from 'axios';
 import { API_BASE_URL } from '../config/api';
 import { quizKey, readQuiz, type ClarifyMessage, type Question, type QuizState, type Result } from '../lib/quizState';
 
 // The AI server isn't consistent about the concept id field name
-type RawPair = { question?: string; answer?: string; conceptId?: string; concept_id?: string; topicId?: string; topic_id?: string; id?: string; explanation?: string; format?: string };
+type RawPair = { question?: string; answer?: string; conceptId?: string; concept_id?: string; topicId?: string; topic_id?: string; id?: string; conceptName?: string; explanation?: string; format?: string };
 
 function splitQuestion(question: Question) {
   const lines = question.question.split('\n');
@@ -64,6 +64,7 @@ function QuizRunner() {
         question: pair.question || '',
         answer: pair.answer === 'T' ? 'True' : pair.answer === 'F' ? 'False' : String(pair.answer || ''),
         conceptId: String(pair.conceptId || pair.concept_id || pair.topicId || pair.topic_id || pair.id || ''),
+        conceptName: pair.conceptName || undefined,
         explanation: pair.explanation,
         format: pair.format,
       }));
@@ -108,7 +109,7 @@ function QuizRunner() {
     if (valid.length) {
       try {
         await axios.post(`${API_BASE_URL}/api/quiz-history`, {
-          concepts: valid.map(({ question, index }) => ({ conceptID: question.conceptId, name: `Question ${index + 1} Concept` })),
+          concepts: valid.map(({ question, index }) => ({ conceptID: question.conceptId, name: question.conceptName || `Question ${index + 1} Concept` })),
           questions: valid.map(({ question, result }) => ({
             questionText: question.question,
             // Quiz history compares exact strings against the stored letter, so send "A" rather than "A) ATP"
@@ -164,12 +165,10 @@ function QuizRunner() {
       };
       const results = [...quiz.results];
       results[index] = result;
-      const next = { ...quiz, results, currentQuestionIndex: Math.min(index + 1, quiz.qaData.length - 1) };
-      setDraft('');
+      // Stay on this question so the student sees whether they got it right; Next / See results moves on.
+      save({ ...quiz, results });
       setClarifyDraft('');
       setClarifyError('');
-      if (index === quiz.qaData.length - 1) await finish(next);
-      else save(next);
     } catch (err) {
       console.error('Could not verify answer', err);
       setError('Could not submit this answer. Please try again.');
@@ -220,6 +219,9 @@ function QuizRunner() {
   const { prompt, choices } = splitQuestion(question);
   const completedCount = quiz.results.filter(Boolean).length;
   const heading = quiz.completed ? 'Quiz review' : 'Quiz';
+  const result = quiz.results[index];
+  const correctChoice = displayAnswer(question).toLowerCase();
+  const isLast = index === quiz.qaData.length - 1;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50 text-slate-800">
@@ -254,28 +256,48 @@ function QuizRunner() {
         <div className="max-w-6xl mx-auto px-4 py-8 sm:py-12">
           <div className="mb-6">
             <div className="flex justify-between text-sm font-medium text-slate-600 mb-3"><span>Question {index + 1} of {quiz.qaData.length}</span><span>{Math.round(completedCount / quiz.qaData.length * 100)}% complete</span></div>
-            <div className="flex gap-1" aria-label="Quiz progress">{quiz.qaData.map((_, step) => <div key={step} className={`h-1.5 flex-1 rounded-full ${quiz.results[step] ? 'bg-teal-500' : step === index ? 'bg-teal-400' : 'bg-slate-200'}`} />)}</div>
+            <div className="flex gap-1" aria-label="Quiz progress">{quiz.qaData.map((_, step) => <div key={step} className={`h-1.5 flex-1 rounded-full ${quiz.results[step] ? (quiz.results[step]?.isCorrect ? 'bg-teal-500' : 'bg-red-300') : step === index ? 'bg-teal-400' : 'bg-slate-200'}`} />)}</div>
           </div>
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] items-start">
             <section className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-6 sm:p-8">
               <p className="text-sm font-medium text-teal-600 mb-3">Question {index + 1}</p>
               <h2 className="text-xl font-semibold text-slate-800 whitespace-pre-wrap leading-relaxed">{prompt}</h2>
               {choices.length ? <div className="mt-6 space-y-3" role="radiogroup" aria-label="Answer choices">{choices.map(choice => {
-                const picked = (quiz.results[index]?.answer || draft) === choice;
+                const picked = (result?.answer || draft) === choice;
+                const isRight = choice.toLowerCase() === correctChoice;
+                const style = !result
+                  ? (picked ? 'border-teal-500 bg-teal-50' : 'border-slate-200 bg-white hover:border-teal-400')
+                  : isRight ? 'border-teal-500 bg-teal-50' : picked ? 'border-red-400 bg-red-50' : 'border-slate-200 bg-white opacity-70';
                 return <div key={choice} className="flex items-stretch gap-2">
-                  <button type="button" role="radio" aria-checked={picked} disabled={!!quiz.results[index]} onClick={() => setDraft(choice)} className={`flex-1 text-left px-4 py-3 rounded-lg border transition-colors ${picked ? 'border-teal-500 bg-teal-50 text-slate-800' : 'border-slate-200 bg-white text-slate-800 hover:border-teal-400'}`}>{choice}</button>
+                  <button type="button" role="radio" aria-checked={picked} disabled={!!result} onClick={() => setDraft(choice)} className={`flex-1 text-left px-4 py-3 rounded-lg border text-slate-800 transition-colors flex items-center justify-between gap-3 ${style}`}>
+                    <span>{choice}</span>
+                    {result && isRight && <CheckCircle2 size={18} className="text-teal-600 flex-shrink-0" aria-label="Correct answer" />}
+                    {result && picked && !isRight && <XCircle size={18} className="text-red-500 flex-shrink-0" aria-label="Your answer" />}
+                  </button>
                   {/^[A-D][).]/.test(choice) && <button type="button" onClick={() => askAbout(choice)} title="Ask about this choice" aria-label={`Ask about ${choice}`} className="px-3 rounded-lg border border-teal-200 bg-white text-teal-600 text-xs font-medium hover:bg-teal-50 transition-colors flex items-center gap-1"><HelpCircle size={14} /> Ask</button>}
                 </div>;
               })}</div> : <textarea value={quiz.results[index]?.answer || draft} onChange={event => setDraft(event.target.value)} disabled={!!quiz.results[index]} rows={5} placeholder="Write your answer..." aria-label="Your answer" className="mt-6 w-full px-4 py-3 bg-white text-slate-900 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 placeholder-slate-400" />}
-              {quiz.results[index] && <p className="mt-4 text-sm text-slate-600">Answer submitted. Use Next to continue.</p>}
+              {result && <div role="status" className={`mt-6 rounded-xl border p-4 ${result.isCorrect ? 'border-teal-200 bg-teal-50' : 'border-red-200 bg-red-50'}`}>
+                <p className={`font-semibold flex items-center gap-2 ${result.isCorrect ? 'text-teal-700' : 'text-red-700'}`}>
+                  {result.isCorrect ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
+                  {result.isCorrect ? 'Correct' : result.skipped ? 'Skipped' : 'Not quite'}
+                </p>
+                {!result.isCorrect && <p className="mt-2 text-sm text-slate-700">Correct answer: <span className="font-medium text-slate-900">{displayAnswer(question)}</span></p>}
+                {result.feedback && !result.skipped && <p className="mt-2 text-sm text-slate-700">{result.feedback}</p>}
+                {question.explanation && <p className="mt-2 text-sm text-slate-600"><span className="font-medium">Why:</span> {question.explanation}</p>}
+              </div>}
               {error && <p role="alert" className="mt-4 text-sm text-red-600">{error}</p>}
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <button type="button" disabled={index === 0 || busy} onClick={() => goTo(index - 1)} className="px-4 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 font-medium disabled:opacity-50 flex items-center gap-1"><ChevronLeft size={16} /> Back</button>
-                {quiz.results[index] && <button type="button" disabled={busy} onClick={() => goTo(Math.min(index + 1, quiz.qaData.length - 1))} className="px-4 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 font-medium flex items-center gap-1">Next <ChevronRight size={16} /></button>}
                 <div className="flex-1" />
-                {quiz.results[index] && index === quiz.qaData.length - 1 && <button type="button" disabled={busy} onClick={() => void retryFinish()} className="px-5 py-2 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 text-white font-medium shadow-md shadow-teal-500/20 disabled:opacity-50">{busy ? 'Saving...' : 'Finish quiz'}</button>}
-                <button type="button" disabled={busy || !!quiz.results[index]} onClick={() => submit(true)} className="px-4 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 font-medium disabled:opacity-50">Skip</button>
-                <button type="button" disabled={busy || !!quiz.results[index] || !draft.trim()} onClick={() => submit()} className="px-5 py-2 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 text-white font-medium shadow-md shadow-teal-500/20 disabled:opacity-50">{busy ? 'Submitting...' : 'Submit'}</button>
+                {result ? (
+                  isLast
+                    ? <button type="button" disabled={busy} onClick={() => void retryFinish()} className="px-5 py-2 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 text-white font-medium shadow-md shadow-teal-500/20 disabled:opacity-50">{busy ? 'Saving...' : 'See results'}</button>
+                    : <button type="button" disabled={busy} onClick={() => goTo(index + 1)} className="px-5 py-2 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 text-white font-medium shadow-md shadow-teal-500/20 flex items-center gap-1">Next <ChevronRight size={16} /></button>
+                ) : <>
+                  <button type="button" disabled={busy} onClick={() => submit(true)} className="px-4 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 font-medium disabled:opacity-50">Skip</button>
+                  <button type="button" disabled={busy || !draft.trim()} onClick={() => submit()} className="px-5 py-2 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 text-white font-medium shadow-md shadow-teal-500/20 disabled:opacity-50">{busy ? 'Checking...' : 'Check answer'}</button>
+                </>}
               </div>
             </section>
             <aside aria-label="Ask about this question" className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex flex-col lg:sticky lg:top-6">
