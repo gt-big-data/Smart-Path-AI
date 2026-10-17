@@ -109,6 +109,7 @@ app.use('/upload', uploadRoutes_1.default);
 app.use('/api', graphRoutes_1.default);
 //Chat Routes
 app.use('/chat', chatRoutes_1.default);
+app.use('/api/chat', chatRoutes_1.default);
 //Progress Routes (mounted at /api to match existing endpoint usage)
 app.use('/api', progressRoutes_1.default);
 // Quiz History Routes
