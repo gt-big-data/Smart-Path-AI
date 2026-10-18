@@ -160,6 +160,7 @@ const checkAuth = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 user: {
                     email: user.email,
                     displayName: user.displayName,
+                    folders: user.folders || [],
                 }
             });
         }

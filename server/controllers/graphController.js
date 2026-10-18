@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.semanticSearchGraph = exports.searchGraph = exports.getNodeMetadata = exports.getUserProfile = exports.generateConversationResponse = exports.verifyAnswer = exports.generateQuestionsWithAnswers = exports.viewGraph = void 0;
+exports.clarifyQuizQuestion = exports.semanticSearchGraph = exports.searchGraph = exports.getNodeMetadata = exports.getUserProfile = exports.generateConversationResponse = exports.verifyAnswer = exports.generateQuestionsWithAnswers = exports.viewGraph = void 0;
 const openai_1 = __importDefault(require("openai"));
 const ConceptProgress_1 = __importDefault(require("../models/ConceptProgress"));
 const axiosConfig_1 = require("../utils/axiosConfig");
@@ -481,7 +481,7 @@ const semanticSearchGraph = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.semanticSearchGraph = semanticSearchGraph;
 // Quiz clarifications use their own AI endpoint: the chat one answers directly and pulls in graph facts that give answers away
 const clarifyQuizQuestion = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d;
     const userId = (_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user;
     if (!userId) {
         return res.status(401).json({ error: 'User not authenticated' });

@@ -115,6 +115,7 @@ app.use('/api', graphRoutes);
 
 //Chat Routes
 app.use('/chat', chatRoutes);
+app.use('/api/chat', chatRoutes);
 
 //Progress Routes (mounted at /api to match existing endpoint usage)
 app.use('/api', progressRoutes);
