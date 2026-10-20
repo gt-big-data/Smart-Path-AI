@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 
 const navLinks = [
   { label: 'Dashboard', to: '/chat', authRequired: true },
+  { label: 'Quizzes', to: '/quiz', authRequired: true },
   { label: 'Progress', to: '/progress', authRequired: true },
   { label: 'Profile', to: '/profile', authRequired: true },
   { label: 'About Us', to: '/about', authRequired: false },

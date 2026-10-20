@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { API_BASE_URL } from '../config/api';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -18,14 +19,13 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  // Start loading so ProtectedRoute waits for the first check instead of redirecting to /login
+  const [isLoading, setIsLoading] = useState(true);
 
   const checkAuth = async () => {
-    if (isLoading) return;
-    
     setIsLoading(true);
     try {
-      const response = await fetch('https://smartpath-node-backend-361386464842.us-east1.run.app/auth/check-auth', {
+      const response = await fetch(`${API_BASE_URL}/auth/check-auth`, {
         credentials: 'include',
       });
       const data = await response.json();
@@ -53,7 +53,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const signup = async (email: string, password: string, name: string) => {
     try {
-      const response = await fetch('https://smartpath-node-backend-361386464842.us-east1.run.app/auth/signup', {
+      const response = await fetch(`${API_BASE_URL}/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, name }),
@@ -83,7 +83,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const login = async (email: string, password: string) => {
     try {
-      const response = await fetch('https://smartpath-node-backend-361386464842.us-east1.run.app/auth/login', {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -107,12 +107,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const loginWithGoogle = () => {
-    window.location.href = 'https://smartpath-node-backend-361386464842.us-east1.run.app/auth/google';
+    const loginUrl = new URL(`${API_BASE_URL}/auth/google`, window.location.origin);
+    loginUrl.searchParams.set('returnTo', window.location.origin);
+    window.location.href = loginUrl.toString();
   };
 
   const logout = async () => {
     try {
-      const response = await fetch('https://smartpath-node-backend-361386464842.us-east1.run.app/auth/logout', {
+      const response = await fetch(`${API_BASE_URL}/auth/logout`, {
         method: 'POST',
         credentials: 'include',
       });

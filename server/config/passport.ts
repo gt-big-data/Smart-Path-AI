@@ -3,6 +3,13 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Profile } from 'passport-google-oauth20';
 import User from '../models/User';
 
+const googleCallbackUrl = process.env.GOOGLE_CALLBACK_URL ||
+    (process.env.SERVER_PUBLIC_URL
+        ? `${process.env.SERVER_PUBLIC_URL}/auth/google/callback`
+        : process.env.NODE_ENV === 'production'
+            ? 'https://smartpath-node-backend-361386464842.us-east1.run.app/auth/google/callback'
+            : 'http://localhost:4000/auth/google/callback');
+
 passport.serializeUser((user: any, done) => {
     done(null, user.id);
 });
@@ -21,7 +28,7 @@ passport.use(
         {
             clientID: process.env.GOOGLE_CLIENT_ID!,
             clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-            callbackURL: process.env.GOOGLE_CALLBACK_URL || `${process.env.SERVER_PUBLIC_URL || 'https://smartpath-node-backend-361386464842.us-east1.run.app'}/auth/google/callback`,
+            callbackURL: googleCallbackUrl,
         },
         async (
             accessToken: string,

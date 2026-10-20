@@ -1,5 +1,5 @@
 # Dependencies
-node_modules/
+node_modules
 /.pnp
 .pnp.js
 
@@ -22,6 +22,7 @@ node_modules/
 .vscode/
 *.sublime-project
 *.sublime-workspace
+justfile
 
 # OS
 .DS_Store

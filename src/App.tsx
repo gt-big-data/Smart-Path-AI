@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Chat from './pages/Chat';
+import Quiz from './pages/Quiz';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Home from './pages/Home';
@@ -46,6 +47,10 @@ function AppContent() {
             <Chat />
           </ProtectedRoute>
         }
+      />
+      <Route
+        path="/quiz"
+        element={<ProtectedRoute><Quiz /></ProtectedRoute>}
       />
       <Route
         path="/progress"

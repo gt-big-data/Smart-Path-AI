@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.renameChat = exports.deleteChat = exports.getUserGraphIds = exports.getUserChats = exports.addMessageToChat = exports.createNewChat = exports.getCurrentUserId = void 0;
+exports.renameFolder = exports.moveFolder = exports.getUserFolders = exports.moveChatToFolder = exports.deleteFolder = exports.createFolder = exports.renameChat = exports.deleteChat = exports.getUserGraphIds = exports.getUserChats = exports.addMessageToChat = exports.createNewChat = exports.getCurrentUserId = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const uuid_1 = require("uuid");
 /**
@@ -313,3 +313,196 @@ const renameChat = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.renameChat = renameChat;
+// Create a new folder
+const createFolder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    try {
+        const rawUserId = ((_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user) || ((_c = req.session) === null || _c === void 0 ? void 0 : _c.userId) || ((_d = req.user) === null || _d === void 0 ? void 0 : _d._id);
+        if (!rawUserId) {
+            return res.status(401).json({ message: 'Unauthorized: Session missing user ID' });
+        }
+        // Extract raw string if Passport serialized an object
+        const userId = typeof rawUserId === 'object' && rawUserId._id ? rawUserId._id : rawUserId;
+        const { name, parent_folder_id } = req.body;
+        if (!name || !name.trim()) {
+            return res.status(400).json({ message: 'Folder name is required' });
+        }
+        const user = yield User_1.default.findById(userId);
+        if (!user) {
+            console.error('[createFolder] User ID in session not found in DB:', userId);
+            return res.status(404).json({ message: 'User record not found in database' });
+        }
+        if (parent_folder_id && !user.folders.some((folder) => folder.folder_id === parent_folder_id)) {
+            return res.status(404).json({ message: 'Parent folder not found' });
+        }
+        const newFolder = {
+            folder_id: (0, uuid_1.v4)(),
+            name: name.trim(),
+            date_created: new Date(),
+            parent_folder_id: parent_folder_id || null,
+        };
+        user.folders.push(newFolder);
+        yield user.save();
+        console.log('[createFolder] Folder created successfully:', newFolder);
+        return res.status(201).json(newFolder);
+    }
+    catch (error) {
+        console.error('[createFolder] Internal error:', error);
+        return res.status(500).json({ message: 'Error creating folder', error });
+    }
+});
+exports.createFolder = createFolder;
+// Delete a folder and return its chats to the root list
+const deleteFolder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    try {
+        const userId = ((_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user) || ((_c = req.session) === null || _c === void 0 ? void 0 : _c.userId) || ((_d = req.user) === null || _d === void 0 ? void 0 : _d._id);
+        const { folder_id } = req.params;
+        if (!userId) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
+        const user = yield User_1.default.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        const folderIndex = user.folders.findIndex((folder) => folder.folder_id === folder_id);
+        if (folderIndex === -1) {
+            return res.status(404).json({ message: 'Folder not found' });
+        }
+        const parentFolderId = user.folders[folderIndex].parent_folder_id || null;
+        user.folders.splice(folderIndex, 1);
+        user.folders.forEach((folder) => {
+            if (folder.parent_folder_id === folder_id) {
+                folder.parent_folder_id = parentFolderId;
+            }
+        });
+        user.chats.forEach((chat) => {
+            if (chat.folder_id === folder_id) {
+                chat.folder_id = null;
+            }
+        });
+        user.markModified('folders');
+        user.markModified('chats');
+        yield user.save();
+        return res.status(200).json({ message: 'Folder deleted successfully', folder_id });
+    }
+    catch (error) {
+        console.error('Delete folder error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+exports.deleteFolder = deleteFolder;
+// Move a chat to a folder (or remove from folder if folder_id is null)
+const moveChatToFolder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    try {
+        const rawUserId = ((_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user) || ((_c = req.session) === null || _c === void 0 ? void 0 : _c.userId) || ((_d = req.user) === null || _d === void 0 ? void 0 : _d._id) || ((_e = req.user) === null || _e === void 0 ? void 0 : _e._id);
+        const userId = typeof rawUserId === 'object' && (rawUserId === null || rawUserId === void 0 ? void 0 : rawUserId._id) ? rawUserId._id : rawUserId;
+        const { chat_id, folder_id } = req.body;
+        if (!userId)
+            return res.status(401).json({ message: 'Unauthorized' });
+        const user = yield User_1.default.findById(userId);
+        if (!user)
+            return res.status(404).json({ message: 'User not found' });
+        const chat = user.chats.find((c) => c.chat_id === chat_id);
+        if (!chat)
+            return res.status(404).json({ message: 'Chat not found' });
+        if (folder_id && !user.folders.some((folder) => folder.folder_id === folder_id)) {
+            return res.status(404).json({ message: 'Folder not found' });
+        }
+        chat.folder_id = folder_id || null;
+        yield user.save();
+        res.status(200).json({ message: 'Chat moved successfully', chat });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error moving chat', error });
+    }
+});
+exports.moveChatToFolder = moveChatToFolder;
+const getUserFolders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    try {
+        const rawUserId = ((_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user) || ((_c = req.session) === null || _c === void 0 ? void 0 : _c.userId) || ((_d = req.user) === null || _d === void 0 ? void 0 : _d._id);
+        const userId = typeof rawUserId === 'object' && (rawUserId === null || rawUserId === void 0 ? void 0 : rawUserId._id) ? rawUserId._id : rawUserId;
+        if (!userId)
+            return res.status(401).json({ message: 'Unauthorized' });
+        const user = yield User_1.default.findById(userId).select('folders');
+        if (!user)
+            return res.status(404).json({ message: 'User not found' });
+        return res.status(200).json(user.folders || []);
+    }
+    catch (error) {
+        console.error('Get folders error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+exports.getUserFolders = getUserFolders;
+const moveFolder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    try {
+        const rawUserId = ((_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user) || ((_c = req.session) === null || _c === void 0 ? void 0 : _c.userId) || ((_d = req.user) === null || _d === void 0 ? void 0 : _d._id);
+        const userId = typeof rawUserId === 'object' && (rawUserId === null || rawUserId === void 0 ? void 0 : rawUserId._id) ? rawUserId._id : rawUserId;
+        const { folder_id } = req.params;
+        const { parent_folder_id } = req.body;
+        if (!userId)
+            return res.status(401).json({ message: 'Unauthorized' });
+        const user = yield User_1.default.findById(userId);
+        if (!user)
+            return res.status(404).json({ message: 'User not found' });
+        const folder = user.folders.find((item) => item.folder_id === folder_id);
+        if (!folder)
+            return res.status(404).json({ message: 'Folder not found' });
+        if (parent_folder_id) {
+            if (parent_folder_id === folder_id) {
+                return res.status(400).json({ message: 'A folder cannot contain itself' });
+            }
+            const parent = user.folders.find((item) => item.folder_id === parent_folder_id);
+            if (!parent)
+                return res.status(404).json({ message: 'Parent folder not found' });
+            let ancestorId = parent.parent_folder_id;
+            while (ancestorId) {
+                if (ancestorId === folder_id) {
+                    return res.status(400).json({ message: 'A folder cannot be moved into its own descendant' });
+                }
+                ancestorId = (_e = user.folders.find((item) => item.folder_id === ancestorId)) === null || _e === void 0 ? void 0 : _e.parent_folder_id;
+            }
+        }
+        folder.parent_folder_id = parent_folder_id || null;
+        user.markModified('folders');
+        yield user.save();
+        return res.status(200).json(folder);
+    }
+    catch (error) {
+        console.error('Move folder error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+exports.moveFolder = moveFolder;
+const renameFolder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    try {
+        const rawUserId = ((_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user) || ((_c = req.session) === null || _c === void 0 ? void 0 : _c.userId) || ((_d = req.user) === null || _d === void 0 ? void 0 : _d._id);
+        const userId = typeof rawUserId === 'object' && (rawUserId === null || rawUserId === void 0 ? void 0 : rawUserId._id) ? rawUserId._id : rawUserId;
+        const { folder_id } = req.params;
+        const { name } = req.body;
+        if (!userId)
+            return res.status(401).json({ message: 'Unauthorized' });
+        if (!name || !name.trim())
+            return res.status(400).json({ message: 'Folder name is required' });
+        const user = yield User_1.default.findById(userId);
+        if (!user)
+            return res.status(404).json({ message: 'User not found' });
+        const folder = user.folders.find((item) => item.folder_id === folder_id);
+        if (!folder)
+            return res.status(404).json({ message: 'Folder not found' });
+        folder.name = name.trim();
+        user.markModified('folders');
+        yield user.save();
+        return res.status(200).json(folder);
+    }
+    catch (error) {
+        console.error('Rename folder error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+exports.renameFolder = renameFolder;
