@@ -7,6 +7,7 @@ import { pythonServiceClient } from '../utils/axiosConfig';
 // Initialize OpenAI with explicit API key
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',  // Provide empty string as fallback
+  baseURL: process.env.OPENAI_API_BASE_URL || 'https://api.openai.com/v1/',
 });
 
 // Verify API key is loaded
@@ -263,9 +264,9 @@ Provide feedback in this JSON format:
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
         ],
-        model: "gpt-4o-mini",
-        temperature: 0.3,
-        max_tokens: 500,
+        model: "gpt-6-luna",
+        reasoning_effort: "low",
+        max_completion_tokens: 2000,
         response_format: { type: "json_object" },
       });
 

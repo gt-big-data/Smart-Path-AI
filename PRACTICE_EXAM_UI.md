@@ -96,13 +96,26 @@ Input controls:
 
 - `mcq`: radio buttons for `choices`. Submit the **exact choice text**, not A/B/C/D or an index.
 - `tf`: radio buttons submitting `"True"` or `"False"`.
+- `binary`: radio buttons for the two source response labels in `choices`, such as Possible/Impossible.
+- `multi_select`: checkboxes; submit a JSON array of exact choice texts in the `user_answer` string.
 - `numeric`: text input allowing units and scientific notation.
 - `short_answer`, `long_answer`: appropriately sized text areas.
 - `depends_on`: keep the parts together and show their shared context; this does not prohibit
   answering a later part when an earlier answer is blank.
 
+Repeated response rows remain separate parts but share a `group_label` and
+`group_instructions`. Show that group heading once, under the original question number.
+Do not create a section for every question. Math text is rendered with KaTeX in instructions,
+stems, prompts, choices and feedback. Supported delimiters include `\(...\)`, `\[...\]`,
+`$...$` and `$$...$$`; model HTML is always treated as text.
+
 There are no `answer`, `explanation`, or `rubric` fields in public exams. Solutions appear
 only in completed attempt grading. Render content as text; do not insert it as HTML.
+
+Questions whose essential diagram data are missing have an `error` message and empty
+`parts` and `concept_ids`. Keep their original position and label, display the failure,
+and offer no answer inputs. Their points are excluded from `total_points`. If all questions
+fail this way, the total is zero and the UI disables starting an attempt.
 
 ### Draft and submit
 
@@ -218,3 +231,7 @@ The test rejects remote/main database addresses, refuses an already-existing dat
 only its newly created whitelisted test database on completion. It stubs AI responses but exercises real
 Mongo persistence and Express HTTP routes, including ownership, hidden keys, revision
 conflicts, duplicate-submit protection and grading failure recovery.
+
+Unverified questions retain their generated content with an error warning. Show their parts with
+disabled controls, exclude them from answer counts and totals, and never submit or grade their IDs.
+Previously discarded question content requires regeneration to become visible.

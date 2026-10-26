@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../config/api';
 //GraphVisualization.tsx
 import React, { useCallback, useEffect, memo, useRef, useState } from 'react';
 import ReactFlow, {
@@ -795,7 +796,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     setIsSearching(true);
     try {
       const endpoint = searchMode === 'semantic' ? 'semantic-search-graph' : 'search-graph';
-      const url = `https://smartpath-node-backend-361386464842.us-east1.run.app/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
+      const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
       const response = await fetch(url, { credentials: 'include' });
       const result = await response.json();
       if (result.status === 'success') {

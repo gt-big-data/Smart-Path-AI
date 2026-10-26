@@ -19,11 +19,15 @@ const definition = {
   schema_version: 2, title: 'Solutions', instructions: 'Show work', time_limit_minutes: 30, total_points: 5,
   sections: [{ name: 'Part I', instructions: null, questions: [{ id: 'q1', label: '1', stem: 'Shared scenario',
     concept_ids: ['topic-molarity'], parts: [
-      { id: 'q1-a', label: 'a', type: 'numeric', prompt: 'Moles?', choices: null, answer: '2 mol',
+      { id: 'q1-a', label: '(i)', group_label: '(a)', group_instructions: 'Calculate each value.', type: 'numeric', prompt: 'Moles?', choices: null, answer: '2 mol',
         explanation: 'Given', rubric: 'Method and answer', points: 2, depends_on: [] },
       { id: 'q1-b', label: 'b', type: 'mcq', prompt: 'Concentration?', choices: ['1 M','2 M','3 M','4 M'],
         answer: '2 M', explanation: 'M = n/V', rubric: 'Exact choice', points: 3, depends_on: ['q1-a'] },
-    ] }] }],
+    ] }, { id: 'q2', label: '2', stem: '', concept_ids: [], parts: [], error: 'Required diagram missing' },
+      { id: 'q3', label: '3', stem: 'Unverified question', concept_ids: ['topic-1'],
+        error: 'Could not verify', parts: [{ id: 'q3-a', label: '', type: 'numeric',
+          prompt: 'Unverified calculation', choices: null, answer: '99', explanation: 'Unverified',
+          rubric: 'Unverified', points: 7, depends_on: [] }] }] }],
 };
 let server, base, owner, outsider, ownsDatabase = false;
 let grades = 0, failGrade = false, holdGrade = false, releaseGrade;
@@ -93,6 +97,10 @@ test('owned exam lifecycle, private keys, draft conflicts, idempotent submission
   const examId = generated.data.id;
   assert.equal(generated.data.graph_id, 'graph-local');
   const publicPart = generated.data.exam.sections[0].questions[0].parts[0];
+  assert.equal(publicPart.group_label, '(a)');
+  assert.equal(generated.data.exam.sections[0].questions[1].error, 'Required diagram missing');
+  assert.equal(generated.data.exam.sections[0].questions[2].parts[0].prompt, 'Unverified calculation');
+  assert.equal('answer' in generated.data.exam.sections[0].questions[2].parts[0], false);
   assert.equal('answer' in publicPart, false); assert.equal('rubric' in publicPart, false);
   assert.equal((await request(`/${examId}`, { who: outsider })).status, 404);
   assert.equal((await request('?chat_id=chat-local')).data.total, 1);
@@ -108,6 +116,7 @@ test('owned exam lifecycle, private keys, draft conflicts, idempotent submission
   const prefix = `/${examId}/attempts/${attemptId}`;
   assert.equal((await request(`/${examId}/attempts`, { method: 'POST', body: { request_id: requestId } })).data.attempt.id, attemptId);
   assert.equal((await request(prefix, { who: outsider })).status, 404);
+  assert.equal((await request(prefix, { method: 'PATCH', body: { revision: 0, answers: [{ part_id: 'q3-a', user_answer: '99' }] } })).status, 400);
   const answers = [{ part_id: 'q1-a', user_answer: '1 mol' }, { part_id: 'q1-b', user_answer: '2 M' }];
   assert.equal((await request(prefix, { method: 'PATCH', body: { revision: 0, answers: [{ part_id: 'bad', user_answer: 'x' }] } })).status, 400);
   assert.equal((await request(prefix, { method: 'PATCH', body: { revision: 0, answers: [{ part_id: 'q1-a', user_answer: 'x', correct_answer: 'x' }] } })).status, 400);

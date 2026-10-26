@@ -86,7 +86,7 @@ Express loads `server/.env`, then falls back to the repo-root `.env`.
 | `SERVER_PUBLIC_URL` | Express | Used to build the default callback URL |
 | `CLIENT_URL` | Express | Post-OAuth redirect (default `http://localhost:5173`) |
 | `CORS_ORIGINS` | Express | Comma-separated allowed origins |
-| `OPENAI_API_KEY` | Express | Node-side `POST /api/verify-answer` (`gpt-4o-mini`) |
+| `OPENAI_API_KEY` | Express | Node-side `POST /api/verify-answer` (`gpt-6-luna`) |
 | `PYTHON_SERVICE_URL` | Express | AI server. Local: `http://127.0.0.1:8000` |
 | `PORT` | Express | Listen port (default 4000) |
 | `NODE_ENV` | Express | Production cookies: `secure` + `sameSite: none` |
