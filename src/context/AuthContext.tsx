@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
 import { API_BASE_URL } from '../config/api';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -19,10 +19,11 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
-  // Start loading so ProtectedRoute waits for the first check instead of redirecting to /login
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   const checkAuth = async () => {
+    if (isLoading) return;
+    
     setIsLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/auth/check-auth`, {
@@ -107,9 +108,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const loginWithGoogle = () => {
-    const loginUrl = new URL(`${API_BASE_URL}/auth/google`, window.location.origin);
-    loginUrl.searchParams.set('returnTo', window.location.origin);
-    window.location.href = loginUrl.toString();
+    window.location.href = `${API_BASE_URL}/auth/google`;
   };
 
   const logout = async () => {

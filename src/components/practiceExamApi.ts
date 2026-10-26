@@ -3,11 +3,13 @@ import { API_BASE_URL } from "../config/api";
 export interface Part {
   id: string;
   label: string;
-  type: "mcq" | "tf" | "numeric" | "short_answer" | "long_answer";
+  type: "mcq" | "tf" | "binary" | "multi_select" | "numeric" | "short_answer" | "long_answer";
   prompt: string;
   choices: string[] | null;
   points: number;
   depends_on: string[];
+  group_label?: string;
+  group_instructions?: string;
 }
 export interface Exam {
   id: string;
@@ -20,13 +22,19 @@ export interface Exam {
     sections: {
       name: string;
       instructions?: string;
-      questions: { id: string; label: string; stem: string; parts: Part[] }[];
+      questions: { id: string; label: string; stem: string; parts: Part[]; error?: string }[];
     }[];
   };
 }
 export interface Answer {
   part_id: string;
   user_answer: string;
+}
+export function selectedChoices(answer = ""): string[] {
+  try {
+    const choices = JSON.parse(answer);
+    return Array.isArray(choices) ? choices.filter((c): c is string => typeof c === "string") : [];
+  } catch { return []; }
 }
 export interface Attempt {
   id: string;

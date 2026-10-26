@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../config/api';
 import React, { useState } from 'react';
 import { Brain, ArrowLeft } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -8,10 +9,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
 
   // Single error for the login form
-  const [loginError, setLoginError] = useState(() =>
-    new URLSearchParams(window.location.search).get('error') === 'google_login_failed'
-      ? 'Google sign-in was cancelled or could not be completed. Please try again.'
-      : '');
+  const [loginError, setLoginError] = useState('');
 
   const navigate = useNavigate();
   const { login, loginWithGoogle } = useAuth();
@@ -28,6 +26,11 @@ export default function Login() {
       const errorMessage = err.response?.data?.message || err.message || 'An error occurred';
       setLoginError(errorMessage);
     }
+  };
+
+  // Simplified Google login - direct redirect
+  const handleGoogleLogin = () => {
+    window.location.href = `${API_BASE_URL}/auth/google`;
   };
 
   return (
@@ -53,7 +56,7 @@ export default function Login() {
             {/* Google Login */}
             <div className="mb-6">
               <button
-                  onClick={loginWithGoogle}
+                  onClick={handleGoogleLogin}
                   className="w-full flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 focus:outline-offset-0 shadow-sm"
               >
                 <img src="https://www.google.com/favicon.ico" alt="Google" className="h-6 w-6" />

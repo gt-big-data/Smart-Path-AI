@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../config/api';
 import React, { useState } from 'react';
 import { Brain, ArrowLeft, Check, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -87,6 +88,10 @@ export default function Signup() {
 }
   };
 
+  const handleGoogleSignup = () => {
+    window.location.href = `${API_BASE_URL}/auth/google`;
+  };
+
   // Add password check on input change
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newPassword = e.target.value;
@@ -124,7 +129,7 @@ export default function Signup() {
 
             <div className="mb-6">
               <button
-                onClick={loginWithGoogle}
+                onClick={handleGoogleSignup}
                 className="w-full flex items-center justify-center gap-3 px-4 py-2.5 border border-gray-200 bg-white rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 shadow-sm"
               >
                 <img

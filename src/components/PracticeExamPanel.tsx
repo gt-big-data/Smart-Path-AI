@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X, FileText, Loader2 } from "lucide-react";
-import { Answer, Attempt, Exam, examApi, errorText } from "./practiceExamApi";
+import { Answer, Attempt, Exam, examApi, errorText, selectedChoices } from "./practiceExamApi";
+import MathText from "./MathText";
 
 const button =
   "rounded-lg border border-teal-600 px-4 py-2 text-sm font-medium text-teal-800 hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -204,7 +205,7 @@ export default function PracticeExamPanel({
     !busy &&
     !blocked;
   const parts =
-    exam?.exam.sections.flatMap((s) => s.questions.flatMap((q) => q.parts)) ??
+    exam?.exam.sections.flatMap((s) => s.questions.filter((q) => !q.error).flatMap((q) => q.parts)) ??
     [];
 
   return (
@@ -417,14 +418,14 @@ export default function PracticeExamPanel({
                     : ""}
                 </p>
                 <p className="mt-3 whitespace-pre-wrap">
-                  {exam.exam.instructions}
+                  <MathText>{exam.exam.instructions}</MathText>
                 </p>
               </div>
               {!attempt ? (
                 <section className="rounded-xl border p-4 space-y-3">
                   <button
                     className={primary}
-                    disabled={!!busy}
+                    disabled={!!busy || !parts.length}
                     onClick={() =>
                       void act("Starting attempt…", async () => {
                         requestId.current ??= crypto.randomUUID();
@@ -505,7 +506,7 @@ export default function PracticeExamPanel({
                     {section.name}
                   </h4>
                   <p className="whitespace-pre-wrap text-sm">
-                    {section.instructions}
+                    <MathText>{section.instructions}</MathText>
                   </p>
                   {section.questions.map((q) => (
                     <article
@@ -513,24 +514,35 @@ export default function PracticeExamPanel({
                       className="rounded-xl border p-5 space-y-4"
                     >
                       <h5 className="font-semibold">Question {q.label}</h5>
-                      <p className="whitespace-pre-wrap">{q.stem}</p>
-                      {q.parts.map((p) => {
+                      {q.error && (
+                        <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                          <strong>Question unavailable for scoring.</strong> {q.error} Excluded from the score total.
+                        </p>
+                      )}
+                      <p><MathText>{q.stem}</MathText></p>
+                      {q.parts.map((p, pi) => {
+                        const selected = selectedChoices(answers[p.id]);
                         const grade = attempt?.grading?.results.find(
                           (r) => r.part_id === p.id,
                         );
                         return (
+                          <div key={p.id} className={p.group_label ? "border-l-2 border-teal-100 pl-4" : ""}>
+                          {p.group_label && p.group_label !== q.parts[pi - 1]?.group_label && (
+                            <h6 className="mb-3 font-semibold">
+                              {p.group_label} <MathText>{p.group_instructions}</MathText>
+                            </h6>
+                          )}
                           <fieldset
-                            key={p.id}
-                            disabled={!editable}
+                            disabled={!editable || !!q.error}
                             className="space-y-2"
                           >
                             <legend className="whitespace-pre-wrap font-medium">
-                              {p.label} {p.prompt}{" "}
+                              {p.label} <MathText>{p.prompt}</MathText>{" "}
                               <span className="text-sm text-slate-500">
-                                ({p.points} points)
+                                ({p.points} points{q.error ? "; excluded" : ""})
                               </span>
                             </legend>
-                            {p.type === "mcq" || p.type === "tf" ? (
+                            {["mcq", "tf", "binary", "multi_select"].includes(p.type) ? (
                               (p.type === "tf"
                                 ? ["True", "False"]
                                 : (p.choices ?? [])
@@ -541,13 +553,17 @@ export default function PracticeExamPanel({
                                 >
                                   <input
                                     className="mt-1 accent-teal-600"
-                                    type="radio"
+                                    type={p.type === "multi_select" ? "checkbox" : "radio"}
                                     name={`${attempt?.id ?? "preview"}-${p.id}`}
-                                    checked={answers[p.id] === choice}
-                                    onChange={() => changeAnswer(p.id, choice)}
+                                    checked={p.type === "multi_select" ? selected.includes(choice) : answers[p.id] === choice}
+                                    onChange={(e) => {
+                                      if (p.type !== "multi_select") return changeAnswer(p.id, choice);
+                                      changeAnswer(p.id, JSON.stringify(e.target.checked
+                                        ? [...selected, choice] : selected.filter(c => c !== choice)));
+                                    }}
                                   />
                                   <span className="whitespace-pre-wrap">
-                                    {choice}
+                                    <MathText>{choice}</MathText>
                                   </span>
                                 </label>
                               ))
@@ -581,15 +597,17 @@ export default function PracticeExamPanel({
                                   {grade.points_earned} /{" "}
                                   {grade.points_possible} points
                                 </p>
-                                <p>{grade.feedback}</p>
+                                <p><MathText>{grade.feedback}</MathText></p>
                                 <p className="mt-2">
                                   <strong>Answer:</strong>{" "}
-                                  {grade.correct_answer}
+                                  <MathText>{p.type === "multi_select"
+                                    ? selectedChoices(grade.correct_answer).join("; ") : grade.correct_answer}</MathText>
                                 </p>
-                                <p>{grade.explanation}</p>
+                                <p><MathText>{grade.explanation}</MathText></p>
                               </div>
                             )}
                           </fieldset>
+                          </div>
                         );
                       })}
                     </article>
@@ -599,7 +617,7 @@ export default function PracticeExamPanel({
               {attempt && attempt.status !== "submitted" && (
                 <div className="flex flex-wrap items-center gap-3 border-t pt-4">
                   <p className="text-sm">
-                    {parts.filter((p) => answers[p.id]?.trim()).length} /{" "}
+                    {parts.filter((p) => p.type === "multi_select" ? selectedChoices(answers[p.id]).length : answers[p.id]?.trim()).length} /{" "}
                     {parts.length} parts answered
                   </p>
                   <button

@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../config/api';
 //GraphVisualization.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
