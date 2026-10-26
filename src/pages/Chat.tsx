@@ -57,7 +57,10 @@ interface ConceptProgress {
   lastAttempted?: Date;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://smartpath-node-backend-361386464842.us-east1.run.app';
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ||
+  'https://smartpath-node-backend-361386464842.us-east1.run.app'
+).replace(/\/+$/, '');
 
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
