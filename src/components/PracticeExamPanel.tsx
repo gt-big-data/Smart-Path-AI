@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { X, FileText, Loader2 } from "lucide-react";
 import { Answer, Attempt, Exam, examApi, errorText, selectedChoices } from "./practiceExamApi";
 import MathText from "./MathText";
+import MathAnswerInput from "./MathAnswerInput";
 
 const button =
   "rounded-lg border border-teal-600 px-4 py-2 text-sm font-medium text-teal-800 hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -567,28 +568,14 @@ export default function PracticeExamPanel({
                                   </span>
                                 </label>
                               ))
-                            ) : p.type === "numeric" ? (
-                              <input
-                                aria-label={`Answer ${q.label} ${p.label}`}
-                                className="w-full rounded-lg border p-3 disabled:bg-slate-50"
-                                value={answers[p.id] ?? ""}
-                                maxLength={20000}
-                                placeholder="Answer, including units"
-                                onChange={(e) =>
-                                  changeAnswer(p.id, e.target.value)
-                                }
-                              />
                             ) : (
-                              <textarea
-                                aria-label={`Answer ${q.label} ${p.label}`}
-                                className="w-full rounded-lg border p-3 disabled:bg-slate-50"
-                                rows={p.type === "long_answer" ? 6 : 3}
-                                maxLength={20000}
+                              <MathAnswerInput
+                                key={`${attempt?.id ?? "preview"}-${p.id}`}
+                                label={`Answer ${q.label} ${p.label}`}
+                                rows={p.type === "long_answer" ? 6 : p.type === "numeric" ? 2 : 3}
                                 value={answers[p.id] ?? ""}
-                                placeholder="Your answer"
-                                onChange={(e) =>
-                                  changeAnswer(p.id, e.target.value)
-                                }
+                                disabled={!editable || !!q.error}
+                                onChange={(value) => changeAnswer(p.id, value)}
                               />
                             )}
                             {grade && (
