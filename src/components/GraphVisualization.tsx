@@ -533,6 +533,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [activePathTargetId, setActivePathTargetId] = useState<string | null>(null);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [minimapLocked, setMinimapLocked] = useState(false);
 
   // Custom label/color edits by node id. Kept apart from the nodes so a restyle doesn't drop them,
@@ -749,7 +750,7 @@ useEffect(() => {
       type: 'smoothstep',
       style: { stroke: '#888', strokeWidth: 2 },
       labelStyle: { fill: '#888', fontSize: 10 },
-      animated: true,
+      animated: false,
       data: {
         graphEdgeIndex: i,
       },
@@ -917,6 +918,30 @@ useEffect(() => {
       });
     });
   }, [baseGraph, styledGraph, setNodes, setEdges]);
+
+  // Normal relationship labels stay hidden until their edge is hovered. Path edges
+  // keep the label and animation supplied by applyGraphStyles.
+  const visibleEdges = useMemo(() => {
+    const baseEdgesById = new Map(
+      (baseGraph?.edges ?? []).map(edge => [edge.id, edge])
+    );
+
+    return edges.map(edge => {
+      const hovered = edge.id === hoveredEdgeId;
+      if (!hovered || edge.animated) return edge;
+
+      const baseEdge = baseEdgesById.get(edge.id);
+      return {
+        ...edge,
+        label: baseEdge?.label,
+        labelStyle: {
+          ...edge.labelStyle,
+          fill: '#374151',
+        },
+        zIndex: Math.max(Number(edge.zIndex ?? 0), 1),
+      };
+    });
+  }, [baseGraph, edges, hoveredEdgeId]);
 
   // Zoom to the center's nearest rings once per graph, after its nodes reach React Flow
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
@@ -1133,11 +1158,19 @@ useEffect(() => {
 
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={visibleEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={handleNodeClick}
         onPaneClick={clearActivePath}
+        onEdgeMouseEnter={(_, edge) => {
+          setHoveredEdgeId(edge.id);
+        }}
+        onEdgeMouseLeave={(_, edge) => {
+          setHoveredEdgeId(currentId =>
+            currentId === edge.id ? null : currentId
+          );
+        }}
         nodeTypes={nodeTypes}
         onInit={setFlowInstance}
         minZoom={0.1}
@@ -1145,7 +1178,7 @@ useEffect(() => {
         defaultViewport={{ x: 0, y: 0, zoom: 0.2 }}
         defaultEdgeOptions={{
           type: 'smoothstep',
-          animated: true,
+          animated: false,
           style: { strokeWidth: 2 },
           labelStyle: { fontSize: 12, fill: '#888' },
         }}
