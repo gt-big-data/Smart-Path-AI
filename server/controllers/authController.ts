@@ -170,6 +170,7 @@ export const checkAuth = async (req: Request, res: Response) => {
                 user: {
                     email: user.email,
                     displayName: user.displayName,
+                  folders: user.folders || [],
                 }
             });
         } else {

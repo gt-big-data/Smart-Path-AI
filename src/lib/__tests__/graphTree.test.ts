@@ -116,6 +116,17 @@ describe('walk', () => {
     expect(tree.nodes.get('y')).toMatchObject({ parentId: 'x', depth: 3, via: 'edge' });
   });
 
+  it('joins a cluster the center reaches only by RELATED_TO through one of those edges', () => {
+    // The backend links the center to every member of an unreached cluster with RELATED_TO
+    const tree = build(g(
+      [['c', 'Topic', true], ['x', 'Concept'], ['y', 'Concept'], ['z', 'Concept']],
+      [['c', 'x', 'RELATED_TO'], ['c', 'y', 'RELATED_TO'], ['c', 'z', 'RELATED_TO'], ['x', 'y'], ['y', 'z']]
+    ));
+    expect(tree.nodes.get('x')).toMatchObject({ parentId: 'c', depth: 1, via: 'related' });
+    expect(tree.nodes.get('y')).toMatchObject({ parentId: 'x', depth: 2, via: 'edge' });
+    expect(tree.nodes.get('z')).toMatchObject({ parentId: 'y', depth: 3, via: 'edge' });
+  });
+
   it('attaches disconnected components to the center as orphans, keeping their shape', () => {
     const tree = build(g(
       [['c', 'Topic', true], ['a', 'Concept'], ['x', 'Concept'], ['y', 'Concept']],

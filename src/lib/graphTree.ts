@@ -140,7 +140,10 @@ export function buildGraphTree(graph: RawGraph): GraphTree {
   };
 
   // Grows the tree from the node at order[from]: BFS over real edges until nothing new
-  // is reached, then one hop over RELATED_TO edges, then real edges again, and so on.
+  // is reached, then a single RELATED_TO hop, then real edges again from that node, and so on.
+  // One hop at a time lets each cluster join through one RELATED_TO edge and keep its own
+  // real-edge shape, instead of every member hanging off the center (the backend links the
+  // center to each unreached node with RELATED_TO).
   const grow = (from: number) => {
     let next = from;
     for (;;) {
@@ -151,15 +154,20 @@ export function buildGraphTree(graph: RawGraph): GraphTree {
         }
       }
 
-      const reachedEnd = order.length;
-      for (let i = from; i < reachedEnd; i++) {
-        const id = order[i];
-        for (const [neighbor, link] of neighbors.get(id)!) {
-          if (link.related && !nodes.has(neighbor)) attach(neighbor, id, 'related', link.edgeIndex);
-        }
-      }
-      if (order.length === reachedEnd) return;
+      const hop = findRelatedHop(from);
+      if (!hop) return;
+      attach(hop.neighbor, hop.id, 'related', hop.edgeIndex);
     }
+  };
+
+  const findRelatedHop = (from: number) => {
+    for (let i = from; i < order.length; i++) {
+      const id = order[i];
+      for (const [neighbor, link] of neighbors.get(id)!) {
+        if (link.related && !nodes.has(neighbor)) return { id, neighbor, edgeIndex: link.edgeIndex };
+      }
+    }
+    return null;
   };
 
   attach(centerId, null, null, null);

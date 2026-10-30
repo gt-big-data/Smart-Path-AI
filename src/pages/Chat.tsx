@@ -1,17 +1,39 @@
 //Chat.tsx
-import React, { useState, useEffect, useRef, ChangeEvent, useCallback } from 'react';
-import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File, Trash2, Pencil, Check, Home, Settings, UserCircle, ClipboardList } from 'lucide-react';
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  ChangeEvent,
+  useCallback,
+} from "react";
 import {
-  Panel,
-  PanelGroup,
-  PanelResizeHandle,
-} from 'react-resizable-panels';
-import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
-import GraphVisualization from '../components/GraphVisualization';
-import { API_BASE_URL } from '../config/api';
-import { clearQuiz, readQuiz } from '../lib/quizState';
-import { centerNodeName } from '../lib/graphTree';
+  Send,
+  ClipboardList,
+  Bot,
+  User,
+  MessageSquare,
+  ChevronLeft,
+  ChevronRight,
+  Paperclip,
+  X,
+  FileText,
+  Image,
+  File,
+  Folder,
+  Search,
+  Trash2,
+  Pencil,
+  Check,
+  Home,
+  Settings,
+} from "lucide-react";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { useNavigate } from "react-router-dom";
+import axios from "axios";
+import GraphVisualization from "../components/GraphVisualization";
+import { API_BASE_URL } from "../config/api";
+import { clearQuiz, readQuiz } from "../lib/quizState";
+import { centerNodeName } from "../lib/graphTree";
 
 interface Message {
   id: string;
@@ -32,6 +54,7 @@ interface Chat {
   timestamp: Date;
   messages: Message[];
   graph_id?: string;
+  folder_id?: string | null;
 }
 
 // Add interface for concept progress
@@ -41,44 +64,420 @@ interface ConceptProgress {
   lastAttempted?: Date;
 }
 
-
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [currentChatId, setCurrentChatId] = useState('');
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+  const [currentChatId, setCurrentChatId] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [progressMessage, setProgressMessage] = useState('');
+  const [progressMessage, setProgressMessage] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [graphData, setGraphData] = useState<any>(null);
-  const [conceptProgress, setConceptProgress] = useState<ConceptProgress[]>([]); // Add state for concept progress
+  const [conceptProgress, setConceptProgress] = useState<ConceptProgress[]>(
+    [],
+  ); // Add state for concept progress
   const [quizLength, setQuizLength] = useState<5 | 10 | 15>(5);
-  const [questionFormat, setQuestionFormat] = useState<'mixed' | 'mcq' | 'true-false' | 'open-ended'>('mixed');
+  const [questionFormat, setQuestionFormat] = useState<
+    "mixed" | "mcq" | "true-false" | "open-ended"
+  >("mixed");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const deletingChatRef = useRef<string | null>(null);
   const renameInFlightRef = useRef<string | null>(null);
+  const folderRenameInFlightRef = useRef<string | null>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
   const latestGraphRequestRef = useRef<string | null>(null);
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [loadingDots, setLoadingDots] = useState('');
+  const [renameValue, setRenameValue] = useState("");
+  const [loadingDots, setLoadingDots] = useState("");
 
   const navigate = useNavigate();
-  
+
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatsLoading, setChatsLoading] = useState(true);
 
-  const currentChat = chats.find(chat => chat.id === currentChatId) ?? null;
+  const currentChat = chats.find((chat) => chat.id === currentChatId) ?? null;
   const savedQuiz = currentChatId ? readQuiz(currentChatId) : null;
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
   const [isGraphLoading, setIsGraphLoading] = useState(false);
+
+  const [folders, setFolders] = useState<
+    Array<{
+      folder_id: string;
+      name: string;
+      date_created: string;
+      parent_folder_id?: string | null;
+    }>
+  >([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [expandedFolders, setExpandedFolders] = useState<
+    Record<string, boolean>
+  >({});
+  const [activeMenuChatId, setActiveMenuChatId] = useState<string | null>(
+    null,
+  );
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderParentId, setNewFolderParentId] = useState<string | null>(
+    null,
+  );
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(
+    null,
+  );
+  const [folderRenameValue, setFolderRenameValue] = useState("");
+  const [draggedChatId, setDraggedChatId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(
+    null,
+  );
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [folderToDelete, setFolderToDelete] = useState<{
+    folder_id: string;
+    name: string;
+    parent_folder_id?: string | null;
+  } | null>(null);
+  const errorToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const sidebarResizeRef = useRef<{
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
+  const showErrorToast = (message: string) => {
+    if (errorToastTimeoutRef.current) {
+      clearTimeout(errorToastTimeoutRef.current);
+    }
+    setErrorToast(message);
+    errorToastTimeoutRef.current = setTimeout(
+      () => setErrorToast(null),
+      5000,
+    );
+  };
+
+  useEffect(() => {
+    if (!isResizingSidebar) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const resizeStart = sidebarResizeRef.current;
+      if (!resizeStart) return;
+      setSidebarWidth(
+        Math.min(
+          480,
+          Math.max(
+            220,
+            resizeStart.startWidth +
+            event.clientX -
+            resizeStart.startX,
+          ),
+        ),
+      );
+    };
+    const handleMouseUp = () => {
+      sidebarResizeRef.current = null;
+      setIsResizingSidebar(false);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizingSidebar]);
+
+  const startSidebarResize = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (isSidebarCollapsed) return;
+    event.preventDefault();
+    sidebarResizeRef.current = {
+      startX: event.clientX,
+      startWidth: sidebarWidth,
+    };
+    setIsResizingSidebar(true);
+  };
+
+  const focusSearchAfterExpand = () => {
+    setIsSidebarCollapsed(false);
+    window.setTimeout(() => searchInputRef.current?.focus(), 0);
+  };
+
+  const fetchFolders = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/chat/folders`, {
+        credentials: "include",
+      });
+      if (res.ok) {
+        setFolders(await res.json());
+      }
+    } catch (err) {
+      console.error("Error fetching folders:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchFolders();
+  }, []);
+
+  const handleCreateFolderSubmit = async (e?: React.FormEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    const name = newFolderName.trim();
+    if (!name) {
+      setIsCreatingFolder(false);
+      return;
+    }
+
+    try {
+      const response = await axios.post(
+        `${API_BASE_URL}/chat/folder/new`,
+        { name, parent_folder_id: newFolderParentId },
+        { withCredentials: true },
+      );
+
+      if (response.status === 201 || response.status === 200) {
+        const newFolder = response.data;
+        setFolders((prev) => [...prev, newFolder]);
+        setExpandedFolders((prev) => ({
+          ...prev,
+          [newFolder.folder_id]: true,
+        }));
+        if (newFolder.parent_folder_id) {
+          setExpandedFolders((prev) => ({
+            ...prev,
+            [newFolder.parent_folder_id]: true,
+          }));
+        }
+      }
+    } catch (err: any) {
+      console.error("Error creating folder:", err);
+      const serverMessage = err.response?.data?.message || "Server error";
+      showErrorToast(
+        `Could not create folder (${err.response?.status || "Network Error"}): ${serverMessage}`,
+      );
+    } finally {
+      setNewFolderName("");
+      setNewFolderParentId(null);
+      setIsCreatingFolder(false);
+    }
+  };
+
+  const handleRenameFolder = async (folderId: string) => {
+    if (
+      renamingFolderId !== folderId ||
+      folderRenameInFlightRef.current === folderId
+    )
+      return;
+
+    const trimmed = folderRenameValue.trim();
+    const currentName =
+      folders.find((folder) => folder.folder_id === folderId)?.name || "";
+    setRenamingFolderId(null);
+    if (!trimmed || trimmed === currentName) return;
+
+    folderRenameInFlightRef.current = folderId;
+    setFolders((prev) =>
+      prev.map((folder) =>
+        folder.folder_id === folderId
+          ? { ...folder, name: trimmed }
+          : folder,
+      ),
+    );
+
+    try {
+      await axios.patch(
+        `${API_BASE_URL}/chat/folder/${folderId}/rename`,
+        { name: trimmed },
+        { withCredentials: true },
+      );
+    } catch (err: any) {
+      console.error("Error renaming folder:", err);
+      await fetchFolders();
+      showErrorToast(
+        `Could not rename folder: ${err.response?.data?.message || "Server error"}`,
+      );
+    } finally {
+      folderRenameInFlightRef.current = null;
+    }
+  };
+
+  const handleMoveChat = async (chatId: string, folderId: string | null) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/chat/move-to-folder`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ chat_id: chatId, folder_id: folderId }),
+      });
+
+      if (!res.ok) {
+        let message = `Server error (${res.status})`;
+        try {
+          const data = await res.json();
+          message = data.message || message;
+        } catch {
+          // Keep the status-based message when the response is not JSON.
+        }
+        throw new Error(message);
+      }
+
+      setChats((prevChats) =>
+        prevChats.map((chat) =>
+          chat.id === chatId
+            ? { ...chat, folder_id: folderId }
+            : chat,
+        ),
+      );
+      setActiveMenuChatId(null);
+    } catch (err) {
+      console.error("Error moving chat to folder:", err);
+      showErrorToast(
+        `Could not move chat: ${err instanceof Error ? err.message : "Server error"}`,
+      );
+    }
+  };
+
+  const handleMoveFolder = async (
+    folderId: string,
+    parentFolderId: string | null,
+  ) => {
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/chat/folder/${folderId}/move`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ parent_folder_id: parentFolderId }),
+        },
+      );
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || `Server error (${res.status})`);
+      }
+
+      setFolders((prev) =>
+        prev.map((folder) =>
+          folder.folder_id === folderId
+            ? { ...folder, parent_folder_id: parentFolderId }
+            : folder,
+        ),
+      );
+    } catch (err) {
+      console.error("Error moving folder:", err);
+      showErrorToast(
+        `Could not move folder: ${err instanceof Error ? err.message : "Server error"}`,
+      );
+    }
+  };
+
+  const requestDeleteFolder = (folderId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    const folder = folders.find((item) => item.folder_id === folderId);
+    if (folder) {
+      setFolderToDelete({
+        folder_id: folder.folder_id,
+        name: folder.name,
+        parent_folder_id: folder.parent_folder_id,
+      });
+    }
+  };
+
+  const handleDeleteFolder = async () => {
+    if (!folderToDelete) return;
+
+    const { folder_id: folderId, parent_folder_id: parentFolderId } =
+      folderToDelete;
+    setFolderToDelete(null);
+
+    try {
+      await axios.delete(`${API_BASE_URL}/chat/folder/${folderId}`, {
+        withCredentials: true,
+      });
+      setFolders((prev) =>
+        prev
+          .filter((item) => item.folder_id !== folderId)
+          .map((item) =>
+            item.parent_folder_id === folderId
+              ? {
+                ...item,
+                parent_folder_id: parentFolderId || null,
+              }
+              : item,
+          ),
+      );
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.folder_id === folderId
+            ? { ...chat, folder_id: null }
+            : chat,
+        ),
+      );
+      setExpandedFolders((prev) => {
+        const next = { ...prev };
+        delete next[folderId];
+        return next;
+      });
+    } catch (err: any) {
+      console.error("Error deleting folder:", err);
+      showErrorToast(
+        `Failed to delete folder: ${err.response?.data?.message || "Server error"}`,
+      );
+    }
+  };
+
+  const handleChatDragStart = (
+    e: React.DragEvent<HTMLDivElement>,
+    chatId: string,
+  ) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", chatId);
+    setDraggedChatId(chatId);
+  };
+
+  const handleFolderDragStart = (
+    e: React.DragEvent<HTMLDivElement>,
+    folderId: string,
+  ) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("application/x-smartpath-folder", folderId);
+  };
+
+  const handleChatDrop = async (
+    e: React.DragEvent<HTMLDivElement>,
+    targetFolderId: string | null,
+  ) => {
+    e.preventDefault();
+    const draggedFolderId = e.dataTransfer.getData(
+      "application/x-smartpath-folder",
+    );
+    e.stopPropagation();
+    if (draggedFolderId) {
+      setDragOverFolderId(null);
+      await handleMoveFolder(draggedFolderId, targetFolderId);
+      return;
+    }
+
+    const chatId = e.dataTransfer.getData("text/plain") || draggedChatId;
+    setDragOverFolderId(null);
+    setDraggedChatId(null);
+
+    if (chatId) {
+      await handleMoveChat(chatId, targetFolderId);
+    }
+  };
 
   // Generate robust unique IDs to avoid duplicate keys when multiple messages are created in the same millisecond
   const generateMessageId = () => {
     try {
-      if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
         return (crypto as any).randomUUID();
       }
     } catch (_) {
@@ -88,7 +487,7 @@ function App() {
   };
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
@@ -101,7 +500,7 @@ function App() {
     let interval: NodeJS.Timeout;
     if (isProcessingFile) {
       interval = setInterval(() => {
-        setLoadingDots(dots => dots.length >= 3 ? '' : dots + '.');
+        setLoadingDots((dots) => (dots.length >= 3 ? "" : dots + "."));
       }, 500);
     }
     return () => clearInterval(interval);
@@ -110,48 +509,65 @@ function App() {
   // Add function to fetch concept progress
   const fetchConceptProgress = useCallback(async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/concept-progress`, {
-        withCredentials: true
-      });
+      const response = await axios.get(
+        `${API_BASE_URL}/api/concept-progress`,
+        {
+          withCredentials: true,
+        },
+      );
       setConceptProgress(response.data);
-      console.log('Fetched concept progress:', response.data);
+      console.log("Fetched concept progress:", response.data);
     } catch (error) {
-      console.error('Error fetching concept progress:', error);
+      console.error("Error fetching concept progress:", error);
       // Set empty array on error to avoid breaking the UI
       setConceptProgress([]);
     }
   }, []);
 
-  const generateAIResponse = async (userMessage: string, fileType?: string) => {
-    let aiResponse = '';
+  const generateAIResponse = async (
+    userMessage: string,
+    fileType?: string,
+  ) => {
+    let aiResponse = "";
 
     if (fileType) {
-      if (fileType.startsWith('image/')) {
-        aiResponse = 'I see you\'ve shared an image. What would you like me to help you with regarding this image?';
-      } else if (fileType.includes('document') || fileType.includes('pdf')) {
-        aiResponse = 'I\'ve received your document. What aspects would you like me to review or analyze?';
+      if (fileType.startsWith("image/")) {
+        aiResponse =
+          "I see you've shared an image. What would you like me to help you with regarding this image?";
+      } else if (
+        fileType.includes("document") ||
+        fileType.includes("pdf")
+      ) {
+        aiResponse =
+          "I've received your document. What aspects would you like me to review or analyze?";
       } else {
-        aiResponse = 'I\'ve received your file. How can I help you with it?';
+        aiResponse =
+          "I've received your file. How can I help you with it?";
       }
     } else {
       const lowerMessage = userMessage.toLowerCase();
-      if (lowerMessage.includes('hello') || lowerMessage.includes('hi')) {
-        aiResponse = 'Hello! It\'s great to meet you. How can I assist you today?';
-      } else if (lowerMessage.includes('help')) {
-        aiResponse = 'I\'d be happy to help! Could you please provide more details about what you need assistance with?';
-      } else if (lowerMessage.includes('thank')) {
-        aiResponse = 'You\'re welcome! Is there anything else you\'d like to know?';
-      } else if (lowerMessage.includes('bye')) {
-        aiResponse = 'Goodbye! Feel free to return if you have more questions!';
+      if (lowerMessage.includes("hello") || lowerMessage.includes("hi")) {
+        aiResponse =
+          "Hello! It's great to meet you. How can I assist you today?";
+      } else if (lowerMessage.includes("help")) {
+        aiResponse =
+          "I'd be happy to help! Could you please provide more details about what you need assistance with?";
+      } else if (lowerMessage.includes("thank")) {
+        aiResponse =
+          "You're welcome! Is there anything else you'd like to know?";
+      } else if (lowerMessage.includes("bye")) {
+        aiResponse =
+          "Goodbye! Feel free to return if you have more questions!";
       } else {
-        aiResponse = 'That\'s an interesting point! Could you tell me more about what you\'re thinking?';
+        aiResponse =
+          "That's an interesting point! Could you tell me more about what you're thinking?";
       }
     }
 
     return {
       id: generateMessageId(),
       content: aiResponse,
-      sender: 'ai' as const,
+      sender: "ai" as const,
       timestamp: new Date(),
     };
   };
@@ -166,26 +582,35 @@ function App() {
     }
 
     const node = nodes[0] || {};
-    const labels = Array.isArray(node.labels) ? node.labels.map((l: string) => String(l).toLowerCase()) : [];
-    const propSubject = String(node?.properties?.subject ?? '').toLowerCase();
-    const topSubject = String(payload?.subject ?? '').toLowerCase();
+    const labels: string[] = Array.isArray(node.labels)
+      ? node.labels.map((l: string) => String(l).toLowerCase())
+      : [];
+    const propSubject = String(
+      node?.properties?.subject ?? "",
+    ).toLowerCase();
+    const topSubject = String(payload?.subject ?? "").toLowerCase();
     if (
-      labels.some((l) => l.includes('graphmetadata')) &&
-      (propSubject === 'default' || topSubject === 'default')
+      labels.some((l) => l.includes("graphmetadata")) &&
+      (propSubject === "default" || topSubject === "default")
     ) {
       return true;
     }
 
-    const id = String(node.id || '').toLowerCase();
-    const label = String(node?.labels?.[0] || '').toLowerCase();
-    const name = String(node?.properties?.name || '').toLowerCase();
-    const text = String(node?.properties?.text || '').toLowerCase();
-    return [id, label, name, text].some((value) => value === 'default' || value.includes('placeholder'));
+    const id = String(node.id || "").toLowerCase();
+    const label = String(node?.labels?.[0] || "").toLowerCase();
+    const name = String(node?.properties?.name || "").toLowerCase();
+    const text = String(node?.properties?.text || "").toLowerCase();
+    return [id, label, name, text].some(
+      (value) => value === "default" || value.includes("placeholder"),
+    );
   };
 
-  const fetchGraphData = async (graphId?: string, expectedChatId?: string) => {
+  const fetchGraphData = async (
+    graphId?: string,
+    expectedChatId?: string,
+  ) => {
     if (!graphId) return;
-    const requestKey = `${graphId}:${expectedChatId ?? ''}:${Date.now()}`;
+    const requestKey = `${graphId}:${expectedChatId ?? ""}:${Date.now()}`;
     latestGraphRequestRef.current = requestKey;
     setIsGraphLoading(true);
 
@@ -193,27 +618,32 @@ function App() {
       const maxAttempts = 20;
       let selectedData: any = null;
 
-      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      for (let attempt = 1;attempt <= maxAttempts;attempt += 1) {
         // Abort stale retries if a newer graph request has been issued.
         if (latestGraphRequestRef.current !== requestKey) {
           return;
         }
 
-        const response = await axios.get(`${API_BASE_URL}/api/view-graph`, {
-          params: {
-            graph_id: graphId,
-            t: Date.now(), // cache buster to avoid stale graph responses
+        const response = await axios.get(
+          `${API_BASE_URL}/api/view-graph`,
+          {
+            params: {
+              graph_id: graphId,
+              t: Date.now(), // cache buster to avoid stale graph responses
+            },
+            headers: {
+              "Cache-Control": "no-cache",
+              Pragma: "no-cache",
+            },
+            withCredentials: true,
           },
-          headers: {
-            'Cache-Control': 'no-cache',
-            Pragma: 'no-cache',
-          },
-          withCredentials: true,
-        });
+        );
 
         const payload = response.data;
         const placeholder = isPlaceholderGraph(payload);
-        console.log(`[Graph] Fetch attempt ${attempt}/${maxAttempts} for ${graphId} placeholder=${placeholder}`);
+        console.log(
+          `[Graph] Fetch attempt ${attempt}/${maxAttempts} for ${graphId} placeholder=${placeholder}`,
+        );
 
         if (!placeholder || attempt === maxAttempts) {
           selectedData = payload;
@@ -225,7 +655,7 @@ function App() {
       }
 
       if (!selectedData) {
-        throw new Error('Failed to load graph data');
+        throw new Error("Failed to load graph data");
       }
 
       if (latestGraphRequestRef.current !== requestKey) {
@@ -240,10 +670,10 @@ function App() {
         return currentId;
       });
     } catch (error) {
-      console.error('Error fetching graph:', error);
+      console.error("Error fetching graph:", error);
       setCurrentChatId((currentId) => {
         if (!expectedChatId || currentId === expectedChatId) {
-          setGraphData({ error: 'Failed to load graph data' });
+          setGraphData({ error: "Failed to load graph data" });
         }
         return currentId;
       });
@@ -257,8 +687,8 @@ function App() {
   const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.type !== 'application/pdf') {
-        alert('Please upload a PDF file');
+      if (file.type !== "application/pdf") {
+        showErrorToast("Please upload a PDF file");
         return;
       }
 
@@ -267,12 +697,12 @@ function App() {
       try {
         setIsProcessingFile(true);
         const formData = new FormData();
-        formData.append('file', file);
+        formData.append("file", file);
 
-        console.log('Uploading file:', {
+        console.log("Uploading file:", {
           name: file.name,
           type: file.type,
-          size: file.size
+          size: file.size,
         });
 
         // Always create a fresh graph for each uploaded document.
@@ -280,15 +710,15 @@ function App() {
         const url = `${API_BASE_URL}/upload/process-pdf`;
 
         setUploadProgress(0);
-        setProgressMessage('Uploading PDF...');
+        setProgressMessage("Uploading PDF...");
 
         const abortController = new AbortController();
         uploadAbortRef.current = abortController;
 
         const response = await fetch(url, {
-          method: 'POST',
+          method: "POST",
           body: formData,
-          credentials: 'include',
+          credentials: "include",
           signal: abortController.signal,
         });
 
@@ -296,10 +726,10 @@ function App() {
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
         let responseData: any = null;
-        let buffer = '';
+        let buffer = "";
 
         if (!reader) {
-          throw new Error('Failed to read response stream');
+          throw new Error("Failed to read response stream");
         }
 
         while (true) {
@@ -307,28 +737,36 @@ function App() {
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
+          const lines = buffer.split("\n");
           // Keep the last potentially incomplete line in the buffer
-          buffer = lines.pop() || '';
+          buffer = lines.pop() || "";
 
           for (const line of lines) {
-            if (line.startsWith('data: ')) {
+            if (line.startsWith("data: ")) {
               try {
                 const event = JSON.parse(line.slice(6));
-                if (event.type === 'progress') {
+                if (event.type === "progress") {
                   setUploadProgress(event.percent);
                   setProgressMessage(event.message);
-                } else if (event.type === 'complete') {
+                } else if (event.type === "complete") {
                   responseData = event.data;
                   setUploadProgress(100);
-                  setProgressMessage('Processing complete!');
-                } else if (event.type === 'error') {
-                  const baseError = event.error || 'Failed to process file';
-                  throw new Error(event.details ? `${baseError} (${event.details})` : baseError);
+                  setProgressMessage("Processing complete!");
+                } else if (event.type === "error") {
+                  const baseError =
+                    event.error || "Failed to process file";
+                  throw new Error(
+                    event.details
+                      ? `${baseError} (${event.details})`
+                      : baseError,
+                  );
                 }
               } catch (parseErr) {
                 if (parseErr instanceof SyntaxError) {
-                  console.warn('[Upload] Skipping malformed SSE line:', line);
+                  console.warn(
+                    "[Upload] Skipping malformed SSE line:",
+                    line,
+                  );
                 } else {
                   throw parseErr;
                 }
@@ -337,78 +775,104 @@ function App() {
           }
         }
 
-        console.log('[Upload] Parsed response data:', responseData);
+        console.log("[Upload] Parsed response data:", responseData);
 
         if (!responseData) {
-          throw new Error('No response data received from server');
+          throw new Error("No response data received from server");
         }
 
         const processed = responseData.processed_chunks;
         const uploadStatus = responseData.status;
         if (
-          typeof processed === 'number' &&
+          typeof processed === "number" &&
           processed < 1 &&
-          uploadStatus !== 'cancelled'
+          uploadStatus !== "cancelled"
         ) {
           const firstFail =
-            Array.isArray(responseData.failed_chunks) && responseData.failed_chunks.length > 0
-              ? String((responseData.failed_chunks[0] as { error?: string })?.error || '')
-              : '';
+            Array.isArray(responseData.failed_chunks) &&
+              responseData.failed_chunks.length > 0
+              ? String(
+                (
+                  responseData.failed_chunks[0] as {
+                    error?: string;
+                  }
+                )?.error || "",
+              )
+              : "";
           throw new Error(
             firstFail ||
-              'No concepts were written to the graph (0 chunks processed). On GCP, verify OPENAI_API_KEY / LLM config and Neo4j env on the AI service, and PYTHON_SERVICE_URL on the Node service.'
+            "No concepts were written to the graph (0 chunks processed). On GCP, verify OPENAI_API_KEY / LLM config and Neo4j env on the AI service, and PYTHON_SERVICE_URL on the Node service.",
           );
         }
 
         const fileUploadMessage: Message = {
           id: generateMessageId(),
           content: `Uploaded file: ${file.name}`,
-          sender: 'user',
+          sender: "user",
           timestamp: new Date(),
           file: {
             name: file.name,
             type: file.type,
-            url: URL.createObjectURL(file)
-          }
+            url: URL.createObjectURL(file),
+          },
         };
 
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'user',
-          text: fileUploadMessage.content,
-        }, { withCredentials: true });
+        await axios.post(
+          `${API_BASE_URL}/chat/message`,
+          {
+            chat_id: currentChatId,
+            sender: "user",
+            text: fileUploadMessage.content,
+          },
+          { withCredentials: true },
+        );
 
-        setChats(prevChats => prevChats.map(chat =>
-          chat.id === currentChatId
-            ? {
+        setChats((prevChats) =>
+          prevChats.map((chat) =>
+            chat.id === currentChatId
+              ? {
                 ...chat,
                 lastMessage: fileUploadMessage.content,
                 timestamp: new Date(),
-                messages: [...chat.messages, fileUploadMessage],
+                messages: [
+                  ...chat.messages,
+                  fileUploadMessage,
+                ],
               }
-            : chat
-        ));
+              : chat,
+          ),
+        );
 
         if (responseData.graph_id) {
-          await axios.post(`${API_BASE_URL}/chat/message`, {
-            chat_id: currentChatId,
-            graph_id: responseData.graph_id,
-          }, { withCredentials: true });
+          await axios.post(
+            `${API_BASE_URL}/chat/message`,
+            {
+              chat_id: currentChatId,
+              graph_id: responseData.graph_id,
+            },
+            { withCredentials: true },
+          );
 
-          setChats(prevChats => prevChats.map(chat => 
-            chat.id === currentChatId
-              ? { ...chat, graph_id: responseData.graph_id }
-              : chat
-          ));
+          setChats((prevChats) =>
+            prevChats.map((chat) =>
+              chat.id === currentChatId
+                ? { ...chat, graph_id: responseData.graph_id }
+                : chat,
+            ),
+          );
         }
 
-        const uploadIncludesGraph = responseData?.graph && !isPlaceholderGraph(responseData);
+        const uploadIncludesGraph =
+          responseData?.graph && !isPlaceholderGraph(responseData);
         if (uploadIncludesGraph) {
           // Prefer graph data returned by process-pdf when available.
           // This avoids a second fetch race where view-graph can briefly return placeholder data.
           setCurrentChatId((currentId) => {
             if (currentId === currentChatId) {
-              setGraphData({ ...responseData, graph_id: responseData.graph_id });
+              setGraphData({
+                ...responseData,
+                graph_id: responseData.graph_id,
+              });
               void fetchConceptProgress();
             }
             return currentId;
@@ -416,71 +880,85 @@ function App() {
         } else {
           await fetchGraphData(responseData.graph_id, currentChatId);
         }
-        
-
       } catch (error) {
         // If the user cancelled, just silently exit — no error message needed
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          console.log('PDF upload cancelled by user');
+        if (
+          error instanceof DOMException &&
+          error.name === "AbortError"
+        ) {
+          console.log("PDF upload cancelled by user");
           const cancelMsg: Message = {
             id: generateMessageId(),
-            content: 'Upload cancelled.',
-            sender: 'ai',
+            content: "Upload cancelled.",
+            sender: "ai",
             timestamp: new Date(),
           };
-          setChats(prevChats => prevChats.map(chat =>
-            chat.id === currentChatId
-              ? { ...chat, lastMessage: cancelMsg.content, timestamp: new Date(), messages: [...chat.messages, cancelMsg] }
-              : chat
-          ));
+          setChats((prevChats) =>
+            prevChats.map((chat) =>
+              chat.id === currentChatId
+                ? {
+                  ...chat,
+                  lastMessage: cancelMsg.content,
+                  timestamp: new Date(),
+                  messages: [...chat.messages, cancelMsg],
+                }
+                : chat,
+            ),
+          );
           return;
         }
 
-        console.error('Detailed upload error:', error);
-        let errorMessage = 'Failed to upload file. Please try again.';
-        
+        console.error("Detailed upload error:", error);
+        let errorMessage = "Failed to upload file. Please try again.";
+
         if (error instanceof Error) {
-          console.error('Error details:', {
+          console.error("Error details:", {
             message: error.message,
-            stack: error.stack
+            stack: error.stack,
           });
           errorMessage = error.message;
         }
-        
+
         const errorMsg: Message = {
           id: generateMessageId(),
           content: errorMessage,
-          sender: 'ai',
+          sender: "ai",
           timestamp: new Date(),
         };
 
-        setChats(prevChats => prevChats.map(chat =>
-          chat.id === currentChatId
-            ? {
+        setChats((prevChats) =>
+          prevChats.map((chat) =>
+            chat.id === currentChatId
+              ? {
                 ...chat,
                 lastMessage: errorMessage,
                 timestamp: new Date(),
                 messages: [...chat.messages, errorMsg],
               }
-            : chat
-        ));
+              : chat,
+          ),
+        );
 
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'ai',
-          text: errorMessage,
-        }, { withCredentials: true });
-        
-        alert(errorMessage);
+        await axios.post(
+          `${API_BASE_URL}/chat/message`,
+          {
+            chat_id: currentChatId,
+            sender: "ai",
+            text: errorMessage,
+          },
+          { withCredentials: true },
+        );
+
+        showErrorToast(errorMessage);
       } finally {
         uploadAbortRef.current = null;
         setSelectedFile(null);
         if (fileInputRef.current) {
-          fileInputRef.current.value = '';
+          fileInputRef.current.value = "";
         }
         setIsProcessingFile(false);
         setUploadProgress(0);
-        setProgressMessage('');
+        setProgressMessage("");
       }
     }
   };
@@ -488,13 +966,13 @@ function App() {
   const handleRemoveFile = () => {
     setSelectedFile(null);
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const trimmedInput = input.trim();
     if (!trimmedInput) return;
 
@@ -510,15 +988,15 @@ function App() {
     setInput('');
 
     // 4. Update the chat state with the new user message.
-    // This is asynchronous, but that's okay because we've already captured the last question.
-    setChats(prevChats => prevChats.map(chat => 
+    // Preserve the chat metadata while appending the new message.
+    setChats(prevChats => prevChats.map(chat =>
       chat.id === currentChatId
         ? {
-            ...chat,
-            lastMessage: trimmedInput,
-            timestamp: new Date(),
-            messages: [...chat.messages, userMessage],
-          }
+          ...chat,
+          lastMessage: trimmedInput,
+          timestamp: new Date(),
+          messages: [...chat.messages, userMessage],
+        }
         : chat
     ));
 
@@ -534,40 +1012,40 @@ function App() {
     }
 
     if (currentChat?.graph_id) {
-    try {
-      setIsTyping(true);
+      try {
+        setIsTyping(true);
         console.log('[Conversation] Sending request', { message: trimmedInput, graph_id: currentChat.graph_id });
-      const response = await axios.post(
+        const response = await axios.post(
           `${API_BASE_URL}/api/generate-conversation-response`,
           { message: trimmedInput, graph_id: currentChat.graph_id },
-        { withCredentials: true }
-      );
+          { withCredentials: true }
+        );
         console.log('[Conversation] Raw response', response.data);
-      const aiMessage: Message = {
+        const aiMessage: Message = {
           id: generateMessageId(),
           content: response.data.response || response.data.message || 'I received your message.',
-        sender: 'ai',
-        timestamp: new Date(),
-      };
+          sender: 'ai',
+          timestamp: new Date(),
+        };
 
-      setChats(prevChats => prevChats.map(chat =>
-        chat.id === currentChatId
-          ? {
+        setChats(prevChats => prevChats.map(chat =>
+          chat.id === currentChatId
+            ? {
               ...chat,
               lastMessage: aiMessage.content,
               timestamp: new Date(),
               messages: [...chat.messages, aiMessage],
             }
-          : chat
-      ));
+            : chat
+        ));
 
-      // Save AI response to backend
-      await axios.post(`${API_BASE_URL}/chat/message`, {
-        chat_id: currentChatId,
-        sender: 'ai',
-        text: aiMessage.content,
-      }, { withCredentials: true });
-    } catch (error) {
+        // Save AI response to backend
+        await axios.post(`${API_BASE_URL}/chat/message`, {
+          chat_id: currentChatId,
+          sender: 'ai',
+          text: aiMessage.content,
+        }, { withCredentials: true });
+      } catch (error) {
         console.error('Error generating conversation response:', error);
         const errorMessage: Message = {
           id: generateMessageId(),
@@ -589,22 +1067,22 @@ function App() {
         } catch (persistErr) {
           console.error('Failed to persist AI error message', persistErr);
         }
-    } finally {
-      setIsTyping(false);
-    }    
+      } finally {
+        setIsTyping(false);
+      }
     } else {
       try {
         setIsTyping(true);
         const aiMessage = await generateAIResponse(input);
-        
-        setChats(prevChats => prevChats.map(chat => 
+
+        setChats(prevChats => prevChats.map(chat =>
           chat.id === currentChatId
             ? {
-                ...chat,
-                lastMessage: aiMessage.content,
-                timestamp: new Date(),
-                messages: [...chat.messages, aiMessage],
-              }
+              ...chat,
+              lastMessage: aiMessage.content,
+              timestamp: new Date(),
+              messages: [...chat.messages, aiMessage],
+            }
             : chat
         ));
 
@@ -625,9 +1103,9 @@ function App() {
         setChats(prevChats => prevChats.map(chat =>
           chat.id === currentChatId
             ? {
-                ...chat,
-                messages: [...chat.messages, errorMessage],
-              }
+              ...chat,
+              messages: [...chat.messages, errorMessage],
+            }
             : chat
         ));
 
@@ -650,114 +1128,142 @@ function App() {
 
   const handleNewChat = useCallback(async () => {
     try {
-      console.log('Creating new chat...');
-      
-      // Clear graph state immediately when creating new chat
-      setGraphData(null);
-  
-      const response = await axios.post(`${API_BASE_URL}/chat/new`, {}, { withCredentials: true });
+      console.log("Creating new chat...");
 
-      console.log('Create chat response:', response.data);
-  
+      // Clear graph state immediately when creating a new chat
+      setGraphData(null);
+
+      const response = await axios.post(
+        `${API_BASE_URL}/chat/new`,
+        {},
+        { withCredentials: true },
+      );
+
+      console.log("Create chat response:", response.data);
+
       const newChatFromBackend = response.data.chat;
-  
+
       const newChat: Chat = {
         id: newChatFromBackend.chat_id,
-        title: 'New Chat',
-        lastMessage: 'Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.',
+        title: "New Chat",
+        lastMessage:
+          "Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.",
         timestamp: new Date(newChatFromBackend.date_created),
         messages: [
           {
-            id: 'welcome',
-            content: 'Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.',
-            sender: 'ai',
+            id: "welcome",
+            content:
+              "Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.",
+            sender: "ai",
             timestamp: new Date(),
           },
         ],
       };
-  
-      console.log('New chat object to add to state:', newChat);
-  
-      setChats(prev => [newChat, ...prev.filter(chat => chat.id !== newChat.id)]);
+
+      console.log("New chat object to add to state:", newChat);
+
+      setChats((prev) => [
+        newChat,
+        ...prev.filter((chat) => chat.id !== newChat.id),
+      ]);
       setCurrentChatId(newChat.id);
 
-      const welcomeMessage = 'Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.';
+      const welcomeMessage =
+        "Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.";
 
-      await axios.post(`${API_BASE_URL}/chat/message`, {
-        chat_id: newChat.id,
-        sender: 'ai',
-        text: welcomeMessage,
-      }, { withCredentials: true });
- 
+      await axios.post(
+        `${API_BASE_URL}/chat/message`,
+        {
+          chat_id: newChat.id,
+          sender: "ai",
+          text: welcomeMessage,
+        },
+        { withCredentials: true },
+      );
+
       return newChat;
-
     } catch (error: any) {
-      console.error('Error creating new chat:', error);
+      console.error("Error creating new chat:", error);
       if (error.response) {
-        console.error('Backend error response:', error.response.data);
+        console.error("Backend error response:", error.response.data);
       }
-      alert('Failed to create a new chat.');
+      showErrorToast("Failed to create a new chat.");
       return undefined;
     }
   }, []);
 
-  const fetchUserChats = useCallback(async (createIfEmpty = false) => {
-    setChatsLoading(true);
-    try {
-      const resUser = await axios.get(`${API_BASE_URL}/chat/user`, {
-        withCredentials: true
-      });
-      const userId = resUser.data;
+  const fetchUserChats = useCallback(
+    async (createIfEmpty = false) => {
+      setChatsLoading(true);
+      try {
+        const resUser = await axios.get(`${API_BASE_URL}/chat/user`, {
+          withCredentials: true,
+        });
+        const userId = resUser.data;
 
-      if (!userId) {
-        console.warn('No user ID returned while fetching chats');
-        setChatsLoading(false);
-        return;
-      }
-
-      const resChats = await axios.get(`${API_BASE_URL}/chat/${userId}/chats`, {
-        withCredentials: true
-      });
-      const userChats = Array.isArray(resChats.data) ? resChats.data : [];
-
-      if (userChats.length === 0) {
-        if (createIfEmpty) {
-          await handleNewChat();
-        } else {
-          setChats([]);
-          setCurrentChatId('');
+        if (!userId) {
+          console.warn("No user ID returned while fetching chats");
+          setChatsLoading(false);
+          return;
         }
-        setChatsLoading(false);
-        return;
-      }
 
-      const formattedChats: Chat[] = userChats.map((chat: any) => ({
-        id: chat.chat_id,
-        title: chat.title || 'Chat',
-        lastMessage: chat.messages?.at?.(-1)?.text || 'No messages yet',
-        timestamp: new Date(chat.date_created),
-        messages: (chat.messages || []).map((msg: any, index: number) => ({
-          id: `${chat.chat_id}-${index}`,
-          content: msg.text,
-          sender: msg.sender,
-          timestamp: new Date(msg.timestamp),
-        })),
-        graph_id: chat.graph_id,
-      }));
+        const resChats = await axios.get(
+          `${API_BASE_URL}/chat/${userId}/chats`,
+          {
+            withCredentials: true,
+          },
+        );
+        const userChats = Array.isArray(resChats.data)
+          ? resChats.data
+          : [];
 
-      setChats(formattedChats);
-      setCurrentChatId(prevId => {
-        if (prevId && formattedChats.some(chat => chat.id === prevId)) {
-          return prevId;
+        if (userChats.length === 0) {
+          if (createIfEmpty) {
+            await handleNewChat();
+          } else {
+            setChats([]);
+            setCurrentChatId("");
+          }
+          setChatsLoading(false);
+          return;
         }
-        return formattedChats[0]?.id ?? prevId;
-      });
-    } catch (err) {
-      console.error('Error fetching chats:', err);
-    } finally {
-      setChatsLoading(false);
-    }
-  }, [handleNewChat]);
+
+        const formattedChats: Chat[] = userChats.map((chat: any) => ({
+          id: chat.chat_id,
+          title: chat.title || "Chat",
+          lastMessage:
+            chat.messages?.at?.(-1)?.text || "No messages yet",
+          timestamp: new Date(chat.date_created),
+          messages: (chat.messages || []).map(
+            (msg: any, index: number) => ({
+              id: `${chat.chat_id}-${index}`,
+              content: msg.text,
+              sender: msg.sender,
+              timestamp: new Date(msg.timestamp),
+            }),
+          ),
+          graph_id: chat.graph_id,
+          folder_id: chat.folder_id ?? null,
+        }));
+
+        setChats(formattedChats);
+        setCurrentChatId((prevId) => {
+          if (
+            prevId &&
+            formattedChats.some((chat) => chat.id === prevId)
+          ) {
+            return prevId;
+          }
+          return formattedChats[0]?.id ?? prevId;
+        });
+      } catch (err) {
+        console.error("Error fetching chats:", err);
+      } finally {
+        setChatsLoading(false);
+      }
+    },
+    [handleNewChat],
+  );
 
   useEffect(() => {
     fetchUserChats(true);
@@ -770,9 +1276,9 @@ function App() {
   }, [chats, currentChatId]);
 
   const getFileIcon = (type: string) => {
-    if (type.startsWith('image/')) {
+    if (type.startsWith("image/")) {
       return <Image className="w-5 h-5" />;
-    } else if (type.includes('document') || type.includes('pdf')) {
+    } else if (type.includes("document") || type.includes("pdf")) {
       return <FileText className="w-5 h-5" />;
     }
     return <File className="w-5 h-5" />;
@@ -783,7 +1289,7 @@ function App() {
     if (renameInFlightRef.current === chatId) return;
 
     const trimmed = renameValue.trim();
-    const currentTitle = chats.find(c => c.id === chatId)?.title ?? '';
+    const currentTitle = chats.find((c) => c.id === chatId)?.title ?? "";
     renameInFlightRef.current = chatId;
     setRenamingChatId(null);
     if (!trimmed || trimmed === currentTitle) {
@@ -792,11 +1298,17 @@ function App() {
     }
 
     // Optimistic update
-    setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: trimmed } : c));
+    setChats((prev) =>
+      prev.map((c) => (c.id === chatId ? { ...c, title: trimmed } : c)),
+    );
     try {
-      await axios.patch(`${API_BASE_URL}/chat/rename/${chatId}`, { title: trimmed }, { withCredentials: true });
+      await axios.patch(
+        `${API_BASE_URL}/chat/rename/${chatId}`,
+        { title: trimmed },
+        { withCredentials: true },
+      );
     } catch (err) {
-      console.error('Error renaming chat:', err);
+      console.error("Error renaming chat:", err);
       // Revert on failure by refetching
       fetchUserChats(false);
     } finally {
@@ -809,72 +1321,88 @@ function App() {
     e.preventDefault();
 
     if (deletingChatRef.current === chatId) {
-      console.log('⚠️ Delete already in progress for chat:', chatId);
+      console.log("⚠️ Delete already in progress for chat:", chatId);
       return;
     }
 
-    console.log('🗑️ Delete button clicked for chat:', chatId);
-    console.log('Current chats:', chats.map(c => c.id));
+    console.log("🗑️ Delete button clicked for chat:", chatId);
+    console.log(
+      "Current chats:",
+      chats.map((c) => c.id),
+    );
 
     deletingChatRef.current = chatId;
 
-    console.log('✅ Proceeding with delete...');
-    console.log('Sending DELETE request to:', `${API_BASE_URL}/chat/delete/${chatId}`);
+    console.log("✅ Proceeding with delete...");
+    console.log(
+      "Sending DELETE request to:",
+      `${API_BASE_URL}/chat/delete/${chatId}`,
+    );
 
-    console.log('Updating local state optimistically...');
-    setChats(prev => {
+    console.log("Updating local state optimistically...");
+    setChats((prev) => {
       const beforeCount = prev.length;
-      const filtered = prev.filter(chat => chat.id !== chatId);
-      console.log(`Chats: ${beforeCount} -> ${filtered.length} (removed ${beforeCount - filtered.length})`);
+      const filtered = prev.filter((chat) => chat.id !== chatId);
+      console.log(
+        `Chats: ${beforeCount} -> ${filtered.length} (removed ${beforeCount - filtered.length})`,
+      );
       return filtered;
     });
-    
+
     if (currentChatId === chatId) {
-      console.log('Clearing current chat ID because it was deleted');
-      setCurrentChatId('');
+      console.log("Clearing current chat ID because it was deleted");
+      setCurrentChatId("");
     }
 
     try {
-      const response = await axios.delete(`${API_BASE_URL}/chat/delete/${chatId}`, {
-        withCredentials: true,
-      });
+      const response = await axios.delete(
+        `${API_BASE_URL}/chat/delete/${chatId}`,
+        {
+          withCredentials: true,
+        },
+      );
 
-      console.log('✅ Delete response received:', response.data);
-      console.log('Response status:', response.status);
-      console.log('✅ Chat deleted successfully on server');
-      
+      console.log("✅ Delete response received:", response.data);
+      console.log("Response status:", response.status);
+      console.log("✅ Chat deleted successfully on server");
+
       deletingChatRef.current = null;
-      
     } catch (error: any) {
-      console.error('❌ Error deleting chat on server:', error);
-      
+      console.error("❌ Error deleting chat on server:", error);
+
       deletingChatRef.current = null;
-      console.error('Error details:', {
+      console.error("Error details:", {
         message: error?.message,
         response: error?.response,
         status: error?.response?.status,
-        data: error?.response?.data
+        data: error?.response?.data,
       });
-      
-      console.log('Restoring chat in UI since server deletion failed...');
+
+      console.log("Restoring chat in UI since server deletion failed...");
       await fetchUserChats(false);
-      
+
       if (error?.response) {
-        console.error('Backend error status:', error.response.status);
-        console.error('Backend error response:', error.response.data);
-        alert(`Failed to delete chat: ${error.response.data?.message || error.response.statusText || 'Unknown error'}`);
+        console.error("Backend error status:", error.response.status);
+        console.error("Backend error response:", error.response.data);
+        showErrorToast(
+          `Failed to delete chat: ${error.response.data?.message || error.response.statusText || "Unknown error"}`,
+        );
       } else if (error?.request) {
-        console.error('No response received from server');
-        alert('Failed to delete chat: No response from server. Is the server running?');
+        console.error("No response received from server");
+        showErrorToast(
+          "Failed to delete chat: No response from server. Is the server running?",
+        );
       } else {
-        console.error('Request setup error:', error.message);
-        alert(`Failed to delete chat: ${error.message}`);
+        console.error("Request setup error:", error.message);
+        showErrorToast(`Failed to delete chat: ${error.message}`);
       }
     }
   };
 
-  const ResizeHandle = ({ className = '' }) => (
-    <PanelResizeHandle className={`w-2 hover:bg-teal-500/20 transition-colors duration-150 ${className}`}>
+  const ResizeHandle = ({ className = "" }) => (
+    <PanelResizeHandle
+      className={`w-2 hover:bg-teal-500/20 transition-colors duration-150 ${className}`}
+    >
       <div className="h-full w-[2px] bg-gray-200 mx-auto" />
     </PanelResizeHandle>
   );
@@ -892,9 +1420,9 @@ function App() {
     navigate(`/quiz?${query.toString()}`);
   };
 
-  // Load the graph when the chat changes
+  // Load the graph when the chat changes.
   useEffect(() => {
-      const currentChat = chats.find(chat => chat.id === currentChatId);
+    const currentChat = chats.find(chat => chat.id === currentChatId);
     if (currentChat?.graph_id) {
       setGraphData(null);
       setIsGraphLoading(true);
@@ -905,10 +1433,9 @@ function App() {
       setIsGraphLoading(false);
       setGraphData(null);
     }
-  }, [currentChatId, currentChat?.graph_id]); // Dependency array ensures this runs when the chat changes
+  }, [currentChatId, currentChat?.graph_id]);
 
-  // Name untitled chats after their graph's center topic. Only touches the default "New Chat"
-  // title, so chats the user renamed are left alone.
+  // Name only default-titled chats after their graph center.
   useEffect(() => {
     if (!currentChat || currentChat.title !== 'New Chat' || !graphData?.graph || isPlaceholderGraph(graphData)) return;
     if (graphData.graph_id !== currentChat.graph_id) return; // graph still belongs to the previous chat
@@ -920,7 +1447,373 @@ function App() {
       console.error('Could not auto-name chat', err);
       setChats(prev => prev.map(chat => chat.id === chatId && chat.title === title ? { ...chat, title: 'New Chat' } : chat));
     });
-  }, [graphData, currentChat]);
+  }, [graphData, currentChat]); // Dependency array ensures this runs when the chat changes
+
+  const renderChatItem = (chat: Chat) => {
+    const isSelected = currentChatId === chat.id;
+    const isMenuOpen = activeMenuChatId === chat.id;
+
+    return (
+      <div
+        key={chat.id}
+        draggable
+        onDragStart={(e) => handleChatDragStart(e, chat.id)}
+        onDragEnd={() => {
+          setDraggedChatId(null);
+          setDragOverFolderId(null);
+        }}
+        onClick={(e) => {
+          if (
+            (e.target as HTMLElement).closest(
+              'button[title="Delete chat"]',
+            ) ||
+            (e.target as HTMLElement).closest(
+              'button[title="Rename chat"]',
+            ) ||
+            (e.target as HTMLElement).closest(
+              'button[title="Move to folder"]',
+            ) ||
+            renamingChatId === chat.id
+          ) {
+            return;
+          }
+          handleChatSelect(chat.id);
+        }}
+        className={`p-3 min-h-[64px] hover:bg-slate-800/70 cursor-grab active:cursor-grabbing border-b border-slate-700/30 transition-colors duration-150 relative group ${isSelected
+          ? "bg-slate-800 border-l-2 border-l-teal-400"
+          : ""
+          }`}
+      >
+        <div className="flex items-center space-x-3">
+          <MessageSquare className="w-5 h-5 text-teal-400 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            {renamingChatId === chat.id ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleRenameChat(chat.id);
+                }}
+                className="flex items-center gap-1"
+              >
+                <input
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e) =>
+                    setRenameValue(e.target.value)
+                  }
+                  onBlur={() => handleRenameChat(chat.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setRenamingChatId(null);
+                      setRenameValue(chat.title);
+                    }
+                  }}
+                  className="w-full bg-slate-700 text-slate-200 text-sm rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-teal-400"
+                />
+                <button
+                  type="submit"
+                  className="p-0.5 hover:bg-teal-500/20 rounded flex-shrink-0"
+                  title="Confirm rename"
+                >
+                  <Check className="w-3.5 h-3.5 text-teal-400" />
+                </button>
+              </form>
+            ) : (
+              <>
+                <h3 className="text-sm font-medium text-slate-200 truncate">
+                  {chat.title}
+                </h3>
+                <p className="text-xs text-slate-500 truncate">
+                  {chat.lastMessage}
+                </p>
+              </>
+            )}
+          </div>
+
+          <div
+            className="flex items-center gap-0.5"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+            }}
+          >
+            {/* Move to Folder Button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setActiveMenuChatId(
+                  isMenuOpen ? null : chat.id,
+                );
+              }}
+              className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-teal-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
+              title="Move to folder"
+              type="button"
+            >
+              <Folder className="w-3.5 h-3.5 text-yellow-500 hover:text-yellow-400" />
+            </button>
+
+            {/* Rename Button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setRenamingChatId(chat.id);
+                setRenameValue(chat.title);
+              }}
+              className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-teal-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
+              title="Rename chat"
+              type="button"
+            >
+              <Pencil className="w-3.5 h-3.5 text-teal-400 hover:text-teal-300" />
+            </button>
+
+            {/* Delete Button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                handleDeleteChat(chat.id, e);
+              }}
+              className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-red-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
+              title="Delete chat"
+              type="button"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-300" />
+            </button>
+          </div>
+        </div>
+
+        {/* Move Folder Dropdown Menu */}
+        {isMenuOpen && (
+          <div
+            className="absolute right-2 top-10 z-50 w-48 bg-slate-900 border border-slate-700 rounded-md shadow-xl py-1 text-xs"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1 font-semibold text-slate-400 border-b border-slate-800">
+              Move to Folder
+            </div>
+            {(chat as any).folder_id && (
+              <button
+                onClick={() => handleMoveChat(chat.id, null)}
+                className="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-amber-400 border-b border-slate-800"
+              >
+                ✕ Remove from folder
+              </button>
+            )}
+            {folders.length === 0 ? (
+              <div className="px-3 py-1.5 text-slate-500 italic">
+                No folders created
+              </div>
+            ) : (
+              folders.map((f) => (
+                <button
+                  key={f.folder_id}
+                  onClick={() =>
+                    handleMoveChat(chat.id, f.folder_id)
+                  }
+                  className={`w-full text-left px-3 py-1.5 hover:bg-slate-800 truncate ${(chat as any).folder_id === f.folder_id
+                    ? "text-teal-400 font-semibold"
+                    : "text-slate-300"
+                    }`}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Folder className="w-4 h-4 text-yellow-500" />
+                    {f.name}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderFolderTree = (
+    folder: (typeof folders)[number],
+    depth: number,
+  ): React.ReactNode => {
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const folderHasSearchMatch = (
+      candidate: (typeof folders)[number],
+    ): boolean => {
+      if (!normalizedSearch) return true;
+      if (candidate.name.toLowerCase().includes(normalizedSearch))
+        return true;
+      if (
+        chats.some(
+          (chat) =>
+            chat.folder_id === candidate.folder_id &&
+            chat.title.toLowerCase().includes(normalizedSearch),
+        )
+      )
+        return true;
+      return folders
+        .filter(
+          (child) => child.parent_folder_id === candidate.folder_id,
+        )
+        .some(folderHasSearchMatch);
+    };
+
+    if (!folderHasSearchMatch(folder)) return null;
+
+    const folderChats = chats.filter(
+      (chat) =>
+        chat.folder_id === folder.folder_id &&
+        (!normalizedSearch ||
+          chat.title.toLowerCase().includes(normalizedSearch)),
+    );
+    const childFolders = folders.filter(
+      (child) =>
+        child.parent_folder_id === folder.folder_id &&
+        folderHasSearchMatch(child),
+    );
+    const isExpanded = !!expandedFolders[folder.folder_id];
+
+    return (
+      <div
+        key={folder.folder_id}
+        className="space-y-1"
+        style={{ marginLeft: `${depth * 12}px` }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = "move";
+          setDragOverFolderId(folder.folder_id);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            setDragOverFolderId(null);
+          }
+        }}
+        onDrop={(e) => {
+          e.stopPropagation();
+          void handleChatDrop(e, folder.folder_id);
+        }}
+      >
+        <div
+          draggable
+          onDragStart={(e) =>
+            handleFolderDragStart(e, folder.folder_id)
+          }
+          onDragEnd={() => {
+            setDragOverFolderId(null);
+          }}
+          onClick={() =>
+            setExpandedFolders((prev) => ({
+              ...prev,
+              [folder.folder_id]: !prev[folder.folder_id],
+            }))
+          }
+          className={`group flex min-h-[64px] cursor-grab items-center justify-between rounded p-2 text-sm font-medium text-slate-200 transition-colors hover:text-white active:cursor-grabbing ${dragOverFolderId === folder.folder_id
+            ? "bg-teal-500/20 ring-1 ring-teal-400"
+            : "hover:bg-slate-800"
+            }`}
+        >
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            <span
+              className="text-xs text-slate-400"
+              aria-hidden="true"
+            >
+              {isExpanded ? "▼" : "▶"}
+            </span>
+            <Folder className="h-5 w-5 flex-shrink-0 text-yellow-500" />
+            {renamingFolderId === folder.folder_id ? (
+              <form
+                className="min-w-0 flex-1"
+                onClick={(e) => e.stopPropagation()}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void handleRenameFolder(folder.folder_id);
+                }}
+              >
+                <input
+                  autoFocus
+                  value={folderRenameValue}
+                  onChange={(e) =>
+                    setFolderRenameValue(e.target.value)
+                  }
+                  onBlur={() =>
+                    void handleRenameFolder(
+                      folder.folder_id,
+                    )
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape")
+                      setRenamingFolderId(null);
+                  }}
+                  className="w-full rounded bg-slate-700 px-1.5 py-0.5 text-sm text-slate-200 outline-none focus:ring-1 focus:ring-teal-400"
+                />
+              </form>
+            ) : (
+              <span className="truncate">{folder.name}</span>
+            )}
+          </span>
+          <div className="flex items-center gap-1">
+            <span className="rounded-full bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">
+              {folderChats.length}
+            </span>
+            <button
+              type="button"
+              title="Create subfolder"
+              onClick={(e) => {
+                e.stopPropagation();
+                setNewFolderParentId(folder.folder_id);
+                setIsCreatingFolder(true);
+                setExpandedFolders((prev) => ({
+                  ...prev,
+                  [folder.folder_id]: true,
+                }));
+              }}
+              className="rounded p-1.5 opacity-0 transition-all duration-150 hover:bg-teal-500/20 hover:!opacity-100 group-hover:opacity-70"
+            >
+              <Folder className="h-3.5 w-3.5 text-yellow-500" />
+            </button>
+            <button
+              type="button"
+              title="Rename folder"
+              onClick={(e) => {
+                e.stopPropagation();
+                setRenamingFolderId(folder.folder_id);
+                setFolderRenameValue(folder.name);
+              }}
+              className="rounded p-1.5 opacity-0 transition-all duration-150 hover:bg-teal-500/20 hover:!opacity-100 group-hover:opacity-70"
+            >
+              <Pencil className="h-3.5 w-3.5 text-teal-300" />
+            </button>
+            <button
+              type="button"
+              title="Delete folder"
+              onClick={(e) =>
+                requestDeleteFolder(folder.folder_id, e)
+              }
+              className="p-1.5 opacity-0 transition-all duration-150 hover:!opacity-100 hover:bg-red-500/20 group-hover:opacity-70 rounded"
+            >
+              <Trash2 className="h-3.5 w-3.5 text-red-400 hover:text-red-300" />
+            </button>
+          </div>
+        </div>
+
+        {isExpanded && (
+          <div className="ml-2 space-y-1 border-l border-slate-700/50 pl-2">
+            {childFolders.map((child) =>
+              renderFolderTree(child, depth + 1),
+            )}
+            {folderChats.length === 0 &&
+              childFolders.length === 0 ? (
+              <div className="px-2 py-1 text-[11px] italic text-slate-500">
+                Folder is empty
+              </div>
+            ) : (
+              folderChats.map((chat) => renderChatItem(chat))
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // Show loading state while fetching chats
   if (chatsLoading) {
@@ -939,8 +1832,13 @@ function App() {
     return (
       <div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50 via-slate-50 to-blue-50">
         <div className="text-center space-y-4">
-          <h2 className="text-2xl font-semibold text-slate-800">No chats yet</h2>
-          <p className="text-slate-500">Start a new conversation to begin chatting with your study assistant.</p>
+          <h2 className="text-2xl font-semibold text-slate-800">
+            No chats yet
+          </h2>
+          <p className="text-slate-500">
+            Start a new conversation to begin chatting with your
+            study assistant.
+          </p>
           <button
             onClick={() => void handleNewChat()}
             className="px-6 py-2.5 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all duration-200 shadow-md shadow-teal-500/20 btn-lift"
@@ -954,17 +1852,86 @@ function App() {
 
   return (
     <div className="flex h-screen bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
+      {errorToast && (
+        <div
+          role="alert"
+          className="fixed bottom-5 right-5 z-[200] flex max-w-sm items-start gap-3 rounded-lg border border-red-400/40 bg-slate-900 px-4 py-3 text-sm text-red-100 shadow-xl shadow-slate-950/30"
+        >
+          <span className="flex-1">{errorToast}</span>
+          <button
+            type="button"
+            aria-label="Dismiss error"
+            onClick={() => setErrorToast(null)}
+            className="shrink-0 rounded p-0.5 text-red-200 hover:bg-red-400/20 hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+      {folderToDelete && (
+        <div
+          className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget)
+              setFolderToDelete(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-folder-title"
+            className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="delete-folder-title"
+              className="text-base font-semibold"
+            >
+              Delete folder?
+            </h2>
+            <p className="mt-2 text-sm leading-5 text-slate-400">
+              Delete{" "}
+              <span className="font-medium text-slate-200">
+                {folderToDelete.name}
+              </span>
+              ? Its chats will move to Unorganized.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setFolderToDelete(null)}
+                className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDeleteFolder()}
+                className="rounded-lg bg-red-500/90 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-500"
+              >
+                Delete folder
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div
-        className={`${
-          isSidebarCollapsed ? 'w-12' : 'w-64'
-        } bg-slate-900 flex flex-col transition-all duration-300`}
+        className={`relative flex flex-col bg-slate-900 ${isResizingSidebar ? "select-none" : "transition-[width] duration-300"}`}
+        style={{
+          width: isSidebarCollapsed ? 64 : sidebarWidth,
+          minWidth: isSidebarCollapsed ? 64 : 220,
+        }}
       >
         <div className="p-4 border-b border-slate-700/50 flex justify-between items-center">
           {!isSidebarCollapsed && (
-            <h2 className="text-lg font-semibold text-slate-100">Chat History</h2>
+            <h2 className="text-lg font-semibold text-slate-100">
+              Chats
+            </h2>
           )}
           <button
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            onClick={() =>
+              setIsSidebarCollapsed(!isSidebarCollapsed)
+            }
             className="p-1 hover:bg-slate-700/50 rounded-lg transition-colors duration-150"
           >
             {isSidebarCollapsed ? (
@@ -974,143 +1941,222 @@ function App() {
             )}
           </button>
         </div>
-        
-        <button
-          onClick={() => void handleNewChat()}
-          className={`m-4 p-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all duration-200 flex items-center justify-center gap-2 shadow-md shadow-teal-500/20 btn-lift ${
-            isSidebarCollapsed ? 'p-2' : ''
-          }`}
-        >
-          <Plus className="w-5 h-5" />
-          {!isSidebarCollapsed && <span>New Chat</span>}
-        </button>
 
+        {/* Search Bar */}
         {!isSidebarCollapsed && (
-          <div className="flex-1 overflow-y-auto">
-            {chats
-              .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-              .map((chat) => (
-              <div
-                key={chat.id}
-                onClick={(e) => {
-                  if ((e.target as HTMLElement).closest('button[title="Delete chat"]') || (e.target as HTMLElement).closest('button[title="Rename chat"]') || renamingChatId === chat.id) {
-                    return;
-                  }
-                  handleChatSelect(chat.id);
-                }}
-                className={`p-3 hover:bg-slate-800/70 cursor-pointer border-b border-slate-700/30 transition-colors duration-150 relative group ${
-                  currentChatId === chat.id ? 'bg-slate-800 border-l-2 border-l-teal-400' : ''
-                }`}
-              >
-                <div className="flex items-center space-x-3">
-                  <MessageSquare className="w-5 h-5 text-teal-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    {renamingChatId === chat.id ? (
-                      <form
-                        onSubmit={(e) => { e.preventDefault(); handleRenameChat(chat.id); }}
-                        className="flex items-center gap-1"
-                      >
-                        <input
-                          autoFocus
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onBlur={() => handleRenameChat(chat.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') {
-                              setRenamingChatId(null);
-                              setRenameValue(chat.title);
-                            }
-                          }}
-                          className="w-full bg-slate-700 text-slate-200 text-sm rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-teal-400"
-                        />
-                        <button type="submit" className="p-0.5 hover:bg-teal-500/20 rounded flex-shrink-0" title="Confirm rename">
-                          <Check className="w-3.5 h-3.5 text-teal-400" />
-                        </button>
-                      </form>
-                    ) : (
-                      <>
-                        <h3 className="text-sm font-medium text-slate-200 truncate">
-                          {chat.title}
-                        </h3>
-                        <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
-                      </>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-0.5"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                    }}
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                    }}
-                  >
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        setRenamingChatId(chat.id);
-                        setRenameValue(chat.title);
-                      }}
-                      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-teal-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
-                      title="Rename chat"
-                      type="button"
-                    >
-                      <Pencil className="w-3.5 h-3.5 text-teal-400 hover:text-teal-300" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        console.log('Delete button onClick triggered for chat:', chat.id);
-                        handleDeleteChat(chat.id, e);
-                      }}
-                      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-red-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
-                      title="Delete chat"
-                      type="button"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-300" />
-                    </button>
-                  </div>
-                </div>
-                <div className="mt-1 text-xs text-slate-500">
-                  {(() => {
-                    const now = new Date();
-                    const diff = now.getTime() - chat.timestamp.getTime();
-                    const mins = Math.floor(diff / 60000);
-                    const hrs = Math.floor(diff / 3600000);
-                    const days = Math.floor(diff / 86400000);
-                    if (mins < 1) return 'Just now';
-                    if (mins < 60) return `${mins}m ago`;
-                    if (hrs < 24) return `${hrs}h ago`;
-                    if (days === 1) return 'Yesterday';
-                    if (days < 7) return `${days}d ago`;
-                    return chat.timestamp.toLocaleDateString();
-                  })()}
-                </div>
-              </div>
-            ))}
+          <div className="px-4 pt-3 pb-1">
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search chats..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-teal-400"
+            />
           </div>
         )}
-        <div className="p-4 border-t border-slate-700/50 flex flex-col gap-2">
-          <button onClick={() => navigate('/')} className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200" title="Home">
-            <Home className="w-5 h-5" />
-            {!isSidebarCollapsed && <span className="text-sm">Home</span>}
+
+        {/* Action Buttons: New Chat & + Folder */}
+        {isSidebarCollapsed && (
+          <div className="px-2 pt-2">
+            <button
+              type="button"
+              onClick={focusSearchAfterExpand}
+              className="flex min-h-[50px] w-full items-center justify-center rounded-lg border border-slate-700 bg-slate-800 p-2 text-slate-200 transition-all duration-200 hover:bg-slate-700"
+              title="Search chats"
+              aria-label="Search chats"
+            >
+              <Search className="h-4 w-4 text-gray-400" />
+            </button>
+          </div>
+        )}
+        <div
+          className={
+            isSidebarCollapsed
+              ? "flex flex-col gap-2 p-2"
+              : "grid grid-cols-2 gap-2 p-4"
+          }
+        >
+          <button
+            onClick={() => void handleNewChat()}
+            className="p-2 min-h-[50px] bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition-all duration-200 flex items-center justify-center gap-1.5 text-xs font-semibold"
+          >
+            <MessageSquare className="w-4 h-4 text-teal-400" />
+            {!isSidebarCollapsed && <span>+ Chat</span>}
           </button>
-          <button onClick={() => navigate('/quiz')} className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200" title="Quizzes">
+
+          <button
+            onClick={() => {
+              setIsSidebarCollapsed(false);
+              setNewFolderParentId(null);
+              setIsCreatingFolder(true);
+            }}
+            className="p-2 min-h-[50px] bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition-all duration-200 flex items-center justify-center gap-1.5 text-xs font-semibold"
+            title="Create folder"
+            aria-label="Create folder"
+          >
+            <Folder className="w-4 h-4 text-yellow-500" />
+            {!isSidebarCollapsed && <span>+ Folder</span>}
+          </button>
+        </div>
+
+        {/* Inline Create Folder Form */}
+        {!isSidebarCollapsed && isCreatingFolder && (
+          <form
+            onSubmit={handleCreateFolderSubmit}
+            className="mx-4 mb-3 p-2 bg-slate-800/90 border border-slate-700 rounded-lg flex items-center gap-1.5 min-w-0"
+          >
+            <input
+              autoFocus
+              type="text"
+              placeholder={
+                newFolderParentId
+                  ? "Subfolder name..."
+                  : "Folder name..."
+              }
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              className="w-full min-w-0 bg-slate-900 border border-teal-500/50 rounded px-2 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-400"
+            />
+            <button
+              type="submit"
+              className="shrink-0 px-2.5 py-1 bg-teal-500 hover:bg-teal-600 text-white text-xs font-semibold rounded transition-colors"
+            >
+              Add
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsCreatingFolder(false);
+                setNewFolderName("");
+                setNewFolderParentId(null);
+              }}
+              className="shrink-0 px-1.5 py-1 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-xs rounded transition-colors"
+            >
+              ✕
+            </button>
+          </form>
+        )}
+
+        {/* Folder & Chat List Container */}
+        {!isSidebarCollapsed && (
+          <div className="flex-1 overflow-y-auto px-2 space-y-2">
+            {/* 1. Folders Tree */}
+            {folders
+              .filter((folder) => !folder.parent_folder_id)
+              .map((folder) => renderFolderTree(folder, 0))}
+
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = "move";
+                setDragOverFolderId("root");
+              }}
+              onDragLeave={(e) => {
+                if (
+                  !e.currentTarget.contains(
+                    e.relatedTarget as Node,
+                  )
+                ) {
+                  setDragOverFolderId(null);
+                }
+              }}
+              onDrop={(e) => {
+                e.stopPropagation();
+                void handleChatDrop(e, null);
+              }}
+              className={`rounded transition-colors ${dragOverFolderId === "root" ? "bg-teal-500/10 ring-1 ring-teal-400" : ""}`}
+            >
+              {/* 2. Unorganized Header */}
+              {folders.length > 0 && (
+                <div className="pt-2 px-2 min-h-[28px] flex items-center justify-between text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                  <span>Unorganized</span>
+                  <span className="normal-case text-[10px] bg-slate-800 px-1.5 py-0.5 rounded-full text-slate-400">
+                    {
+                      chats.filter(
+                        (chat) =>
+                          !chat.folder_id &&
+                          chat.title
+                            .toLowerCase()
+                            .includes(
+                              searchQuery.toLowerCase(),
+                            ),
+                      ).length
+                    }
+                  </span>
+                </div>
+              )}
+
+              {/* 3. Unorganized Chats */}
+              {chats
+                .filter(
+                  (c: any) =>
+                    !c.folder_id &&
+                    c.title
+                      .toLowerCase()
+                      .includes(
+                        searchQuery.toLowerCase(),
+                      ),
+                )
+                .sort(
+                  (a, b) =>
+                    b.timestamp.getTime() -
+                    a.timestamp.getTime(),
+                )
+                .map((chat) => renderChatItem(chat))}
+            </div>
+          </div>
+        )}
+        <div
+          className={`${isSidebarCollapsed ? "p-2" : "p-4"} mt-auto border-t border-slate-700/50 flex flex-col gap-2`}
+        >
+          <button
+            onClick={() => navigate("/")}
+            className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200"
+            title="Home"
+            aria-label="Home"
+          >
+            <Home className="w-5 h-5" />
+            {!isSidebarCollapsed && (
+              <span className="text-sm">Home</span>
+            )}
+          </button>
+          <button onClick={() => navigate('/quiz')} className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200" title="Quizzes" aria-label="Quizzes">
             <ClipboardList className="w-5 h-5" />
             {!isSidebarCollapsed && <span className="text-sm">Quizzes</span>}
           </button>
-          <button onClick={() => navigate('/profile')} className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200" title="Profile">
+          <button
+            onClick={() => navigate("/profile")}
+            className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200"
+            title="Profile"
+            aria-label="Profile"
+          >
             <User className="w-5 h-5" />
-            {!isSidebarCollapsed && <span className="text-sm">Profile</span>}
+            {!isSidebarCollapsed && (
+              <span className="text-sm">Profile</span>
+            )}
           </button>
-          <button className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200 opacity-50 cursor-not-allowed" title="Settings (coming soon)">
+          <button
+            className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200 opacity-50 cursor-not-allowed"
+            title="Settings (coming soon)"
+            aria-label="Settings (coming soon)"
+          >
             <Settings className="w-5 h-5" />
-            {!isSidebarCollapsed && <span className="text-sm">Settings</span>}
+            {!isSidebarCollapsed && (
+              <span className="text-sm">Settings</span>
+            )}
           </button>
         </div>
+        {!isSidebarCollapsed && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize sidebar"
+            onMouseDown={startSidebarResize}
+            className="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize bg-transparent transition-colors hover:bg-teal-400/60"
+          />
+        )}
       </div>
 
       <PanelGroup direction="horizontal" className="flex-1">
@@ -1124,16 +2170,21 @@ function App() {
                     Processing your PDF{loadingDots}
                   </p>
                   <p className="text-gray-500 text-sm mb-6">
-                    {progressMessage || 'Extracting concepts and building your knowledge graph'}
+                    {progressMessage ||
+                      "Extracting concepts and building your knowledge graph"}
                   </p>
                   <div className="w-full max-w-xs">
                     <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-teal-500 rounded-full transition-all duration-700 ease-out"
-                        style={{ width: `${uploadProgress}%` }}
+                        style={{
+                          width: `${uploadProgress}%`,
+                        }}
                       />
                     </div>
-                    <p className="text-center text-xs text-gray-400 mt-2">{uploadProgress}%</p>
+                    <p className="text-center text-xs text-gray-400 mt-2">
+                      {uploadProgress}%
+                    </p>
                   </div>
                   <button
                     onClick={async () => {
@@ -1141,7 +2192,13 @@ function App() {
                       uploadAbortRef.current?.abort();
                       // 2. Tell the server to cancel the AI processing
                       try {
-                        await fetch(`${API_BASE_URL}/upload/cancel-processing`, { method: 'POST', credentials: 'include' });
+                        await fetch(
+                          `${API_BASE_URL}/upload/cancel-processing`,
+                          {
+                            method: "POST",
+                            credentials: "include",
+                          },
+                        );
                       } catch {
                         // Best-effort — server may already have cleaned up
                       }
@@ -1149,8 +2206,9 @@ function App() {
                       setIsProcessingFile(false);
                       setSelectedFile(null);
                       setUploadProgress(0);
-                      setProgressMessage('');
-                      if (fileInputRef.current) fileInputRef.current.value = '';
+                      setProgressMessage("");
+                      if (fileInputRef.current)
+                        fileInputRef.current.value = "";
                     }}
                     className="mt-6 px-4 py-2 text-sm text-red-500 border border-red-300 rounded-lg hover:bg-red-50 transition-colors duration-150"
                   >
@@ -1158,7 +2216,11 @@ function App() {
                   </button>
                 </div>
               ) : (
-                <GraphVisualization data={graphData} conceptProgress={conceptProgress} isLoading={isGraphLoading} />
+                <GraphVisualization
+                  data={graphData}
+                  conceptProgress={conceptProgress}
+                  isLoading={isGraphLoading}
+                />
               )}
             </div>
           </div>
@@ -1185,7 +2247,7 @@ function App() {
                     <option value={15}>15 questions</option>
                   </select>
                 </div>
-                
+
                 {/* Question Type Control */}
                 <div className="flex items-center gap-2">
                   <label className="text-sm font-medium text-slate-600">Question Type:</label>
@@ -1201,25 +2263,25 @@ function App() {
                     <option value="open-ended">Open-Ended</option>
                   </select>
                 </div>
-                
+
                 {/* Divider */}
                 <div className="h-8 w-px bg-slate-200"></div>
-                
+
                 <button
                   onClick={() => {
                     if (currentChat?.graph_id) {
                       navigate('/progress');
                     } else {
-                      alert("Please upload a document to view progress.");
+                      showErrorToast("Please upload a document to view progress.");
                     }
                   }}
                   className="px-4 py-2 bg-white text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 hover:border-teal-300 transition-all duration-200 flex items-center justify-center gap-2 font-medium shadow-sm btn-lift"
                 >
                   View Progress
                 </button>
-                
-                
-                
+
+
+
                 {currentChat?.graph_id && (
                   <button
                     onClick={startQuiz}
@@ -1253,16 +2315,14 @@ function App() {
                   className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} ${message.sender === 'user' ? 'animate-slide-in-right' : 'animate-slide-in-left'} group/msg`}
                 >
                   <div
-                    className={`flex items-end gap-2 max-w-[75%] ${
-                      message.sender === 'user' ? 'flex-row-reverse' : ''
-                    }`}
+                    className={`flex items-end gap-2 max-w-[75%] ${message.sender === 'user' ? 'flex-row-reverse' : ''
+                      }`}
                   >
                     {/* Avatar */}
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      message.sender === 'user'
-                        ? 'bg-gradient-to-br from-teal-400 to-teal-600'
-                        : 'bg-gradient-to-br from-slate-200 to-slate-300'
-                    }`}>
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${message.sender === 'user'
+                      ? 'bg-gradient-to-br from-teal-400 to-teal-600'
+                      : 'bg-gradient-to-br from-slate-200 to-slate-300'
+                      }`}>
                       {message.sender === 'user' ? (
                         <User className="w-3.5 h-3.5 text-white" />
                       ) : (
@@ -1271,28 +2331,25 @@ function App() {
                     </div>
                     {/* Bubble */}
                     <div
-                      className={`px-3.5 py-2.5 ${
-                        message.sender === 'user'
-                          ? 'bg-gradient-to-br from-teal-500 to-teal-600 text-white rounded-2xl rounded-br-md shadow-md shadow-teal-500/15'
-                          : 'bg-white text-slate-800 rounded-2xl rounded-bl-md border border-slate-200/60 shadow-sm'
-                      }`}
+                      className={`px-3.5 py-2.5 ${message.sender === 'user'
+                        ? 'bg-gradient-to-br from-teal-500 to-teal-600 text-white rounded-2xl rounded-br-md shadow-md shadow-teal-500/15'
+                        : 'bg-white text-slate-800 rounded-2xl rounded-bl-md border border-slate-200/60 shadow-sm'
+                        }`}
                     >
                       <div className="text-sm whitespace-pre-wrap leading-relaxed">
                         {message.content}
                       </div>
                       {message.file && (
-                        <div className={`mt-2 p-2 rounded-lg ${
-                          message.sender === 'user' ? 'bg-white/20' : 'bg-slate-100'
-                        }`}>
+                        <div className={`mt-2 p-2 rounded-lg ${message.sender === 'user' ? 'bg-white/20' : 'bg-slate-100'
+                          }`}>
                           <div className="flex items-center space-x-2">
                             {getFileIcon(message.file.type)}
                             <a
                               href={message.file.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className={`text-sm truncate underline ${
-                                message.sender === 'user' ? 'text-white hover:text-teal-100' : 'text-teal-600 hover:text-teal-500'
-                              }`}
+                              className={`text-sm truncate underline ${message.sender === 'user' ? 'text-white hover:text-teal-100' : 'text-teal-600 hover:text-teal-500'
+                                }`}
                             >
                               {message.file.name}
                             </a>
@@ -1307,9 +2364,8 @@ function App() {
                         </div>
                       )}
                       {/* Hover timestamp */}
-                      <div className={`text-[10px] mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200 ${
-                        message.sender === 'user' ? 'text-teal-100' : 'text-slate-400'
-                      }`}>
+                      <div className={`text-[10px] mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200 ${message.sender === 'user' ? 'text-teal-100' : 'text-slate-400'
+                        }`}>
                         {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </div>
                     </div>
