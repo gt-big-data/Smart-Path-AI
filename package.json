@@ -10,7 +10,10 @@
     "build": "vite build",
     "lint": "eslint .",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "bench:layout": "node scripts/bench/run.mjs",
+    "qa:harness": "vite --config qa/harness/vite.config.ts",
+    "qa:checklist": "node qa/run-checklist.mjs"
   },
   "dependencies": {
     "@react-oauth/google": "^0.12.1",
