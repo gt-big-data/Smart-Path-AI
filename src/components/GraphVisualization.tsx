@@ -489,10 +489,11 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [activePathTargetId, setActivePathTargetId] = useState<string | null>(null);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [minimapLocked, setMinimapLocked] = useState(false);
   const [currentSubject, setCurrentSubject] = useState<string>('default');
   const [nodeTypesInGraph, setNodeTypesInGraph] = useState<Set<string>>(new Set());
-
+  
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<string[]>([]);
@@ -712,7 +713,7 @@ useEffect(() => {
       type: 'smoothstep',
       style: { stroke: '#888', strokeWidth: 2 },
       labelStyle: { fill: '#888', fontSize: 10 },
-      animated: true,
+      animated: false,
       data: {
         graphEdgeIndex: i,
       },
@@ -924,10 +925,13 @@ useEffect(() => {
         typeof edgeIndex === 'number' &&
         activePath.edgeIndices.has(edgeIndex);
 
+      const hovered = edge.id === hoveredEdgeId;
+      const showLabel = onPath || hovered;
+
       return {
         ...edge,
         animated: onPath,
-        label: onPath ? edge.label : undefined,
+        label: showLabel ? edge.label : undefined,
         style: {
           ...edge.style,
           stroke: onPath ? '#d4581c' : '#888',
@@ -942,13 +946,13 @@ useEffect(() => {
         },
         labelStyle: {
           ...edge.labelStyle,
-          fill: onPath ? '#d4581c' : 'transparent',
+          fill: onPath ? '#d4581c' : hovered ? '#374151' : 'transparent',
           fontWeight: onPath ? 700 : 400,
         },
-        zIndex: onPath ? 1 : 0,
+        zIndex: onPath ? 2 : hovered ? 1 : 0,
       };
     });
-  }, [activePath, edges]);
+  }, [activePath, edges, hoveredEdgeId]);
 
   const forceDirectedLayout = (nodes: Node[], edges: Edge[], spacing: number = 360) => {
     const positions: { x: number; y: number }[] = [];
@@ -1226,6 +1230,14 @@ useEffect(() => {
         onEdgesChange={onEdgesChange}
         onNodeClick={handleNodeClick}
         onPaneClick={clearActivePath}
+        onEdgeMouseEnter={(_, edge) => {
+          setHoveredEdgeId(edge.id);
+        }}
+        onEdgeMouseLeave={(_, edge) => {
+          setHoveredEdgeId(currentId =>
+            currentId === edge.id ? null : currentId
+          );
+        }}
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.5, minZoom: 0.1, maxZoom: 1, duration: 800 }}
@@ -1234,7 +1246,7 @@ useEffect(() => {
         defaultViewport={{ x: 0, y: 0, zoom: 0.2 }}
         defaultEdgeOptions={{
           type: 'smoothstep',
-          animated: true,
+          animated: false,
           style: { strokeWidth: 2 },
           labelStyle: { fontSize: 12, fill: '#888' },
         }}
