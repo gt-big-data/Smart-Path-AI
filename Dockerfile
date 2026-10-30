@@ -27,6 +27,10 @@ COPY --from=deps /app/server/node_modules ./server/node_modules
 COPY . .
 COPY --from=frontend-builder /app/dist ./dist
 
+# Build the server from the TypeScript source used by this image. The runtime
+# starts index.js, so relying on a checked-in compiled file can deploy stale routes.
+RUN npm --prefix server run build
+
 RUN chmod +x /app/scripts/start.sh
 
 EXPOSE 8080

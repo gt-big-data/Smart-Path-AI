@@ -8,6 +8,7 @@ router.get('/node-metadata', graphController_1.getNodeMetadata);
 router.get('/generate-questions-with-answers', graphController_1.generateQuestionsWithAnswers);
 router.post('/verify-answer', graphController_1.verifyAnswer);
 router.post('/generate-conversation-response', graphController_1.generateConversationResponse);
+router.post('/clarify-quiz-question', graphController_1.clarifyQuizQuestion);
 router.get('/user/profile', graphController_1.getUserProfile);
 router.get('/search-graph', graphController_1.searchGraph);
 router.get('/semantic-search-graph', graphController_1.semanticSearchGraph);

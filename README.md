@@ -88,6 +88,7 @@ Express loads `server/.env`, then falls back to the repo-root `.env`.
 | `AUTH_ALLOWED_ORIGINS` | Express | Exact comma-separated Google login return origins; defaults to `CLIENT_URL` |
 | `CORS_ORIGINS` | Express | Comma-separated allowed origins |
 | `OPENAI_API_KEY` | Express | Node-side `POST /api/verify-answer` (`gpt-4o-mini`) |
+| `QUIZ_CLARIFY_SERVICE_TOKEN` | Express + AI server | Same random value on both services; required for quiz clarifications |
 | `PYTHON_SERVICE_URL` | Express | AI server. Local: `http://127.0.0.1:8000` |
 | `PORT` | Express | Listen port (default 4000) |
 | `NODE_ENV` | Express | Production cookies: `secure` + `sameSite: none` |

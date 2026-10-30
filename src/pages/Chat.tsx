@@ -1,2229 +1,3721 @@
 //Chat.tsx
-import React, { useState, useEffect, useRef, ChangeEvent, useCallback } from 'react';
-import { Send, Bot, User, MessageSquare, ChevronLeft, ChevronRight, Plus, Paperclip, X, FileText, Image, File, Trash2, Pencil, Check, Home, Settings, UserCircle } from 'lucide-react';
+import React, {
+	useState,
+	useEffect,
+	useRef,
+	ChangeEvent,
+	useCallback,
+} from "react";
 import {
-  Panel,
-  PanelGroup,
-  PanelResizeHandle,
-} from 'react-resizable-panels';
-import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
-import GraphVisualization from '../components/GraphVisualization';
-import { API_BASE_URL } from '../config/api';
+	Send,
+	Bot,
+	User,
+	MessageSquare,
+	ChevronLeft,
+	ChevronRight,
+	Paperclip,
+	X,
+	FileText,
+	Image,
+	File,
+	Folder,
+	Search,
+	Trash2,
+	Pencil,
+	Check,
+	Home,
+	Settings,
+} from "lucide-react";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { useNavigate } from "react-router-dom";
+import axios from "axios";
+import GraphVisualization from "../components/GraphVisualization";
+import { API_BASE_URL } from "../config/api";
 
 interface Message {
-  id: string;
-  content: string;
-  sender: 'user' | 'ai';
-  timestamp: Date;
-  file?: {
-    name: string;
-    type: string;
-    url: string;
-  };
-  isQuestion?: boolean;
-  questionData?: {
-    question: string;
-    correctAnswer: string;
-    conceptId: string;
-    questionIndex?: number;
-    totalQuestions?: number;
-  };
+	id: string;
+	content: string;
+	sender: "user" | "ai";
+	timestamp: Date;
+	file?: {
+		name: string;
+		type: string;
+		url: string;
+	};
+	isQuestion?: boolean;
+	questionData?: {
+		question: string;
+		correctAnswer: string;
+		conceptId: string;
+		questionIndex?: number;
+		totalQuestions?: number;
+	};
 }
 
 interface Chat {
-  id: string;
-  title: string;
-  lastMessage: string;
-  timestamp: Date;
-  messages: Message[];
-  graph_id?: string;
+	id: string;
+	title: string;
+	lastMessage: string;
+	timestamp: Date;
+	messages: Message[];
+	graph_id?: string;
+	folder_id?: string | null;
 }
 
 interface QAPair {
-  question: string;
-  answer: string;
-  conceptId: string;
-  concept_id?: string; // Alternative field name from Python AI server
-  topicId?: string; // Alternative field name
-  topic_id?: string; // Alternative field name
-  id?: string; // Generic ID field (used as fallback if conceptId is empty)
+	question: string;
+	answer: string;
+	conceptId: string;
+	concept_id?: string; // Alternative field name from Python AI server
+	topicId?: string; // Alternative field name
+	topic_id?: string; // Alternative field name
+	id?: string; // Generic ID field (used as fallback if conceptId is empty)
 }
 
 // Add interface for concept progress
 interface ConceptProgress {
-  conceptId: string;
-  confidenceScore: number;
-  lastAttempted?: Date;
+	conceptId: string;
+	confidenceScore: number;
+	lastAttempted?: Date;
 }
 
-
 function App() {
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [currentChatId, setCurrentChatId] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [isProcessingFile, setIsProcessingFile] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [progressMessage, setProgressMessage] = useState('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [graphData, setGraphData] = useState<any>(null);
-  const [qaData, setQaData] = useState<QAPair[]>([]);
-  const [conceptProgress, setConceptProgress] = useState<ConceptProgress[]>([]); // Add state for concept progress
-  const [quizLength, setQuizLength] = useState<5 | 10 | 15>(5);
-  const [questionFormat, setQuestionFormat] = useState<'mixed' | 'mcq' | 'true-false' | 'open-ended'>('mixed');
-  const [shouldStartQuiz, setShouldStartQuiz] = useState(false);
-  const [quizCompleted, setQuizCompleted] = useState(false);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const deletingChatRef = useRef<string | null>(null);
-  const renameInFlightRef = useRef<string | null>(null);
-  const uploadAbortRef = useRef<AbortController | null>(null);
-  const latestGraphRequestRef = useRef<string | null>(null);
-  const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [loadingDots, setLoadingDots] = useState('');
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
-  const [isAnswering, setIsAnswering] = useState<boolean>(false);
-  const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
-  const [userAnswers, setUserAnswers] = useState<string[]>([]);
-
-  const navigate = useNavigate();
-  
-  const [chats, setChats] = useState<Chat[]>([]);
-  const [chatsLoading, setChatsLoading] = useState(true);
-
-  const currentChat = chats.find(chat => chat.id === currentChatId) ?? null;
-  const [input, setInput] = useState('');
-  const [isGraphLoading, setIsGraphLoading] = useState(false);
-
-  // Generate robust unique IDs to avoid duplicate keys when multiple messages are created in the same millisecond
-  const generateMessageId = () => {
-    try {
-      if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-        return (crypto as any).randomUUID();
-      }
-    } catch (_) {
-      // ignore and fallback
-    }
-    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  };
-
-  // Local persistence helpers for quiz state per chat
-  const quizStateKey = (chatId: string) => `quizState:${chatId}`;
-
-  const saveQuizState = (chatId: string, state: any) => {
-    try {
-      localStorage.setItem(quizStateKey(chatId), JSON.stringify(state));
-    } catch (err) {
-      console.warn('Failed to save quiz state', err);
-    }
-  };
-
-  const loadQuizState = (chatId: string) => {
-    try {
-      const raw = localStorage.getItem(quizStateKey(chatId));
-      return raw ? JSON.parse(raw) : null;
-    } catch (err) {
-      console.warn('Failed to load quiz state', err);
-      return null;
-    }
-  };
-
-  const clearQuizState = (chatId: string) => {
-    try {
-      localStorage.removeItem(quizStateKey(chatId));
-    } catch (err) {
-      console.warn('Failed to clear quiz state', err);
-    }
-  };
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    if (currentChat) {
-      scrollToBottom();
-    }
-  }, [currentChat]);
-
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isProcessingFile) {
-      interval = setInterval(() => {
-        setLoadingDots(dots => dots.length >= 3 ? '' : dots + '.');
-      }, 500);
-    }
-    return () => clearInterval(interval);
-  }, [isProcessingFile]);
-
-  // Add function to fetch concept progress
-  const fetchConceptProgress = useCallback(async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/api/concept-progress`, {
-        withCredentials: true
-      });
-      setConceptProgress(response.data);
-      console.log('Fetched concept progress:', response.data);
-    } catch (error) {
-      console.error('Error fetching concept progress:', error);
-      // Set empty array on error to avoid breaking the UI
-      setConceptProgress([]);
-    }
-  }, []);
-
-  const generateAIResponse = async (userMessage: string, fileType?: string) => {
-    let aiResponse = '';
-
-    if (fileType) {
-      if (fileType.startsWith('image/')) {
-        aiResponse = 'I see you\'ve shared an image. What would you like me to help you with regarding this image?';
-      } else if (fileType.includes('document') || fileType.includes('pdf')) {
-        aiResponse = 'I\'ve received your document. What aspects would you like me to review or analyze?';
-      } else {
-        aiResponse = 'I\'ve received your file. How can I help you with it?';
-      }
-    } else {
-      const lowerMessage = userMessage.toLowerCase();
-      if (lowerMessage.includes('hello') || lowerMessage.includes('hi')) {
-        aiResponse = 'Hello! It\'s great to meet you. How can I assist you today?';
-      } else if (lowerMessage.includes('help')) {
-        aiResponse = 'I\'d be happy to help! Could you please provide more details about what you need assistance with?';
-      } else if (lowerMessage.includes('thank')) {
-        aiResponse = 'You\'re welcome! Is there anything else you\'d like to know?';
-      } else if (lowerMessage.includes('bye')) {
-        aiResponse = 'Goodbye! Feel free to return if you have more questions!';
-      } else {
-        aiResponse = 'That\'s an interesting point! Could you tell me more about what you\'re thinking?';
-      }
-    }
-
-    return {
-      id: generateMessageId(),
-      content: aiResponse,
-      sender: 'ai' as const,
-      timestamp: new Date(),
-    };
-  };
-
-  const isPlaceholderGraph = (payload: any): boolean => {
-    const nodes = payload?.graph?.nodes;
-    if (!Array.isArray(nodes) || nodes.length === 0) {
-      return true;
-    }
-    if (nodes.length > 1) {
-      return false;
-    }
-
-    const node = nodes[0] || {};
-    const labels = Array.isArray(node.labels) ? node.labels.map((l: string) => String(l).toLowerCase()) : [];
-    const propSubject = String(node?.properties?.subject ?? '').toLowerCase();
-    const topSubject = String(payload?.subject ?? '').toLowerCase();
-    if (
-      labels.some((l) => l.includes('graphmetadata')) &&
-      (propSubject === 'default' || topSubject === 'default')
-    ) {
-      return true;
-    }
-
-    const id = String(node.id || '').toLowerCase();
-    const label = String(node?.labels?.[0] || '').toLowerCase();
-    const name = String(node?.properties?.name || '').toLowerCase();
-    const text = String(node?.properties?.text || '').toLowerCase();
-    return [id, label, name, text].some((value) => value === 'default' || value.includes('placeholder'));
-  };
-
-  const fetchGraphData = async (graphId?: string, expectedChatId?: string) => {
-    if (!graphId) return;
-    const requestKey = `${graphId}:${expectedChatId ?? ''}:${Date.now()}`;
-    latestGraphRequestRef.current = requestKey;
-    setIsGraphLoading(true);
-
-    try {
-      const maxAttempts = 20;
-      let selectedData: any = null;
-
-      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        // Abort stale retries if a newer graph request has been issued.
-        if (latestGraphRequestRef.current !== requestKey) {
-          return;
-        }
-
-        const response = await axios.get(`${API_BASE_URL}/api/view-graph`, {
-          params: {
-            graph_id: graphId,
-            t: Date.now(), // cache buster to avoid stale graph responses
-          },
-          headers: {
-            'Cache-Control': 'no-cache',
-            Pragma: 'no-cache',
-          },
-          withCredentials: true,
-        });
-
-        const payload = response.data;
-        const placeholder = isPlaceholderGraph(payload);
-        console.log(`[Graph] Fetch attempt ${attempt}/${maxAttempts} for ${graphId} placeholder=${placeholder}`);
-
-        if (!placeholder || attempt === maxAttempts) {
-          selectedData = payload;
-          break;
-        }
-
-        // Delay allows backend graph persistence/indexing to complete.
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      }
-
-      if (!selectedData) {
-        throw new Error('Failed to load graph data');
-      }
-
-      if (latestGraphRequestRef.current !== requestKey) {
-        return;
-      }
-
-      setCurrentChatId((currentId) => {
-        if (!expectedChatId || currentId === expectedChatId) {
-          setGraphData({ ...selectedData, graph_id: graphId });
-          void fetchConceptProgress();
-        }
-        return currentId;
-      });
-    } catch (error) {
-      console.error('Error fetching graph:', error);
-      setCurrentChatId((currentId) => {
-        if (!expectedChatId || currentId === expectedChatId) {
-          setGraphData({ error: 'Failed to load graph data' });
-        }
-        return currentId;
-      });
-    } finally {
-      if (latestGraphRequestRef.current === requestKey) {
-        setIsGraphLoading(false);
-      }
-    }
-  };
-
-  const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.type !== 'application/pdf') {
-        alert('Please upload a PDF file');
-        return;
-      }
-
-      setSelectedFile(file);
-      setGraphData(null);
-      setQaData([]);
-      try {
-        setIsProcessingFile(true);
-        const formData = new FormData();
-        formData.append('file', file);
-
-        console.log('Uploading file:', {
-          name: file.name,
-          type: file.type,
-          size: file.size
-        });
-
-        // Always create a fresh graph for each uploaded document.
-        // Reusing old graph_id can cause stale/default graph carry-over.
-        const url = `${API_BASE_URL}/upload/process-pdf`;
-
-        setUploadProgress(0);
-        setProgressMessage('Uploading PDF...');
-
-        const abortController = new AbortController();
-        uploadAbortRef.current = abortController;
-
-        const response = await fetch(url, {
-          method: 'POST',
-          body: formData,
-          credentials: 'include',
-          signal: abortController.signal,
-        });
-
-        // Read the SSE stream for progress updates
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let responseData: any = null;
-        let buffer = '';
-
-        if (!reader) {
-          throw new Error('Failed to read response stream');
-        }
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          // Keep the last potentially incomplete line in the buffer
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const event = JSON.parse(line.slice(6));
-                if (event.type === 'progress') {
-                  setUploadProgress(event.percent);
-                  setProgressMessage(event.message);
-                } else if (event.type === 'complete') {
-                  responseData = event.data;
-                  setUploadProgress(100);
-                  setProgressMessage('Processing complete!');
-                } else if (event.type === 'error') {
-                  const baseError = event.error || 'Failed to process file';
-                  throw new Error(event.details ? `${baseError} (${event.details})` : baseError);
-                }
-              } catch (parseErr) {
-                if (parseErr instanceof SyntaxError) {
-                  console.warn('[Upload] Skipping malformed SSE line:', line);
-                } else {
-                  throw parseErr;
-                }
-              }
-            }
-          }
-        }
-
-        console.log('[Upload] Parsed response data:', responseData);
-
-        if (!responseData) {
-          throw new Error('No response data received from server');
-        }
-
-        const processed = responseData.processed_chunks;
-        const uploadStatus = responseData.status;
-        if (
-          typeof processed === 'number' &&
-          processed < 1 &&
-          uploadStatus !== 'cancelled'
-        ) {
-          const firstFail =
-            Array.isArray(responseData.failed_chunks) && responseData.failed_chunks.length > 0
-              ? String((responseData.failed_chunks[0] as { error?: string })?.error || '')
-              : '';
-          throw new Error(
-            firstFail ||
-              'No concepts were written to the graph (0 chunks processed). On GCP, verify OPENAI_API_KEY / LLM config and Neo4j env on the AI service, and PYTHON_SERVICE_URL on the Node service.'
-          );
-        }
-
-        const fileUploadMessage: Message = {
-          id: generateMessageId(),
-          content: `Uploaded file: ${file.name}`,
-          sender: 'user',
-          timestamp: new Date(),
-          file: {
-            name: file.name,
-            type: file.type,
-            url: URL.createObjectURL(file)
-          }
-        };
-
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'user',
-          text: fileUploadMessage.content,
-        }, { withCredentials: true });
-
-        setChats(prevChats => prevChats.map(chat =>
-          chat.id === currentChatId
-            ? {
-                ...chat,
-                lastMessage: fileUploadMessage.content,
-                timestamp: new Date(),
-                messages: [...chat.messages, fileUploadMessage],
-              }
-            : chat
-        ));
-
-        if (responseData.graph_id) {
-          await axios.post(`${API_BASE_URL}/chat/message`, {
-            chat_id: currentChatId,
-            graph_id: responseData.graph_id,
-          }, { withCredentials: true });
-
-          setChats(prevChats => prevChats.map(chat => 
-            chat.id === currentChatId
-              ? { ...chat, graph_id: responseData.graph_id }
-              : chat
-          ));
-        }
-
-        const uploadIncludesGraph = responseData?.graph && !isPlaceholderGraph(responseData);
-        if (uploadIncludesGraph) {
-          // Prefer graph data returned by process-pdf when available.
-          // This avoids a second fetch race where view-graph can briefly return placeholder data.
-          setCurrentChatId((currentId) => {
-            if (currentId === currentChatId) {
-              setGraphData({ ...responseData, graph_id: responseData.graph_id });
-              void fetchConceptProgress();
-            }
-            return currentId;
-          });
-        } else {
-          await fetchGraphData(responseData.graph_id, currentChatId);
-        }
-        
-        // Show the "Start Quiz" button after document upload
-        // User can now choose quiz settings before starting
-        setShouldStartQuiz(true);
-
-      } catch (error) {
-        // If the user cancelled, just silently exit — no error message needed
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          console.log('PDF upload cancelled by user');
-          const cancelMsg: Message = {
-            id: generateMessageId(),
-            content: 'Upload cancelled.',
-            sender: 'ai',
-            timestamp: new Date(),
-          };
-          setChats(prevChats => prevChats.map(chat =>
-            chat.id === currentChatId
-              ? { ...chat, lastMessage: cancelMsg.content, timestamp: new Date(), messages: [...chat.messages, cancelMsg] }
-              : chat
-          ));
-          return;
-        }
-
-        console.error('Detailed upload error:', error);
-        let errorMessage = 'Failed to upload file. Please try again.';
-        
-        if (error instanceof Error) {
-          console.error('Error details:', {
-            message: error.message,
-            stack: error.stack
-          });
-          errorMessage = error.message;
-        }
-        
-        const errorMsg: Message = {
-          id: generateMessageId(),
-          content: errorMessage,
-          sender: 'ai',
-          timestamp: new Date(),
-        };
-
-        setChats(prevChats => prevChats.map(chat =>
-          chat.id === currentChatId
-            ? {
-                ...chat,
-                lastMessage: errorMessage,
-                timestamp: new Date(),
-                messages: [...chat.messages, errorMsg],
-              }
-            : chat
-        ));
-
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'ai',
-          text: errorMessage,
-        }, { withCredentials: true });
-        
-        alert(errorMessage);
-      } finally {
-        uploadAbortRef.current = null;
-        setSelectedFile(null);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
-        setIsProcessingFile(false);
-        setUploadProgress(0);
-        setProgressMessage('');
-      }
-    }
-  };
-
-  const handleRemoveFile = () => {
-    setSelectedFile(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    const trimmedInput = input.trim();
-    if (!trimmedInput) return;
-
-    // --- Start of Fix ---
-
-  // 1. Capture current messages BEFORE updating the chat state.
-  // `currentChat` is from the current render, so its `messages` array is what's currently displayed.
-  const currentMessages = currentChat?.messages ?? [];
-
-    // 2. Create the user message object.
-    const userMessage: Message = {
-      id: generateMessageId(),
-      content: trimmedInput,
-      sender: 'user',
-      timestamp: new Date(),
-    };
-
-    // 3. Clear the input field.
-    setInput('');
-
-    // 4. Update the chat state with the new user message.
-    // This is asynchronous, but that's okay because we've already captured the last question.
-    setChats(prevChats => prevChats.map(chat => 
-      chat.id === currentChatId
-        ? {
-            ...chat,
-            lastMessage: trimmedInput,
-            timestamp: new Date(),
-            messages: [...chat.messages, userMessage],
-          }
-        : chat
-    ));
-
-    // 5. Save the user message to the backend.
-    try {
-      await axios.post(`${API_BASE_URL}/chat/message`, {
-        chat_id: currentChatId,
-        sender: 'user',
-        text: trimmedInput,
-      }, { withCredentials: true });
-    } catch (error) {
-      console.error('Error saving message:', error);
-    }
-
-    // 6. Now, decide what to do based on whether we are in a quiz.
-    // --- End of Fix ---
-
-    // Prefer authoritative quiz state over inferring from chat history
-    const currentQA = qaData[currentQuestionIndex];
-    if (isAnswering && currentQA) {
-      try {
-        setIsTyping(true);
-        console.log('[Quiz] Submitting answer', {
-          isAnswering,
-          currentQuestionIndex,
-          totalQuestions: qaData.length,
-          question: currentQA.question,
-          expectedAnswer: currentQA.answer,
-          userAnswer: trimmedInput
-        });
-        // Simple retry detection: count how many times this question appears as a question message
-        const isRetry = currentMessages.filter(m => m.isQuestion && m.questionData?.question === currentQA.question).length > 1;
-
-        console.log('Submitting answer for conceptId:', currentQA.conceptId);
-        
-        const response = await axios.post(`${API_BASE_URL}/api/verify-answer`, {
-          question: currentQA.question,
-          userAnswer: trimmedInput,
-          correctAnswer: currentQA.answer,
-          conceptId: currentQA.conceptId,
-          isRetry: isRetry,
-          graph_id: currentChat?.graph_id
-        }, { withCredentials: true });
-
-        const verificationResult = response.data;
-        console.log('[Quiz] Verification raw result:', verificationResult);
-
-        // Defensive shape check
-        const hasIsCorrect = typeof verificationResult?.isCorrect === 'boolean';
-        const hasFeedback = typeof verificationResult?.feedback === 'string' && verificationResult.feedback.length > 0;
-        if (!hasIsCorrect || !hasFeedback) {
-          const diagnosticContent = `Verification response missing expected keys.\nExpected: { isCorrect: boolean, feedback: string, followUpQuestion?: string }\nReceived: ${JSON.stringify(verificationResult, null, 2)}`;
-          const diagnosticMessage: Message = {
-            id: generateMessageId(),
-            content: diagnosticContent,
-            sender: 'ai',
-            timestamp: new Date()
-          };
-          setChats(prevChats => prevChats.map(chat =>
-            chat.id === currentChatId
-              ? { ...chat, messages: [...chat.messages, diagnosticMessage] }
-              : chat
-          ));
-          try {
-            await axios.post(`${API_BASE_URL}/chat/message`, {
-              chat_id: currentChatId,
-              sender: 'ai',
-              text: diagnosticMessage.content,
-            }, { withCredentials: true });
-          } catch (persistErr) {
-            console.error('[Quiz] Failed to persist diagnostic message', persistErr);
-          }
-          return; // Abort normal flow
-        }
-        
-        console.log('Verification result:', verificationResult);
-        
-        // Refresh concept progress after answering
-        await fetchConceptProgress();
-
-        if (verificationResult.isCorrect) {
-          // Track this answer
-          setUserAnswers(prev => [...prev, trimmedInput]);
-          // Persist updated answers
-          if (currentChatId) {
-            const existing = loadQuizState(currentChatId) || {};
-            const updated = {
-              ...(existing || {}),
-              userAnswers: [...(existing.userAnswers || []), trimmedInput],
-            };
-            saveQuizState(currentChatId, updated);
-          }
-          
-          if (qaData.length > currentQuestionIndex + 1) {
-            const nextQuestionMessage: Message = {
-              id: generateMessageId(),
-              content: `Correct! Let's move on to the next question:\n\n${qaData[currentQuestionIndex + 1].question}`,
-              sender: 'ai',
-              timestamp: new Date(),
-              isQuestion: true,
-              questionData: {
-                question: qaData[currentQuestionIndex + 1].question,
-                correctAnswer: qaData[currentQuestionIndex + 1].answer,
-                conceptId: qaData[currentQuestionIndex + 1].conceptId,
-                questionIndex: currentQuestionIndex + 1,
-                totalQuestions: qaData.length
-              }
-            };
-
-            const feedbackMessage: Message = {
-              id: generateMessageId(),
-              content: verificationResult.feedback,
-              sender: 'ai',
-              timestamp: new Date(),
-            };
-
-            setChats(prevChats => prevChats.map(chat =>
-              chat.id === currentChatId
-                ? {
-                    ...chat,
-                    messages: [...chat.messages, feedbackMessage, nextQuestionMessage],
-                  }
-                : chat
-            ));
-
-            await axios.post(`${API_BASE_URL}/chat/message`, {
-              chat_id: currentChatId,
-              sender: 'ai',
-              text: feedbackMessage.content,
-            }, { withCredentials: true });
-
-            await axios.post(`${API_BASE_URL}/chat/message`, {
-              chat_id: currentChatId,
-              sender: 'ai',
-              text: nextQuestionMessage.content,
-            }, { withCredentials: true });
-
-            setCurrentQuestionIndex(prev => prev + 1);
-            // update persisted index
-            if (currentChatId) {
-              const existing = loadQuizState(currentChatId) || {};
-              existing.currentQuestionIndex = (existing.currentQuestionIndex || 0) + 1;
-              saveQuizState(currentChatId, existing);
-            }
-            console.log('[Quiz] Advanced to next question index', currentQuestionIndex + 1);
-          } else {
-            const finalMessage: Message = {
-              id: generateMessageId(),
-              content: `${verificationResult.feedback}\n\nCongratulations! You've successfully answered all the questions. You have a good understanding of the material.`,
-              sender: 'ai',
-              timestamp: new Date(),
-            };
-
-            setChats(prevChats => prevChats.map(chat =>
-              chat.id === currentChatId
-                ? {
-                    ...chat,
-                    messages: [...chat.messages, finalMessage],
-                  }
-                : chat
-            ));
-
-            await axios.post(`${API_BASE_URL}/chat/message`, {
-              chat_id: currentChatId,
-              sender: 'ai',
-              text: finalMessage.content,
-            }, { withCredentials: true });
-
-            try {
-              // Add the final answer to userAnswers
-              const allAnswers = [...userAnswers, trimmedInput];
-              
-              // Filter out questions with empty conceptIds
-              const validQaData = qaData.filter((qa, index) => {
-                const hasConceptId = qa.conceptId && qa.conceptId.trim() !== '';
-                if (!hasConceptId) {
-                  console.warn(`⚠️ Skipping question ${index + 1} - empty conceptId:`, qa);
-                }
-                return hasConceptId;
-              });
-
-              if (validQaData.length === 0) {
-                console.error('❌ Cannot save quiz history: All questions have empty conceptIds!');
-                console.error('Raw qaData:', qaData);
-              } else {
-                const quizHistoryData = {
-                concepts: validQaData.map((qa, idx) => ({
-                  conceptID: qa.conceptId, // Use the actual conceptId from the question
-                  name: `Question ${idx + 1} Concept`
-                })),
-                  questions: validQaData.map((qa, index) => {
-                    const originalIndex = qaData.indexOf(qa);
-                    return {
-                      questionText: qa.question,
-                      userAnswer: allAnswers[originalIndex] || 'No answer provided',
-                      correctAnswer: qa.answer,
-                      explanation: `This question tests understanding of the material covered in the graph.`,
-                      timestamp: new Date().toISOString()
-                    };
-                  })
-                };
-
-                console.log('💾 Saving quiz history with conceptIds:', validQaData.map(qa => qa.conceptId));
-                console.log(`📊 Valid questions: ${validQaData.length}/${qaData.length}`);
-                
-                try {
-                  const response = await axios.post(`${API_BASE_URL}/api/quiz-history`, quizHistoryData, { 
-                    withCredentials: true 
-                  });
-                  
-                  console.log('✅ Quiz history saved successfully:', response.data);
-                  console.log(`✅ Progress records created: ${response.data.progressRecordsCreated || 0}`);
-                } catch (error: any) {
-                  console.error('❌ Error saving quiz history:', error);
-                  console.error('Error details:', {
-                    message: error.message,
-                    status: error.response?.status,
-                    data: error.response?.data
-                  });
-                }
-              }
-            } catch (error) {
-              console.error('❌ Error in quiz completion:', error);
-            }
-
-            setIsAnswering(false);
-            console.log('[Quiz] Quiz completed successfully');
-            // Allow the user to start a new quiz after finishing the previous one
-            setShouldStartQuiz(true);
-            setQuizCompleted(true);
-            // Clear persisted quiz state when finished
-            if (currentChatId) clearQuizState(currentChatId);
-          }
-        } else {
-          const feedbackMessage: Message = {
-            id: generateMessageId(),
-            content: `${verificationResult.feedback}\n\n${verificationResult.followUpQuestion}\n\nTry answering the original question again:`,
-            sender: 'ai',
-            timestamp: new Date(),
-            isQuestion: true,
-            questionData: {
-              question: currentQA.question,
-              correctAnswer: currentQA.answer,
-              conceptId: currentQA.conceptId,
-              questionIndex: currentQuestionIndex,
-              totalQuestions: qaData.length
-            }
-          };
-
-          setChats(prevChats => prevChats.map(chat =>
-            chat.id === currentChatId
-              ? {
-                  ...chat,
-                  messages: [...chat.messages, feedbackMessage],
-                }
-              : chat
-          ));
-
-          await axios.post(`${API_BASE_URL}/chat/message`, {
-            chat_id: currentChatId,
-            sender: 'ai',
-            text: feedbackMessage.content,
-          }, { withCredentials: true });
-        }
-      } catch (error) {
-        console.error('Error verifying answer:', error);
-        const errorMessage: Message = {
-          id: generateMessageId(),
-          content: "Sorry, I encountered an error while verifying your answer. Please try again.",
-          sender: 'ai',
-          timestamp: new Date(),
-        };
-
-        setChats(prevChats => prevChats.map(chat =>
-          chat.id === currentChatId
-            ? {
-                ...chat,
-                messages: [...chat.messages, errorMessage],
-              }
-            : chat
-        ));
-
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'ai',
-          text: errorMessage.content,
-        }, { withCredentials: true });
-      } finally {
-        setIsTyping(false);
-      }
-    } else if (currentChat?.graph_id) {
-    try {
-      setIsTyping(true);
-        console.log('[Conversation] Sending request', { message: trimmedInput, graph_id: currentChat.graph_id });
-      const response = await axios.post(
-          `${API_BASE_URL}/api/generate-conversation-response`,
-          { message: trimmedInput, graph_id: currentChat.graph_id },
-        { withCredentials: true }
-      );
-        console.log('[Conversation] Raw response', response.data);
-      const aiMessage: Message = {
-          id: generateMessageId(),
-          content: response.data.response || response.data.message || 'I received your message.',
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-
-      setChats(prevChats => prevChats.map(chat =>
-        chat.id === currentChatId
-          ? {
-              ...chat,
-              lastMessage: aiMessage.content,
-              timestamp: new Date(),
-              messages: [...chat.messages, aiMessage],
-            }
-          : chat
-      ));
-
-      // Save AI response to backend
-      await axios.post(`${API_BASE_URL}/chat/message`, {
-        chat_id: currentChatId,
-        sender: 'ai',
-        text: aiMessage.content,
-      }, { withCredentials: true });
-    } catch (error) {
-        console.error('Error generating conversation response:', error);
-        const errorMessage: Message = {
-          id: generateMessageId(),
-          content: 'Sorry, I could not generate a response. Please retry or rephrase.',
-          sender: 'ai',
-          timestamp: new Date(),
-        };
-        setChats(prevChats => prevChats.map(chat =>
-          chat.id === currentChatId
-            ? { ...chat, messages: [...chat.messages, errorMessage] }
-            : chat
-        ));
-        try {
-          await axios.post(`${API_BASE_URL}/chat/message`, {
-            chat_id: currentChatId,
-            sender: 'ai',
-            text: errorMessage.content,
-          }, { withCredentials: true });
-        } catch (persistErr) {
-          console.error('Failed to persist AI error message', persistErr);
-        }
-    } finally {
-      setIsTyping(false);
-    }    
-    } else {
-      try {
-        setIsTyping(true);
-        const aiMessage = await generateAIResponse(input);
-        
-        setChats(prevChats => prevChats.map(chat => 
-          chat.id === currentChatId
-            ? {
-                ...chat,
-                lastMessage: aiMessage.content,
-                timestamp: new Date(),
-                messages: [...chat.messages, aiMessage],
-              }
-            : chat
-        ));
-
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'ai',
-          text: aiMessage.content,
-        }, { withCredentials: true });
-      } catch (error) {
-        console.error('Error generating AI response:', error);
-        const errorMessage: Message = {
-          id: generateMessageId(),
-          content: "Sorry, I encountered an error while generating a response. Please try again.",
-          sender: 'ai',
-          timestamp: new Date(),
-        };
-
-        setChats(prevChats => prevChats.map(chat =>
-          chat.id === currentChatId
-            ? {
-                ...chat,
-                messages: [...chat.messages, errorMessage],
-              }
-            : chat
-        ));
-
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'ai',
-          text: errorMessage.content,
-        }, { withCredentials: true });
-      } finally {
-        setIsTyping(false);
-      }
-    }
-  };
-
-  const handleSkip = async () => {
-    const currentQA = qaData[currentQuestionIndex];
-    if (!isAnswering || !currentQA) return;
-
-    try {
-      setIsTyping(true);
-      console.log('[Quiz] Skipping question', {
-        currentQuestionIndex,
-        totalQuestions: qaData.length,
-        question: currentQA.question,
-        conceptId: currentQA.conceptId
-      });
-
-      // Treat skip as incorrect answer for confidence tracking
-      await axios.post(`${API_BASE_URL}/api/verify-answer`, {
-        question: currentQA.question,
-        userAnswer: 'SKIPPED',
-        correctAnswer: currentQA.answer,
-        conceptId: currentQA.conceptId,
-        isRetry: false,
-        graph_id: currentChat?.graph_id
-      }, { withCredentials: true });
-
-      // Track skipped answer
-      setUserAnswers(prev => [...prev, 'SKIPPED']);
-      if (currentChatId) {
-        const existing = loadQuizState(currentChatId) || {};
-        const updated = {
-          ...existing,
-          userAnswers: [...(existing.userAnswers || []), 'SKIPPED'],
-        };
-        saveQuizState(currentChatId, updated);
-      }
-
-      // Refresh concept progress after skipping
-      await fetchConceptProgress();
-
-      // Add skip message
-      const skipMessage: Message = {
-        id: generateMessageId(),
-        content: `You skipped this question. The correct answer was: ${currentQA.answer}\n\nLet's move on to the next question.`,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-
-      if (qaData.length > currentQuestionIndex + 1) {
-        const nextQuestionMessage: Message = {
-          id: generateMessageId(),
-          content: `Question ${currentQuestionIndex + 2} of ${qaData.length}:\n\n${qaData[currentQuestionIndex + 1].question}`,
-          sender: 'ai',
-          timestamp: new Date(),
-          isQuestion: true,
-          questionData: {
-            question: qaData[currentQuestionIndex + 1].question,
-            correctAnswer: qaData[currentQuestionIndex + 1].answer,
-            conceptId: qaData[currentQuestionIndex + 1].conceptId,
-            questionIndex: currentQuestionIndex + 1,
-            totalQuestions: qaData.length
-          }
-        };
-
-        setChats(prevChats => prevChats.map(chat =>
-          chat.id === currentChatId
-            ? {
-                ...chat,
-                messages: [...chat.messages, skipMessage, nextQuestionMessage],
-              }
-            : chat
-        ));
-
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'ai',
-          text: skipMessage.content,
-        }, { withCredentials: true });
-
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'ai',
-          text: nextQuestionMessage.content,
-        }, { withCredentials: true });
-
-        setCurrentQuestionIndex(prev => prev + 1);
-        if (currentChatId) {
-          const existing = loadQuizState(currentChatId) || {};
-          existing.currentQuestionIndex = (existing.currentQuestionIndex || 0) + 1;
-          saveQuizState(currentChatId, existing);
-        }
-      } else {
-        // Quiz completed
-        const finalMessage: Message = {
-          id: generateMessageId(),
-          content: `${skipMessage.content}\n\nYou've completed all the questions.`,
-          sender: 'ai',
-          timestamp: new Date(),
-        };
-
-        setChats(prevChats => prevChats.map(chat =>
-          chat.id === currentChatId
-            ? {
-                ...chat,
-                messages: [...chat.messages, finalMessage],
-              }
-            : chat
-        ));
-
-        await axios.post(`${API_BASE_URL}/chat/message`, {
-          chat_id: currentChatId,
-          sender: 'ai',
-          text: finalMessage.content,
-        }, { withCredentials: true });
-
-        // Save quiz history
-        try {
-          const allAnswers = [...userAnswers, 'SKIPPED'];
-          const validQaData = qaData.filter((qa) => qa.conceptId && qa.conceptId.trim() !== '');
-          
-          if (validQaData.length > 0) {
-            const quizHistoryData = {
-              concepts: validQaData.map((qa, idx) => ({
-                conceptID: qa.conceptId,
-                name: `Question ${idx + 1} Concept`
-              })),
-              questions: validQaData.map((qa, index) => {
-                const originalIndex = qaData.indexOf(qa);
-                return {
-                  questionText: qa.question,
-                  userAnswer: allAnswers[originalIndex] || 'SKIPPED',
-                  correctAnswer: qa.answer,
-                  explanation: `This question tests understanding of the material covered in the graph.`,
-                  timestamp: new Date().toISOString()
-                };
-              })
-            };
-
-            await axios.post(`${API_BASE_URL}/api/quiz-history`, quizHistoryData, { 
-              withCredentials: true 
-            });
-            console.log('✅ Quiz history saved with skipped question');
-          }
-        } catch (error) {
-          console.error('❌ Error saving quiz history:', error);
-        }
-
-        setIsAnswering(false);
-        setShouldStartQuiz(true);
-        setQuizCompleted(true);
-        if (currentChatId) clearQuizState(currentChatId);
-      }
-    } catch (error: any) {
-      console.error('[Quiz] Error skipping question:', error);
-      const errorMessage: Message = {
-        id: generateMessageId(),
-        content: 'Sorry, there was an error processing your skip. Please try again.',
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-
-      setChats(prevChats => prevChats.map(chat =>
-        chat.id === currentChatId
-          ? {
-              ...chat,
-              messages: [...chat.messages, errorMessage],
-            }
-          : chat
-      ));
-
-      await axios.post(`${API_BASE_URL}/chat/message`, {
-        chat_id: currentChatId,
-        sender: 'ai',
-        text: errorMessage.content,
-      }, { withCredentials: true });
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
-  const handleChatSelect = (chatId: string) => {
-    // Clear graph data immediately when switching chats to prevent showing wrong graph
-    setGraphData(null);
-    setQaData([]);
-    setIsAnswering(false);
-    setCurrentQuestionIndex(0);
-    setUserAnswers([]);
-    setQuizCompleted(false);
-    setCurrentChatId(chatId);
-  };
-
-  const handleNewChat = useCallback(async () => {
-    try {
-      console.log('Creating new chat...');
-      
-      // Clear all graph and quiz state immediately when creating new chat
-      setGraphData(null);
-      setQaData([]);
-      setIsAnswering(false);
-      setCurrentQuestionIndex(0);
-      setUserAnswers([]);
-      setQuizCompleted(false);
-      setIsGeneratingQuestions(false);
-  
-      const response = await axios.post(`${API_BASE_URL}/chat/new`, {}, { withCredentials: true });
-
-      console.log('Create chat response:', response.data);
-  
-      const newChatFromBackend = response.data.chat;
-  
-      const newChat: Chat = {
-        id: newChatFromBackend.chat_id,
-        title: 'New Chat',
-        lastMessage: 'Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.',
-        timestamp: new Date(newChatFromBackend.date_created),
-        messages: [
-          {
-            id: 'welcome',
-            content: 'Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.',
-            sender: 'ai',
-            timestamp: new Date(),
-          },
-        ],
-      };
-  
-      console.log('New chat object to add to state:', newChat);
-  
-      setChats(prev => [newChat, ...prev.filter(chat => chat.id !== newChat.id)]);
-      setCurrentChatId(newChat.id);
-
-      const welcomeMessage = 'Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.';
-
-      await axios.post(`${API_BASE_URL}/chat/message`, {
-        chat_id: newChat.id,
-        sender: 'ai',
-        text: welcomeMessage,
-      }, { withCredentials: true });
- 
-      return newChat;
-
-    } catch (error: any) {
-      console.error('Error creating new chat:', error);
-      if (error.response) {
-        console.error('Backend error response:', error.response.data);
-      }
-      alert('Failed to create a new chat.');
-      return undefined;
-    }
-  }, []);
-
-  const fetchUserChats = useCallback(async (createIfEmpty = false) => {
-    setChatsLoading(true);
-    try {
-      const resUser = await axios.get(`${API_BASE_URL}/chat/user`, {
-        withCredentials: true
-      });
-      const userId = resUser.data;
-
-      if (!userId) {
-        console.warn('No user ID returned while fetching chats');
-        setChatsLoading(false);
-        return;
-      }
-
-      const resChats = await axios.get(`${API_BASE_URL}/chat/${userId}/chats`, {
-        withCredentials: true
-      });
-      const userChats = Array.isArray(resChats.data) ? resChats.data : [];
-
-      if (userChats.length === 0) {
-        if (createIfEmpty) {
-          await handleNewChat();
-        } else {
-          setChats([]);
-          setCurrentChatId('');
-        }
-        setChatsLoading(false);
-        return;
-      }
-
-      const formattedChats: Chat[] = userChats.map((chat: any) => ({
-        id: chat.chat_id,
-        title: chat.title || 'Chat',
-        lastMessage: chat.messages?.at?.(-1)?.text || 'No messages yet',
-        timestamp: new Date(chat.date_created),
-        messages: (chat.messages || []).map((msg: any, index: number) => ({
-          id: `${chat.chat_id}-${index}`,
-          content: msg.text,
-          sender: msg.sender,
-          timestamp: new Date(msg.timestamp),
-        })),
-        graph_id: chat.graph_id,
-      }));
-
-      setChats(formattedChats);
-      setCurrentChatId(prevId => {
-        if (prevId && formattedChats.some(chat => chat.id === prevId)) {
-          return prevId;
-        }
-        return formattedChats[0]?.id ?? prevId;
-      });
-    } catch (err) {
-      console.error('Error fetching chats:', err);
-    } finally {
-      setChatsLoading(false);
-    }
-  }, [handleNewChat]);
-
-  useEffect(() => {
-    fetchUserChats(true);
-  }, [fetchUserChats]);
-
-  useEffect(() => {
-    if (!currentChatId && chats.length > 0) {
-      setCurrentChatId(chats[0].id);
-    }
-  }, [chats, currentChatId]);
-
-  // DEBUG: Log when isAnswering changes
-  useEffect(() => {
-    console.log('🟢 isAnswering state changed:', isAnswering);
-    console.log('🟢 qaData length:', qaData.length);
-    console.log('🟢 Should show End Quiz button:', isAnswering);
-  }, [isAnswering, qaData]);
-
-  const getFileIcon = (type: string) => {
-    if (type.startsWith('image/')) {
-      return <Image className="w-5 h-5" />;
-    } else if (type.includes('document') || type.includes('pdf')) {
-      return <FileText className="w-5 h-5" />;
-    }
-    return <File className="w-5 h-5" />;
-  };
-
-  const formatQuestion = (text: string): React.ReactNode => {
-    if (!text) return text;
-
-    const lines = text.split('\n');
-    const formattedLines: React.ReactNode[] = [];
-
-    lines.forEach((line, lineIndex) => {
-      const multipleChoicePattern = /\b([A-Z])[\)\.]\s+([^A-Z\)\.]+?)(?=\s+[A-Z][\)\.]|$)/g;
-      let matches = Array.from(line.matchAll(multipleChoicePattern));
-      
-      if (matches.length < 2) {
-        const altPattern = /\b([A-Z])[\)\.]([^A-Z\)\.]+?)(?=\s*[A-Z][\)\.]|$)/g;
-        matches = Array.from(line.matchAll(altPattern));
-      }
-      
-      if (matches.length >= 2) {
-        const firstMatch = matches[0];
-        const firstMatchIndex = line.indexOf(firstMatch[0]);
-        const questionPart = line.substring(0, firstMatchIndex).trim();
-        
-        if (questionPart) {
-          formattedLines.push(
-            <div key={`q-${lineIndex}`} className="mb-3 font-medium">
-              {questionPart}
-            </div>
-          );
-        }
-
-        matches.forEach((match, matchIndex) => {
-          const choiceLetter = match[1];
-          const choiceText = match[2].trim();
-          formattedLines.push(
-            <div key={`choice-${lineIndex}-${matchIndex}`} className="ml-1 mb-2 px-3 py-2 rounded-lg border border-slate-200/80 bg-slate-50/50 hover:bg-teal-50 hover:border-teal-300 transition-all duration-150 cursor-default flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-bold flex-shrink-0">{choiceLetter}</span>
-              <span className="text-sm">{choiceText}</span>
-            </div>
-          );
-        });
-      } else {
-        if (line.trim()) {
-          if (line.match(/Question\s+\d+\s+of\s+\d+/i)) {
-            formattedLines.push(
-              <div key={`q-header-${lineIndex}`} className="mb-3 font-semibold text-teal-600">
-                {line}
-              </div>
-            );
-          } else {
-            formattedLines.push(
-              <div key={`line-${lineIndex}`} className={lineIndex > 0 ? 'mt-2' : ''}>
-                {line}
-              </div>
-            );
-          }
-        }
-      }
-    });
-
-    return formattedLines.length > 0 ? <div className="space-y-1">{formattedLines}</div> : text;
-  };
-
-  const handleRenameChat = async (chatId: string) => {
-    if (renamingChatId !== chatId) return;
-    if (renameInFlightRef.current === chatId) return;
-
-    const trimmed = renameValue.trim();
-    const currentTitle = chats.find(c => c.id === chatId)?.title ?? '';
-    renameInFlightRef.current = chatId;
-    setRenamingChatId(null);
-    if (!trimmed || trimmed === currentTitle) {
-      renameInFlightRef.current = null;
-      return;
-    }
-
-    // Optimistic update
-    setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: trimmed } : c));
-    try {
-      await axios.patch(`${API_BASE_URL}/chat/rename/${chatId}`, { title: trimmed }, { withCredentials: true });
-    } catch (err) {
-      console.error('Error renaming chat:', err);
-      // Revert on failure by refetching
-      fetchUserChats(false);
-    } finally {
-      renameInFlightRef.current = null;
-    }
-  };
-
-  const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-
-    if (deletingChatRef.current === chatId) {
-      console.log('⚠️ Delete already in progress for chat:', chatId);
-      return;
-    }
-
-    console.log('🗑️ Delete button clicked for chat:', chatId);
-    console.log('Current chats:', chats.map(c => c.id));
-
-    deletingChatRef.current = chatId;
-
-    console.log('✅ Proceeding with delete...');
-    console.log('Sending DELETE request to:', `${API_BASE_URL}/chat/delete/${chatId}`);
-
-    console.log('Updating local state optimistically...');
-    setChats(prev => {
-      const beforeCount = prev.length;
-      const filtered = prev.filter(chat => chat.id !== chatId);
-      console.log(`Chats: ${beforeCount} -> ${filtered.length} (removed ${beforeCount - filtered.length})`);
-      return filtered;
-    });
-    
-    if (currentChatId === chatId) {
-      console.log('Clearing current chat ID because it was deleted');
-      setCurrentChatId('');
-    }
-
-    try {
-      const response = await axios.delete(`${API_BASE_URL}/chat/delete/${chatId}`, {
-        withCredentials: true,
-      });
-
-      console.log('✅ Delete response received:', response.data);
-      console.log('Response status:', response.status);
-      console.log('✅ Chat deleted successfully on server');
-      
-      deletingChatRef.current = null;
-      
-    } catch (error: any) {
-      console.error('❌ Error deleting chat on server:', error);
-      
-      deletingChatRef.current = null;
-      console.error('Error details:', {
-        message: error?.message,
-        response: error?.response,
-        status: error?.response?.status,
-        data: error?.response?.data
-      });
-      
-      console.log('Restoring chat in UI since server deletion failed...');
-      await fetchUserChats(false);
-      
-      if (error?.response) {
-        console.error('Backend error status:', error.response.status);
-        console.error('Backend error response:', error.response.data);
-        alert(`Failed to delete chat: ${error.response.data?.message || error.response.statusText || 'Unknown error'}`);
-      } else if (error?.request) {
-        console.error('No response received from server');
-        alert('Failed to delete chat: No response from server. Is the server running?');
-      } else {
-        console.error('Request setup error:', error.message);
-        alert(`Failed to delete chat: ${error.message}`);
-      }
-    }
-  };
-
-  const ResizeHandle = ({ className = '' }) => (
-    <PanelResizeHandle className={`w-2 hover:bg-teal-500/20 transition-colors duration-150 ${className}`}>
-      <div className="h-full w-[2px] bg-gray-200 mx-auto" />
-    </PanelResizeHandle>
-  );
-
-  useEffect(() => {
-    const currentChat = chats.find(chat => chat.id === currentChatId);
-    
-    // Check if there's already quiz state for this chat (user may have ended it or is in progress)
-    const existingQuizState = currentChat ? loadQuizState(currentChat.id) : null;
-
-    if (currentChat?.graph_id) {
-      // Check if there's an existing quiz in progress
-      if (existingQuizState) {
-        // Restore quiz state if it exists
-        setShouldStartQuiz(false);
-      } else {
-        // Show start quiz button - user must manually start the quiz
-        setShouldStartQuiz(true);
-      }
-    } else {
-      latestGraphRequestRef.current = null;
-      setIsGraphLoading(false);
-      setGraphData(null);
-      setQaData([]);
-      setIsAnswering(false);
-      setShouldStartQuiz(false);
-    }
-
-    return () => {
-      setIsGeneratingQuestions(false);
-    };
-  }, [currentChatId, chats]);
-
-  const startQuiz = async () => {
-      if (isGeneratingQuestions || !currentChat?.graph_id) return;
-    // clear completed flag when starting a new quiz
-    setQuizCompleted(false);
-      
-      try {
-        setIsGeneratingQuestions(true);
-      const qaResponse = await axios.get(
-        `${API_BASE_URL}/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}&length=${quizLength}&format=${questionFormat}`,
-        { withCredentials: true }
-      );
-        const qaResponseData = qaResponse.data;
-
-        if (qaResponseData.status === 'success' && qaResponseData.qa_pairs) {
-          console.log('🔍 Raw QA Pairs from API:', qaResponseData.qa_pairs);
-          console.log('🔍 First QA Pair structure:', qaResponseData.qa_pairs[0]);
-          console.log('🔍 COMPLETE First QA Pair (JSON):', JSON.stringify(qaResponseData.qa_pairs[0], null, 2));
-          console.log('🔍 All keys in first QA pair:', Object.keys(qaResponseData.qa_pairs[0]));
-          
-          const normalizedPairs = qaResponseData.qa_pairs.map((p: QAPair, idx: number) => {
-            const conceptId = p.conceptId || p.concept_id || p.topicId || p.topic_id || p.id || '';
-            const sourceField = p.conceptId ? 'conceptId' : 
-                               p.concept_id ? 'concept_id' : 
-                               p.topicId ? 'topicId' : 
-                               p.topic_id ? 'topic_id' : 
-                               p.id ? 'id' : 'NONE';
-            
-            console.log(`📝 Question ${idx + 1} - conceptId extracted from field: ${sourceField}, value: ${conceptId}`);
-            
-            return {
-              question: p.question,
-              answer: (p.answer === 'T' || p.answer === 'True') ? 'True' : (p.answer === 'F' || p.answer === 'False') ? 'False' : p.answer,
-              conceptId: conceptId
-            };
-          });
-          
-          console.log('🔍 Normalized pairs with conceptIds:', normalizedPairs.map((p: QAPair) => ({ q: p.question.substring(0, 50), conceptId: p.conceptId })));
-
-          setQaData(normalizedPairs);
-          setCurrentQuestionIndex(0);
-          setIsAnswering(true);
-        setUserAnswers([]); // Reset user answers for new quiz
-        setShouldStartQuiz(false); // Hide the start button
-        // Persist quiz state so navigating away doesn't lose it
-        if (currentChatId) {
-          saveQuizState(currentChatId, {
-            qaData: normalizedPairs,
-            currentQuestionIndex: 0,
-            userAnswers: [],
-            isAnswering: true,
-            quizCompleted: false,
-          });
-        }
-          const firstQuestionMessage: Message = {
-          id: generateMessageId(),
-            content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${normalizedPairs.length}:\n\n${normalizedPairs[0].question}`,
-            sender: 'ai',
-            timestamp: new Date(),
-            isQuestion: true,
-            questionData: {
-              question: normalizedPairs[0].question,
-              correctAnswer: normalizedPairs[0].answer,
-              conceptId: normalizedPairs[0].conceptId,
-              questionIndex: 0,
-              totalQuestions: normalizedPairs.length
-            }
-          };
-
-        // Remove any leftover question messages from previous quizzes before adding the new first question.
-            setChats(prevChats => prevChats.map(chat =>
-              chat.id === currentChatId
-                ? {
-                    ...chat,
-                messages: [...chat.messages.filter(m => !m.isQuestion), firstQuestionMessage],
-                  }
-                : chat
-            ));
-
-            await axios.post(`${API_BASE_URL}/chat/message`, {
-              chat_id: currentChatId,
-              sender: 'ai',
-              text: firstQuestionMessage.content,
-            }, { withCredentials: true });
-        }
-      } catch (error) {
-        console.error('Error fetching QA data:', error);
-      } finally {
-          setIsGeneratingQuestions(false);
-      }
-    };
-
-  // Add useEffect to load graph when chat changes
-  // Add useEffect to load graph and restore quiz state when chat changes
-  useEffect(() => {
-      const currentChat = chats.find(chat => chat.id === currentChatId);
-    if (currentChat?.graph_id) {
-      setGraphData(null);
-      setIsGraphLoading(true);
-      fetchGraphData(currentChat.graph_id, currentChatId);
-
-          // Try to restore persisted quiz state first
-          const persisted = currentChatId ? loadQuizState(currentChatId) : null;
-          const hasExistingQuestions = currentChat.messages.some(m => m.isQuestion);
-
-          if (persisted && persisted.qaData) {
-            // Restore persisted state
-            setQaData(persisted.qaData);
-            setCurrentQuestionIndex(persisted.currentQuestionIndex || 0);
-            setUserAnswers(persisted.userAnswers || []);
-            setIsAnswering(!!persisted.isAnswering);
-            setQuizCompleted(!!persisted.quizCompleted);
-            setShouldStartQuiz(false);
-          } else if (hasExistingQuestions && qaData.length === 0) {
-              // Reconstruct quiz state from chat message history (do not call startQuiz which requests new questions)
-              const reconstructed: QAPair[] = currentChat.messages
-                .filter(m => m.isQuestion && m.questionData)
-                .map(m => ({ question: m.questionData!.question, answer: m.questionData!.correctAnswer, conceptId: m.questionData!.conceptId }));
-
-              if (reconstructed.length > 0) {
-                setQaData(reconstructed);
-                const lastQuestion = currentChat.messages.slice().reverse().find(m => m.isQuestion && m.questionData);
-                const lastIndex = lastQuestion?.questionData?.questionIndex ?? 0;
-                setCurrentQuestionIndex(lastIndex);
-                setIsAnswering(true);
-                setShouldStartQuiz(false);
-                // Persist reconstructed state for durability
-                if (currentChatId) {
-                  saveQuizState(currentChatId, {
-                    qaData: reconstructed,
-                    currentQuestionIndex: lastIndex,
-                    userAnswers: [],
-                    isAnswering: true,
-                    quizCompleted: false,
-                  });
-                }
-              }
-      } else if (!hasExistingQuestions) {
-        // If there are no questions in history, reset the quiz state and show the Start Quiz button.
-        setQaData([]);
-        setIsAnswering(false);
-        // If this chat has a graph, allow starting a quiz from the UI (e.g. after returning from Profile).
-        if (currentChat?.graph_id) {
-          setShouldStartQuiz(true);
-        }
-      }
-    } else {
-      // This is a chat without a document/graph, so reset everything.
-      latestGraphRequestRef.current = null;
-      setIsGraphLoading(false);
-      setGraphData(null);
-      setQaData([]);
-      setIsAnswering(false);
-      setShouldStartQuiz(false);
-    }
-  }, [currentChatId, currentChat?.graph_id]); // Dependency array ensures this runs when the chat changes
-
-  // Show loading state while fetching chats
-  if (chatsLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50 via-slate-50 to-blue-50">
-        <div className="text-center space-y-4">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500"></div>
-          <p className="text-slate-500">Loading chats...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Only show "No chats yet" if loading is complete and there are no chats
-  if (!currentChat && chats.length === 0) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50 via-slate-50 to-blue-50">
-        <div className="text-center space-y-4">
-          <h2 className="text-2xl font-semibold text-slate-800">No chats yet</h2>
-          <p className="text-slate-500">Start a new conversation to begin chatting with your study assistant.</p>
-          <button
-            onClick={() => void handleNewChat()}
-            className="px-6 py-2.5 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all duration-200 shadow-md shadow-teal-500/20 btn-lift"
-          >
-            Start a New Chat
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex h-screen bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
-      <div
-        className={`${
-          isSidebarCollapsed ? 'w-12' : 'w-64'
-        } bg-slate-900 flex flex-col transition-all duration-300`}
-      >
-        <div className="p-4 border-b border-slate-700/50 flex justify-between items-center">
-          {!isSidebarCollapsed && (
-            <h2 className="text-lg font-semibold text-slate-100">Chat History</h2>
-          )}
-          <button
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="p-1 hover:bg-slate-700/50 rounded-lg transition-colors duration-150"
-          >
-            {isSidebarCollapsed ? (
-              <ChevronRight className="w-5 h-5 text-slate-400" />
-            ) : (
-              <ChevronLeft className="w-5 h-5 text-slate-400" />
-            )}
-          </button>
-        </div>
-        
-        <button
-          onClick={() => void handleNewChat()}
-          className={`m-4 p-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all duration-200 flex items-center justify-center gap-2 shadow-md shadow-teal-500/20 btn-lift ${
-            isSidebarCollapsed ? 'p-2' : ''
-          }`}
-        >
-          <Plus className="w-5 h-5" />
-          {!isSidebarCollapsed && <span>New Chat</span>}
-        </button>
-
-        {!isSidebarCollapsed && (
-          <div className="flex-1 overflow-y-auto">
-            {chats
-              .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-              .map((chat) => (
-              <div
-                key={chat.id}
-                onClick={(e) => {
-                  if ((e.target as HTMLElement).closest('button[title="Delete chat"]') || (e.target as HTMLElement).closest('button[title="Rename chat"]') || renamingChatId === chat.id) {
-                    return;
-                  }
-                  handleChatSelect(chat.id);
-                }}
-                className={`p-3 hover:bg-slate-800/70 cursor-pointer border-b border-slate-700/30 transition-colors duration-150 relative group ${
-                  currentChatId === chat.id ? 'bg-slate-800 border-l-2 border-l-teal-400' : ''
-                }`}
-              >
-                <div className="flex items-center space-x-3">
-                  <MessageSquare className="w-5 h-5 text-teal-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    {renamingChatId === chat.id ? (
-                      <form
-                        onSubmit={(e) => { e.preventDefault(); handleRenameChat(chat.id); }}
-                        className="flex items-center gap-1"
-                      >
-                        <input
-                          autoFocus
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onBlur={() => handleRenameChat(chat.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') {
-                              setRenamingChatId(null);
-                              setRenameValue(chat.title);
-                            }
-                          }}
-                          className="w-full bg-slate-700 text-slate-200 text-sm rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-teal-400"
-                        />
-                        <button type="submit" className="p-0.5 hover:bg-teal-500/20 rounded flex-shrink-0" title="Confirm rename">
-                          <Check className="w-3.5 h-3.5 text-teal-400" />
-                        </button>
-                      </form>
-                    ) : (
-                      <>
-                        <h3 className="text-sm font-medium text-slate-200 truncate">
-                          {chat.title}
-                        </h3>
-                        <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
-                      </>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-0.5"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                    }}
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                    }}
-                  >
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        setRenamingChatId(chat.id);
-                        setRenameValue(chat.title);
-                      }}
-                      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-teal-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
-                      title="Rename chat"
-                      type="button"
-                    >
-                      <Pencil className="w-3.5 h-3.5 text-teal-400 hover:text-teal-300" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        console.log('Delete button onClick triggered for chat:', chat.id);
-                        handleDeleteChat(chat.id, e);
-                      }}
-                      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-red-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
-                      title="Delete chat"
-                      type="button"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-300" />
-                    </button>
-                  </div>
-                </div>
-                <div className="mt-1 text-xs text-slate-500">
-                  {(() => {
-                    const now = new Date();
-                    const diff = now.getTime() - chat.timestamp.getTime();
-                    const mins = Math.floor(diff / 60000);
-                    const hrs = Math.floor(diff / 3600000);
-                    const days = Math.floor(diff / 86400000);
-                    if (mins < 1) return 'Just now';
-                    if (mins < 60) return `${mins}m ago`;
-                    if (hrs < 24) return `${hrs}h ago`;
-                    if (days === 1) return 'Yesterday';
-                    if (days < 7) return `${days}d ago`;
-                    return chat.timestamp.toLocaleDateString();
-                  })()}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="p-4 border-t border-slate-700/50 flex flex-col gap-2">
-          <button onClick={() => navigate('/')} className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200" title="Home">
-            <Home className="w-5 h-5" />
-            {!isSidebarCollapsed && <span className="text-sm">Home</span>}
-          </button>
-          <button onClick={() => navigate('/profile')} className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200" title="Profile">
-            <User className="w-5 h-5" />
-            {!isSidebarCollapsed && <span className="text-sm">Profile</span>}
-          </button>
-          <button className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200 opacity-50 cursor-not-allowed" title="Settings (coming soon)">
-            <Settings className="w-5 h-5" />
-            {!isSidebarCollapsed && <span className="text-sm">Settings</span>}
-          </button>
-        </div>
-      </div>
-
-      <PanelGroup direction="horizontal" className="flex-1">
-        <Panel defaultSize={40} minSize={20}>
-          <div className="h-full p-4 bg-transparent">
-            <div className="h-full rounded-xl bg-white/80 backdrop-blur-sm border border-slate-200/60 shadow-sm">
-              {isProcessingFile ? (
-                <div className="h-full flex flex-col items-center justify-center px-8">
-                  <FileText className="w-12 h-12 text-teal-500 mb-4 animate-pulse" />
-                  <p className="text-gray-800 text-lg font-semibold mb-1">
-                    Processing your PDF{loadingDots}
-                  </p>
-                  <p className="text-gray-500 text-sm mb-6">
-                    {progressMessage || 'Extracting concepts and building your knowledge graph'}
-                  </p>
-                  <div className="w-full max-w-xs">
-                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-teal-500 rounded-full transition-all duration-700 ease-out"
-                        style={{ width: `${uploadProgress}%` }}
-                      />
-                    </div>
-                    <p className="text-center text-xs text-gray-400 mt-2">{uploadProgress}%</p>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      // 1. Abort the client-side fetch (closes SSE connection)
-                      uploadAbortRef.current?.abort();
-                      // 2. Tell the server to cancel the AI processing
-                      try {
-                        await fetch(`${API_BASE_URL}/upload/cancel-processing`, { method: 'POST', credentials: 'include' });
-                      } catch {
-                        // Best-effort — server may already have cleaned up
-                      }
-                      // 3. Reset client UI state
-                      setIsProcessingFile(false);
-                      setSelectedFile(null);
-                      setUploadProgress(0);
-                      setProgressMessage('');
-                      if (fileInputRef.current) fileInputRef.current.value = '';
-                    }}
-                    className="mt-6 px-4 py-2 text-sm text-red-500 border border-red-300 rounded-lg hover:bg-red-50 transition-colors duration-150"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <GraphVisualization data={graphData} conceptProgress={conceptProgress} isLoading={isGraphLoading} />
-              )}
-            </div>
-          </div>
-        </Panel>
-
-        <ResizeHandle className="w-2 hover:bg-teal-400/20 transition-colors duration-150" />
-
-        <Panel minSize={30}>
-          <div className="h-full flex flex-col">
-            <div className="bg-white/80 backdrop-blur-sm p-4 border-b border-slate-200/60 flex justify-between items-center" style={{ zIndex: 1000, position: 'relative' }}>
-              <h1 className="text-xl font-semibold text-slate-800 flex-1 min-w-0 truncate">{currentChat?.title || 'Loading...'}</h1>
-              <div className="flex items-center gap-4 flex-wrap max-w-full flex-shrink-0" style={{ zIndex: 100, position: 'relative' }}>
-                {/* Quiz Length Control */}
-                <div className="flex items-center gap-3">
-                  <label className="text-sm font-medium text-slate-600">Quiz Length:</label>
-                  <select
-                    value={quizLength}
-                    onChange={(e) => setQuizLength(Number(e.target.value) as 5 | 10 | 15)}
-                    className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 cursor-pointer bg-white hover:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 transition-all max-w-[9rem]"
-                    style={{ zIndex: 101, position: 'relative', pointerEvents: 'auto' }}
-                    disabled={isAnswering}
-                  >
-                    <option value={5}>5 questions</option>
-                    <option value={10}>10 questions</option>
-                    <option value={15}>15 questions</option>
-                  </select>
-                </div>
-                
-                {/* Question Type Control */}
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-slate-600">Question Type:</label>
-                  <select
-                    value={questionFormat}
-                    onChange={(e) => setQuestionFormat(e.target.value as 'mixed' | 'mcq' | 'true-false' | 'open-ended')}
-                    className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 cursor-pointer bg-white hover:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 transition-all max-w-[11rem]"
-                    style={{ zIndex: 101, position: 'relative', pointerEvents: 'auto' }}
-                    disabled={isAnswering}
-                  >
-                    <option value="mixed">Mixed (Random)</option>
-                    <option value="mcq">Multiple Choice</option>
-                    <option value="true-false">True/False</option>
-                    <option value="open-ended">Open-Ended</option>
-                  </select>
-                </div>
-                
-                {/* Divider */}
-                <div className="h-8 w-px bg-slate-200"></div>
-                
-                <button
-                  onClick={() => {
-                    if (currentChat?.graph_id) {
-                      navigate('/progress');
-                    } else {
-                      alert("Please upload a document to view progress.");
-                    }
-                  }}
-                  className="px-4 py-2 bg-white text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 hover:border-teal-300 transition-all duration-200 flex items-center justify-center gap-2 font-medium shadow-sm btn-lift"
-                >
-                  View Progress
-                </button>
-                
-                
-                
-                {/* Start Quiz button moved to header for better placement */}
-                {shouldStartQuiz && !isAnswering && currentChat?.graph_id && (
-                  <button
-                    onClick={startQuiz}
-                    disabled={isGeneratingQuestions}
-                    className={`px-4 py-2 ${isGeneratingQuestions ? 'bg-slate-200 text-slate-500' : 'bg-gradient-to-r from-teal-500 to-teal-600 text-white hover:from-teal-600 hover:to-teal-700 shadow-md shadow-teal-500/20 animate-gentle-pulse'} rounded-lg transition-all duration-200 flex items-center gap-2 font-medium btn-lift`}
-                    title={isGeneratingQuestions ? 'Generating questions...' : 'Start quiz based on this document'}
-                  >
-                    {isGeneratingQuestions ? 'Generating...' : (quizCompleted ? 'Start New Quiz' : 'Start Quiz')}
-                  </button>
-                )}
-                
-                {/* End Quiz button - shows when quiz is active */}
-                {isAnswering && (
-                  <button
-                    onClick={async () => {
-                      console.log('🔴 END QUIZ BUTTON CLICKED!');
-                      console.log('🟡 Resetting quiz state...');
-                      
-                      // Reset all quiz state
-                      setIsAnswering(false);
-                      setQaData([]);
-                      setCurrentQuestionIndex(0);
-                      setUserAnswers([]);
-                      setQuizCompleted(false);
-                      setShouldStartQuiz(true); // Show start quiz button again
-                      
-                      console.log('✅ Quiz state reset! isAnswering=false');
-                      
-                      // Clear persisted quiz state
-                      if (currentChatId) {
-                        clearQuizState(currentChatId);
-                        console.log('✅ Cleared persisted quiz state');
-                      }
-                      
-                      // Add a message to chat indicating quiz was ended
-                      const endMessage: Message = {
-                        id: generateMessageId(),
-                        content: 'Quiz ended. You can start a new quiz anytime by clicking "Start Quiz".',
-                        sender: 'ai',
-                        timestamp: new Date(),
-                      };
-                      
-                      setChats(prevChats => prevChats.map(chat =>
-                        chat.id === currentChatId
-                          ? { ...chat, messages: [...chat.messages, endMessage] }
-                          : chat
-                      ));
-
-                      // Save the end message to backend (consistent with other messages)
-                      try {
-                        await axios.post(`${API_BASE_URL}/chat/message`, {
-                          chat_id: currentChatId,
-                          sender: 'ai',
-                          text: endMessage.content,
-                        }, { withCredentials: true });
-                        console.log('✅ End quiz message saved to backend');
-                      } catch (error) {
-                        console.error('Error saving end quiz message:', error);
-                        // Don't show error to user since quiz state is already cleared locally
-                      }
-                    }}
-                    className="px-4 py-2 bg-red-500 text-white hover:bg-red-600 rounded-lg transition-colors duration-200 flex items-center gap-2 font-medium"
-                    style={{ 
-                      zIndex: 9999, 
-                      position: 'relative', 
-                      pointerEvents: 'auto',
-                      cursor: 'pointer'
-                    }}
-                    title="End the current quiz without finishing"
-                  >
-                    End Quiz
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Quiz progress step bar */}
-            {isAnswering && qaData.length > 0 && (
-              <div className="px-4 py-2.5 bg-white/60 backdrop-blur-sm border-b border-slate-200/60">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-xs font-semibold text-slate-600">Question {currentQuestionIndex + 1} of {qaData.length}</span>
-                  <span className="text-xs text-slate-400">({Math.round(((currentQuestionIndex) / qaData.length) * 100)}% complete)</span>
-                </div>
-                <div className="flex gap-1">
-                  {qaData.map((_, idx) => (
-                    <div
-                      key={idx}
-                      className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
-                        idx < currentQuestionIndex
-                          ? 'bg-teal-500'
-                          : idx === currentQuestionIndex
-                          ? 'bg-teal-400 animate-pulse'
-                          : 'bg-slate-200'
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-slate-50/80 to-slate-100/50">
-              {currentChat?.messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} ${message.sender === 'user' ? 'animate-slide-in-right' : 'animate-slide-in-left'} group/msg`}
-                >
-                  <div
-                    className={`flex items-end gap-2 max-w-[75%] ${
-                      message.sender === 'user' ? 'flex-row-reverse' : ''
-                    }`}
-                  >
-                    {/* Avatar */}
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      message.sender === 'user'
-                        ? 'bg-gradient-to-br from-teal-400 to-teal-600'
-                        : 'bg-gradient-to-br from-slate-200 to-slate-300'
-                    }`}>
-                      {message.sender === 'user' ? (
-                        <User className="w-3.5 h-3.5 text-white" />
-                      ) : (
-                        <Bot className="w-3.5 h-3.5 text-slate-600" />
-                      )}
-                    </div>
-                    {/* Bubble */}
-                    <div
-                      className={`px-3.5 py-2.5 ${
-                        message.sender === 'user'
-                          ? 'bg-gradient-to-br from-teal-500 to-teal-600 text-white rounded-2xl rounded-br-md shadow-md shadow-teal-500/15'
-                          : 'bg-white text-slate-800 rounded-2xl rounded-bl-md border border-slate-200/60 shadow-sm'
-                      }`}
-                    >
-                      <div className="text-sm whitespace-pre-wrap leading-relaxed">
-                        {message.isQuestion ? formatQuestion(message.content) : message.content}
-                      </div>
-                      {message.file && (
-                        <div className={`mt-2 p-2 rounded-lg ${
-                          message.sender === 'user' ? 'bg-white/20' : 'bg-slate-100'
-                        }`}>
-                          <div className="flex items-center space-x-2">
-                            {getFileIcon(message.file.type)}
-                            <a
-                              href={message.file.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={`text-sm truncate underline ${
-                                message.sender === 'user' ? 'text-white hover:text-teal-100' : 'text-teal-600 hover:text-teal-500'
-                              }`}
-                            >
-                              {message.file.name}
-                            </a>
-                          </div>
-                          {message.file.type.startsWith('image/') && (
-                            <img
-                              src={message.file.url}
-                              alt={message.file.name}
-                              className="mt-2 max-w-full h-auto rounded-lg"
-                            />
-                          )}
-                        </div>
-                      )}
-                      {/* Hover timestamp */}
-                      <div className={`text-[10px] mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200 ${
-                        message.sender === 'user' ? 'text-teal-100' : 'text-slate-400'
-                      }`}>
-                        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {isTyping && (
-                <div className="flex justify-start animate-slide-in-left">
-                  <div className="flex items-end gap-2">
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center bg-gradient-to-br from-slate-200 to-slate-300 flex-shrink-0">
-                      <Bot className="w-3.5 h-3.5 text-slate-600" />
-                    </div>
-                    <div className="bg-white px-4 py-3 rounded-2xl rounded-bl-md border border-slate-200/60 shadow-sm">
-                      <div className="flex items-center gap-1">
-                        <span className="w-2 h-2 bg-slate-400 rounded-full typing-dot"></span>
-                        <span className="w-2 h-2 bg-slate-400 rounded-full typing-dot"></span>
-                        <span className="w-2 h-2 bg-slate-400 rounded-full typing-dot"></span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {/* Start Quiz button is now located in the header for improved UX */}
-              <div ref={messagesEndRef} />
-            </div>
-
-            <form onSubmit={handleSubmit} className="p-4 bg-white/80 backdrop-blur-sm border-t border-slate-200/60">
-              {isProcessingFile && (
-                <div className="mb-2 p-3 bg-teal-50 border border-teal-200 rounded-lg">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-teal-700">
-                      {progressMessage || 'Processing PDF...'}
-                    </span>
-                    <span className="text-xs font-semibold text-teal-600">{uploadProgress}%</span>
-                  </div>
-                  <div className="h-1.5 bg-teal-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-teal-500 rounded-full transition-all duration-700 ease-out"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-              {selectedFile && !isProcessingFile && (
-                <div className="mb-2 p-2 bg-slate-50 rounded-lg flex items-center justify-between border border-slate-200/60">
-                  <div className="flex items-center space-x-2">
-                    {getFileIcon(selectedFile.type)}
-                    <span className="text-sm text-slate-600 truncate">{selectedFile.name}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleRemoveFile}
-                    className="text-slate-400 hover:text-slate-600"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-              <div className="flex space-x-2">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder={isAnswering ? "Type your answer..." : "Type your message..."}
-                  className="flex-1 px-4 py-2 bg-white text-slate-900 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 placeholder-slate-400 transition-all"
-                />
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-                {!isAnswering && (
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isProcessingFile}
-                    className="px-4 py-2 bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500/30 flex items-center transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Paperclip className="w-5 h-5" />
-                  </button>
-                )}
-                {isAnswering && (
-                  <button
-                    type="button"
-                    onClick={handleSkip}
-                    disabled={isTyping}
-                    className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 flex items-center transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                    title="Skip this question (counts as incorrect)"
-                  >
-                    Skip
-                  </button>
-                )}
-                <button
-                  type="submit"
-                  disabled={isTyping}
-                  className="px-4 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30 flex items-center transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-teal-500/20 btn-lift"
-                >
-                  <Send className="w-5 h-5" />
-                </button>
-              </div>
-            </form>
-          </div>
-        </Panel>
-      </PanelGroup>
-    </div>
-  );
+	const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+	const [sidebarWidth, setSidebarWidth] = useState(280);
+	const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+	const [currentChatId, setCurrentChatId] = useState("");
+	const [isTyping, setIsTyping] = useState(false);
+	const [isProcessingFile, setIsProcessingFile] = useState(false);
+	const [uploadProgress, setUploadProgress] = useState(0);
+	const [progressMessage, setProgressMessage] = useState("");
+	const [selectedFile, setSelectedFile] = useState<File | null>(null);
+	const [graphData, setGraphData] = useState<any>(null);
+	const [qaData, setQaData] = useState<QAPair[]>([]);
+	const [conceptProgress, setConceptProgress] = useState<ConceptProgress[]>(
+		[],
+	); // Add state for concept progress
+	const [quizLength, setQuizLength] = useState<5 | 10 | 15>(5);
+	const [questionFormat, setQuestionFormat] = useState<
+		"mixed" | "mcq" | "true-false" | "open-ended"
+	>("mixed");
+	const [shouldStartQuiz, setShouldStartQuiz] = useState(false);
+	const [quizCompleted, setQuizCompleted] = useState(false);
+
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const messagesEndRef = useRef<HTMLDivElement>(null);
+	const deletingChatRef = useRef<string | null>(null);
+	const renameInFlightRef = useRef<string | null>(null);
+	const folderRenameInFlightRef = useRef<string | null>(null);
+	const uploadAbortRef = useRef<AbortController | null>(null);
+	const latestGraphRequestRef = useRef<string | null>(null);
+	const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
+	const [renameValue, setRenameValue] = useState("");
+	const [loadingDots, setLoadingDots] = useState("");
+	const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
+	const [isAnswering, setIsAnswering] = useState<boolean>(false);
+	const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
+	const [userAnswers, setUserAnswers] = useState<string[]>([]);
+
+	const navigate = useNavigate();
+
+	const [chats, setChats] = useState<Chat[]>([]);
+	const [chatsLoading, setChatsLoading] = useState(true);
+
+	const currentChat = chats.find((chat) => chat.id === currentChatId) ?? null;
+	const [input, setInput] = useState("");
+	const [isGraphLoading, setIsGraphLoading] = useState(false);
+
+	const [folders, setFolders] = useState<
+		Array<{
+			folder_id: string;
+			name: string;
+			date_created: string;
+			parent_folder_id?: string | null;
+		}>
+	>([]);
+	const [searchQuery, setSearchQuery] = useState("");
+	const searchInputRef = useRef<HTMLInputElement>(null);
+	const [expandedFolders, setExpandedFolders] = useState<
+		Record<string, boolean>
+	>({});
+	const [activeMenuChatId, setActiveMenuChatId] = useState<string | null>(
+		null,
+	);
+	const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+	const [newFolderName, setNewFolderName] = useState("");
+	const [newFolderParentId, setNewFolderParentId] = useState<string | null>(
+		null,
+	);
+	const [renamingFolderId, setRenamingFolderId] = useState<string | null>(
+		null,
+	);
+	const [folderRenameValue, setFolderRenameValue] = useState("");
+	const [draggedChatId, setDraggedChatId] = useState<string | null>(null);
+	const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(
+		null,
+	);
+	const [errorToast, setErrorToast] = useState<string | null>(null);
+	const [folderToDelete, setFolderToDelete] = useState<{
+		folder_id: string;
+		name: string;
+		parent_folder_id?: string | null;
+	} | null>(null);
+	const errorToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+		null,
+	);
+	const sidebarResizeRef = useRef<{
+		startX: number;
+		startWidth: number;
+	} | null>(null);
+
+	const showErrorToast = (message: string) => {
+		if (errorToastTimeoutRef.current) {
+			clearTimeout(errorToastTimeoutRef.current);
+		}
+		setErrorToast(message);
+		errorToastTimeoutRef.current = setTimeout(
+			() => setErrorToast(null),
+			5000,
+		);
+	};
+
+	useEffect(() => {
+		if (!isResizingSidebar) return;
+
+		const handleMouseMove = (event: MouseEvent) => {
+			const resizeStart = sidebarResizeRef.current;
+			if (!resizeStart) return;
+			setSidebarWidth(
+				Math.min(
+					480,
+					Math.max(
+						220,
+						resizeStart.startWidth +
+							event.clientX -
+							resizeStart.startX,
+					),
+				),
+			);
+		};
+		const handleMouseUp = () => {
+			sidebarResizeRef.current = null;
+			setIsResizingSidebar(false);
+		};
+
+		document.addEventListener("mousemove", handleMouseMove);
+		document.addEventListener("mouseup", handleMouseUp);
+		return () => {
+			document.removeEventListener("mousemove", handleMouseMove);
+			document.removeEventListener("mouseup", handleMouseUp);
+		};
+	}, [isResizingSidebar]);
+
+	const startSidebarResize = (event: React.MouseEvent<HTMLDivElement>) => {
+		if (isSidebarCollapsed) return;
+		event.preventDefault();
+		sidebarResizeRef.current = {
+			startX: event.clientX,
+			startWidth: sidebarWidth,
+		};
+		setIsResizingSidebar(true);
+	};
+
+	const focusSearchAfterExpand = () => {
+		setIsSidebarCollapsed(false);
+		window.setTimeout(() => searchInputRef.current?.focus(), 0);
+	};
+
+	const fetchFolders = async () => {
+		try {
+			const res = await fetch(`${API_BASE_URL}/chat/folders`, {
+				credentials: "include",
+			});
+			if (res.ok) {
+				setFolders(await res.json());
+			}
+		} catch (err) {
+			console.error("Error fetching folders:", err);
+		}
+	};
+
+	useEffect(() => {
+		fetchFolders();
+	}, []);
+
+	const handleCreateFolderSubmit = async (e?: React.FormEvent) => {
+		if (e) {
+			e.preventDefault();
+			e.stopPropagation();
+		}
+
+		const name = newFolderName.trim();
+		if (!name) {
+			setIsCreatingFolder(false);
+			return;
+		}
+
+		try {
+			const response = await axios.post(
+				`${API_BASE_URL}/chat/folder/new`,
+				{ name, parent_folder_id: newFolderParentId },
+				{ withCredentials: true },
+			);
+
+			if (response.status === 201 || response.status === 200) {
+				const newFolder = response.data;
+				setFolders((prev) => [...prev, newFolder]);
+				setExpandedFolders((prev) => ({
+					...prev,
+					[newFolder.folder_id]: true,
+				}));
+				if (newFolder.parent_folder_id) {
+					setExpandedFolders((prev) => ({
+						...prev,
+						[newFolder.parent_folder_id]: true,
+					}));
+				}
+			}
+		} catch (err: any) {
+			console.error("Error creating folder:", err);
+			const serverMessage = err.response?.data?.message || "Server error";
+			showErrorToast(
+				`Could not create folder (${err.response?.status || "Network Error"}): ${serverMessage}`,
+			);
+		} finally {
+			setNewFolderName("");
+			setNewFolderParentId(null);
+			setIsCreatingFolder(false);
+		}
+	};
+
+	const handleRenameFolder = async (folderId: string) => {
+		if (
+			renamingFolderId !== folderId ||
+			folderRenameInFlightRef.current === folderId
+		)
+			return;
+
+		const trimmed = folderRenameValue.trim();
+		const currentName =
+			folders.find((folder) => folder.folder_id === folderId)?.name || "";
+		setRenamingFolderId(null);
+		if (!trimmed || trimmed === currentName) return;
+
+		folderRenameInFlightRef.current = folderId;
+		setFolders((prev) =>
+			prev.map((folder) =>
+				folder.folder_id === folderId
+					? { ...folder, name: trimmed }
+					: folder,
+			),
+		);
+
+		try {
+			await axios.patch(
+				`${API_BASE_URL}/chat/folder/${folderId}/rename`,
+				{ name: trimmed },
+				{ withCredentials: true },
+			);
+		} catch (err: any) {
+			console.error("Error renaming folder:", err);
+			await fetchFolders();
+			showErrorToast(
+				`Could not rename folder: ${err.response?.data?.message || "Server error"}`,
+			);
+		} finally {
+			folderRenameInFlightRef.current = null;
+		}
+	};
+
+	const handleMoveChat = async (chatId: string, folderId: string | null) => {
+		try {
+			const res = await fetch(`${API_BASE_URL}/chat/move-to-folder`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				credentials: "include",
+				body: JSON.stringify({ chat_id: chatId, folder_id: folderId }),
+			});
+
+			if (!res.ok) {
+				let message = `Server error (${res.status})`;
+				try {
+					const data = await res.json();
+					message = data.message || message;
+				} catch {
+					// Keep the status-based message when the response is not JSON.
+				}
+				throw new Error(message);
+			}
+
+			setChats((prevChats) =>
+				prevChats.map((chat) =>
+					chat.id === chatId
+						? { ...chat, folder_id: folderId }
+						: chat,
+				),
+			);
+			setActiveMenuChatId(null);
+		} catch (err) {
+			console.error("Error moving chat to folder:", err);
+			showErrorToast(
+				`Could not move chat: ${err instanceof Error ? err.message : "Server error"}`,
+			);
+		}
+	};
+
+	const handleMoveFolder = async (
+		folderId: string,
+		parentFolderId: string | null,
+	) => {
+		try {
+			const res = await fetch(
+				`${API_BASE_URL}/chat/folder/${folderId}/move`,
+				{
+					method: "PATCH",
+					headers: { "Content-Type": "application/json" },
+					credentials: "include",
+					body: JSON.stringify({ parent_folder_id: parentFolderId }),
+				},
+			);
+
+			if (!res.ok) {
+				const data = await res.json().catch(() => ({}));
+				throw new Error(data.message || `Server error (${res.status})`);
+			}
+
+			setFolders((prev) =>
+				prev.map((folder) =>
+					folder.folder_id === folderId
+						? { ...folder, parent_folder_id: parentFolderId }
+						: folder,
+				),
+			);
+		} catch (err) {
+			console.error("Error moving folder:", err);
+			showErrorToast(
+				`Could not move folder: ${err instanceof Error ? err.message : "Server error"}`,
+			);
+		}
+	};
+
+	const requestDeleteFolder = (folderId: string, e: React.MouseEvent) => {
+		e.stopPropagation();
+
+		const folder = folders.find((item) => item.folder_id === folderId);
+		if (folder) {
+			setFolderToDelete({
+				folder_id: folder.folder_id,
+				name: folder.name,
+				parent_folder_id: folder.parent_folder_id,
+			});
+		}
+	};
+
+	const handleDeleteFolder = async () => {
+		if (!folderToDelete) return;
+
+		const { folder_id: folderId, parent_folder_id: parentFolderId } =
+			folderToDelete;
+		setFolderToDelete(null);
+
+		try {
+			await axios.delete(`${API_BASE_URL}/chat/folder/${folderId}`, {
+				withCredentials: true,
+			});
+			setFolders((prev) =>
+				prev
+					.filter((item) => item.folder_id !== folderId)
+					.map((item) =>
+						item.parent_folder_id === folderId
+							? {
+									...item,
+									parent_folder_id: parentFolderId || null,
+								}
+							: item,
+					),
+			);
+			setChats((prev) =>
+				prev.map((chat) =>
+					chat.folder_id === folderId
+						? { ...chat, folder_id: null }
+						: chat,
+				),
+			);
+			setExpandedFolders((prev) => {
+				const next = { ...prev };
+				delete next[folderId];
+				return next;
+			});
+		} catch (err: any) {
+			console.error("Error deleting folder:", err);
+			showErrorToast(
+				`Failed to delete folder: ${err.response?.data?.message || "Server error"}`,
+			);
+		}
+	};
+
+	const handleChatDragStart = (
+		e: React.DragEvent<HTMLDivElement>,
+		chatId: string,
+	) => {
+		e.dataTransfer.effectAllowed = "move";
+		e.dataTransfer.setData("text/plain", chatId);
+		setDraggedChatId(chatId);
+	};
+
+	const handleFolderDragStart = (
+		e: React.DragEvent<HTMLDivElement>,
+		folderId: string,
+	) => {
+		e.dataTransfer.effectAllowed = "move";
+		e.dataTransfer.setData("application/x-smartpath-folder", folderId);
+	};
+
+	const handleChatDrop = async (
+		e: React.DragEvent<HTMLDivElement>,
+		targetFolderId: string | null,
+	) => {
+		e.preventDefault();
+		const draggedFolderId = e.dataTransfer.getData(
+			"application/x-smartpath-folder",
+		);
+		e.stopPropagation();
+		if (draggedFolderId) {
+			setDragOverFolderId(null);
+			await handleMoveFolder(draggedFolderId, targetFolderId);
+			return;
+		}
+
+		const chatId = e.dataTransfer.getData("text/plain") || draggedChatId;
+		setDragOverFolderId(null);
+		setDraggedChatId(null);
+
+		if (chatId) {
+			await handleMoveChat(chatId, targetFolderId);
+		}
+	};
+
+	// Generate robust unique IDs to avoid duplicate keys when multiple messages are created in the same millisecond
+	const generateMessageId = () => {
+		try {
+			if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+				return (crypto as any).randomUUID();
+			}
+		} catch (_) {
+			// ignore and fallback
+		}
+		return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+	};
+
+	// Local persistence helpers for quiz state per chat
+	const quizStateKey = (chatId: string) => `quizState:${chatId}`;
+
+	const saveQuizState = (chatId: string, state: any) => {
+		try {
+			localStorage.setItem(quizStateKey(chatId), JSON.stringify(state));
+		} catch (err) {
+			console.warn("Failed to save quiz state", err);
+		}
+	};
+
+	const loadQuizState = (chatId: string) => {
+		try {
+			const raw = localStorage.getItem(quizStateKey(chatId));
+			return raw ? JSON.parse(raw) : null;
+		} catch (err) {
+			console.warn("Failed to load quiz state", err);
+			return null;
+		}
+	};
+
+	const clearQuizState = (chatId: string) => {
+		try {
+			localStorage.removeItem(quizStateKey(chatId));
+		} catch (err) {
+			console.warn("Failed to clear quiz state", err);
+		}
+	};
+
+	const scrollToBottom = () => {
+		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+	};
+
+	useEffect(() => {
+		if (currentChat) {
+			scrollToBottom();
+		}
+	}, [currentChat]);
+
+	useEffect(() => {
+		let interval: NodeJS.Timeout;
+		if (isProcessingFile) {
+			interval = setInterval(() => {
+				setLoadingDots((dots) => (dots.length >= 3 ? "" : dots + "."));
+			}, 500);
+		}
+		return () => clearInterval(interval);
+	}, [isProcessingFile]);
+
+	// Add function to fetch concept progress
+	const fetchConceptProgress = useCallback(async () => {
+		try {
+			const response = await axios.get(
+				`${API_BASE_URL}/api/concept-progress`,
+				{
+					withCredentials: true,
+				},
+			);
+			setConceptProgress(response.data);
+			console.log("Fetched concept progress:", response.data);
+		} catch (error) {
+			console.error("Error fetching concept progress:", error);
+			// Set empty array on error to avoid breaking the UI
+			setConceptProgress([]);
+		}
+	}, []);
+
+	const generateAIResponse = async (
+		userMessage: string,
+		fileType?: string,
+	) => {
+		let aiResponse = "";
+
+		if (fileType) {
+			if (fileType.startsWith("image/")) {
+				aiResponse =
+					"I see you've shared an image. What would you like me to help you with regarding this image?";
+			} else if (
+				fileType.includes("document") ||
+				fileType.includes("pdf")
+			) {
+				aiResponse =
+					"I've received your document. What aspects would you like me to review or analyze?";
+			} else {
+				aiResponse =
+					"I've received your file. How can I help you with it?";
+			}
+		} else {
+			const lowerMessage = userMessage.toLowerCase();
+			if (lowerMessage.includes("hello") || lowerMessage.includes("hi")) {
+				aiResponse =
+					"Hello! It's great to meet you. How can I assist you today?";
+			} else if (lowerMessage.includes("help")) {
+				aiResponse =
+					"I'd be happy to help! Could you please provide more details about what you need assistance with?";
+			} else if (lowerMessage.includes("thank")) {
+				aiResponse =
+					"You're welcome! Is there anything else you'd like to know?";
+			} else if (lowerMessage.includes("bye")) {
+				aiResponse =
+					"Goodbye! Feel free to return if you have more questions!";
+			} else {
+				aiResponse =
+					"That's an interesting point! Could you tell me more about what you're thinking?";
+			}
+		}
+
+		return {
+			id: generateMessageId(),
+			content: aiResponse,
+			sender: "ai" as const,
+			timestamp: new Date(),
+		};
+	};
+
+	const isPlaceholderGraph = (payload: any): boolean => {
+		const nodes = payload?.graph?.nodes;
+		if (!Array.isArray(nodes) || nodes.length === 0) {
+			return true;
+		}
+		if (nodes.length > 1) {
+			return false;
+		}
+
+		const node = nodes[0] || {};
+		const labels: string[] = Array.isArray(node.labels)
+			? node.labels.map((l: string) => String(l).toLowerCase())
+			: [];
+		const propSubject = String(
+			node?.properties?.subject ?? "",
+		).toLowerCase();
+		const topSubject = String(payload?.subject ?? "").toLowerCase();
+		if (
+			labels.some((l) => l.includes("graphmetadata")) &&
+			(propSubject === "default" || topSubject === "default")
+		) {
+			return true;
+		}
+
+		const id = String(node.id || "").toLowerCase();
+		const label = String(node?.labels?.[0] || "").toLowerCase();
+		const name = String(node?.properties?.name || "").toLowerCase();
+		const text = String(node?.properties?.text || "").toLowerCase();
+		return [id, label, name, text].some(
+			(value) => value === "default" || value.includes("placeholder"),
+		);
+	};
+
+	const fetchGraphData = async (
+		graphId?: string,
+		expectedChatId?: string,
+	) => {
+		if (!graphId) return;
+		const requestKey = `${graphId}:${expectedChatId ?? ""}:${Date.now()}`;
+		latestGraphRequestRef.current = requestKey;
+		setIsGraphLoading(true);
+
+		try {
+			const maxAttempts = 20;
+			let selectedData: any = null;
+
+			for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+				// Abort stale retries if a newer graph request has been issued.
+				if (latestGraphRequestRef.current !== requestKey) {
+					return;
+				}
+
+				const response = await axios.get(
+					`${API_BASE_URL}/api/view-graph`,
+					{
+						params: {
+							graph_id: graphId,
+							t: Date.now(), // cache buster to avoid stale graph responses
+						},
+						headers: {
+							"Cache-Control": "no-cache",
+							Pragma: "no-cache",
+						},
+						withCredentials: true,
+					},
+				);
+
+				const payload = response.data;
+				const placeholder = isPlaceholderGraph(payload);
+				console.log(
+					`[Graph] Fetch attempt ${attempt}/${maxAttempts} for ${graphId} placeholder=${placeholder}`,
+				);
+
+				if (!placeholder || attempt === maxAttempts) {
+					selectedData = payload;
+					break;
+				}
+
+				// Delay allows backend graph persistence/indexing to complete.
+				await new Promise((resolve) => setTimeout(resolve, 2000));
+			}
+
+			if (!selectedData) {
+				throw new Error("Failed to load graph data");
+			}
+
+			if (latestGraphRequestRef.current !== requestKey) {
+				return;
+			}
+
+			setCurrentChatId((currentId) => {
+				if (!expectedChatId || currentId === expectedChatId) {
+					setGraphData({ ...selectedData, graph_id: graphId });
+					void fetchConceptProgress();
+				}
+				return currentId;
+			});
+		} catch (error) {
+			console.error("Error fetching graph:", error);
+			setCurrentChatId((currentId) => {
+				if (!expectedChatId || currentId === expectedChatId) {
+					setGraphData({ error: "Failed to load graph data" });
+				}
+				return currentId;
+			});
+		} finally {
+			if (latestGraphRequestRef.current === requestKey) {
+				setIsGraphLoading(false);
+			}
+		}
+	};
+
+	const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0];
+		if (file) {
+			if (file.type !== "application/pdf") {
+				showErrorToast("Please upload a PDF file");
+				return;
+			}
+
+			setSelectedFile(file);
+			setGraphData(null);
+			setQaData([]);
+			try {
+				setIsProcessingFile(true);
+				const formData = new FormData();
+				formData.append("file", file);
+
+				console.log("Uploading file:", {
+					name: file.name,
+					type: file.type,
+					size: file.size,
+				});
+
+				// Always create a fresh graph for each uploaded document.
+				// Reusing old graph_id can cause stale/default graph carry-over.
+				const url = `${API_BASE_URL}/upload/process-pdf`;
+
+				setUploadProgress(0);
+				setProgressMessage("Uploading PDF...");
+
+				const abortController = new AbortController();
+				uploadAbortRef.current = abortController;
+
+				const response = await fetch(url, {
+					method: "POST",
+					body: formData,
+					credentials: "include",
+					signal: abortController.signal,
+				});
+
+				// Read the SSE stream for progress updates
+				const reader = response.body?.getReader();
+				const decoder = new TextDecoder();
+				let responseData: any = null;
+				let buffer = "";
+
+				if (!reader) {
+					throw new Error("Failed to read response stream");
+				}
+
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) break;
+
+					buffer += decoder.decode(value, { stream: true });
+					const lines = buffer.split("\n");
+					// Keep the last potentially incomplete line in the buffer
+					buffer = lines.pop() || "";
+
+					for (const line of lines) {
+						if (line.startsWith("data: ")) {
+							try {
+								const event = JSON.parse(line.slice(6));
+								if (event.type === "progress") {
+									setUploadProgress(event.percent);
+									setProgressMessage(event.message);
+								} else if (event.type === "complete") {
+									responseData = event.data;
+									setUploadProgress(100);
+									setProgressMessage("Processing complete!");
+								} else if (event.type === "error") {
+									const baseError =
+										event.error || "Failed to process file";
+									throw new Error(
+										event.details
+											? `${baseError} (${event.details})`
+											: baseError,
+									);
+								}
+							} catch (parseErr) {
+								if (parseErr instanceof SyntaxError) {
+									console.warn(
+										"[Upload] Skipping malformed SSE line:",
+										line,
+									);
+								} else {
+									throw parseErr;
+								}
+							}
+						}
+					}
+				}
+
+				console.log("[Upload] Parsed response data:", responseData);
+
+				if (!responseData) {
+					throw new Error("No response data received from server");
+				}
+
+				const processed = responseData.processed_chunks;
+				const uploadStatus = responseData.status;
+				if (
+					typeof processed === "number" &&
+					processed < 1 &&
+					uploadStatus !== "cancelled"
+				) {
+					const firstFail =
+						Array.isArray(responseData.failed_chunks) &&
+						responseData.failed_chunks.length > 0
+							? String(
+									(
+										responseData.failed_chunks[0] as {
+											error?: string;
+										}
+									)?.error || "",
+								)
+							: "";
+					throw new Error(
+						firstFail ||
+							"No concepts were written to the graph (0 chunks processed). On GCP, verify OPENAI_API_KEY / LLM config and Neo4j env on the AI service, and PYTHON_SERVICE_URL on the Node service.",
+					);
+				}
+
+				const fileUploadMessage: Message = {
+					id: generateMessageId(),
+					content: `Uploaded file: ${file.name}`,
+					sender: "user",
+					timestamp: new Date(),
+					file: {
+						name: file.name,
+						type: file.type,
+						url: URL.createObjectURL(file),
+					},
+				};
+
+				await axios.post(
+					`${API_BASE_URL}/chat/message`,
+					{
+						chat_id: currentChatId,
+						sender: "user",
+						text: fileUploadMessage.content,
+					},
+					{ withCredentials: true },
+				);
+
+				setChats((prevChats) =>
+					prevChats.map((chat) =>
+						chat.id === currentChatId
+							? {
+									...chat,
+									lastMessage: fileUploadMessage.content,
+									timestamp: new Date(),
+									messages: [
+										...chat.messages,
+										fileUploadMessage,
+									],
+								}
+							: chat,
+					),
+				);
+
+				if (responseData.graph_id) {
+					await axios.post(
+						`${API_BASE_URL}/chat/message`,
+						{
+							chat_id: currentChatId,
+							graph_id: responseData.graph_id,
+						},
+						{ withCredentials: true },
+					);
+
+					setChats((prevChats) =>
+						prevChats.map((chat) =>
+							chat.id === currentChatId
+								? { ...chat, graph_id: responseData.graph_id }
+								: chat,
+						),
+					);
+				}
+
+				const uploadIncludesGraph =
+					responseData?.graph && !isPlaceholderGraph(responseData);
+				if (uploadIncludesGraph) {
+					// Prefer graph data returned by process-pdf when available.
+					// This avoids a second fetch race where view-graph can briefly return placeholder data.
+					setCurrentChatId((currentId) => {
+						if (currentId === currentChatId) {
+							setGraphData({
+								...responseData,
+								graph_id: responseData.graph_id,
+							});
+							void fetchConceptProgress();
+						}
+						return currentId;
+					});
+				} else {
+					await fetchGraphData(responseData.graph_id, currentChatId);
+				}
+
+				// Show the "Start Quiz" button after document upload
+				// User can now choose quiz settings before starting
+				setShouldStartQuiz(true);
+			} catch (error) {
+				// If the user cancelled, just silently exit — no error message needed
+				if (
+					error instanceof DOMException &&
+					error.name === "AbortError"
+				) {
+					console.log("PDF upload cancelled by user");
+					const cancelMsg: Message = {
+						id: generateMessageId(),
+						content: "Upload cancelled.",
+						sender: "ai",
+						timestamp: new Date(),
+					};
+					setChats((prevChats) =>
+						prevChats.map((chat) =>
+							chat.id === currentChatId
+								? {
+										...chat,
+										lastMessage: cancelMsg.content,
+										timestamp: new Date(),
+										messages: [...chat.messages, cancelMsg],
+									}
+								: chat,
+						),
+					);
+					return;
+				}
+
+				console.error("Detailed upload error:", error);
+				let errorMessage = "Failed to upload file. Please try again.";
+
+				if (error instanceof Error) {
+					console.error("Error details:", {
+						message: error.message,
+						stack: error.stack,
+					});
+					errorMessage = error.message;
+				}
+
+				const errorMsg: Message = {
+					id: generateMessageId(),
+					content: errorMessage,
+					sender: "ai",
+					timestamp: new Date(),
+				};
+
+				setChats((prevChats) =>
+					prevChats.map((chat) =>
+						chat.id === currentChatId
+							? {
+									...chat,
+									lastMessage: errorMessage,
+									timestamp: new Date(),
+									messages: [...chat.messages, errorMsg],
+								}
+							: chat,
+					),
+				);
+
+				await axios.post(
+					`${API_BASE_URL}/chat/message`,
+					{
+						chat_id: currentChatId,
+						sender: "ai",
+						text: errorMessage,
+					},
+					{ withCredentials: true },
+				);
+
+				showErrorToast(errorMessage);
+			} finally {
+				uploadAbortRef.current = null;
+				setSelectedFile(null);
+				if (fileInputRef.current) {
+					fileInputRef.current.value = "";
+				}
+				setIsProcessingFile(false);
+				setUploadProgress(0);
+				setProgressMessage("");
+			}
+		}
+	};
+
+	const handleRemoveFile = () => {
+		setSelectedFile(null);
+		if (fileInputRef.current) {
+			fileInputRef.current.value = "";
+		}
+	};
+
+	const handleSubmit = async (e: React.FormEvent) => {
+		e.preventDefault();
+
+		const trimmedInput = input.trim();
+		if (!trimmedInput) return;
+
+		// --- Start of Fix ---
+
+		// 1. Capture current messages BEFORE updating the chat state.
+		// `currentChat` is from the current render, so its `messages` array is what's currently displayed.
+		const currentMessages = currentChat?.messages ?? [];
+
+		// 2. Create the user message object.
+		const userMessage: Message = {
+			id: generateMessageId(),
+			content: trimmedInput,
+			sender: "user",
+			timestamp: new Date(),
+		};
+
+		// 3. Clear the input field.
+		setInput("");
+
+		// 4. Update the chat state with the new user message.
+		// This is asynchronous, but that's okay because we've already captured the last question.
+		setChats((prevChats) =>
+			prevChats.map((chat) =>
+				chat.id === currentChatId
+					? {
+							...chat,
+							lastMessage: trimmedInput,
+							timestamp: new Date(),
+							messages: [...chat.messages, userMessage],
+						}
+					: chat,
+			),
+		);
+
+		// 5. Save the user message to the backend.
+		try {
+			await axios.post(
+				`${API_BASE_URL}/chat/message`,
+				{
+					chat_id: currentChatId,
+					sender: "user",
+					text: trimmedInput,
+				},
+				{ withCredentials: true },
+			);
+		} catch (error) {
+			console.error("Error saving message:", error);
+		}
+
+		// 6. Now, decide what to do based on whether we are in a quiz.
+		// --- End of Fix ---
+
+		// Prefer authoritative quiz state over inferring from chat history
+		const currentQA = qaData[currentQuestionIndex];
+		if (isAnswering && currentQA) {
+			try {
+				setIsTyping(true);
+				console.log("[Quiz] Submitting answer", {
+					isAnswering,
+					currentQuestionIndex,
+					totalQuestions: qaData.length,
+					question: currentQA.question,
+					expectedAnswer: currentQA.answer,
+					userAnswer: trimmedInput,
+				});
+				// Simple retry detection: count how many times this question appears as a question message
+				const isRetry =
+					currentMessages.filter(
+						(m) =>
+							m.isQuestion &&
+							m.questionData?.question === currentQA.question,
+					).length > 1;
+
+				console.log(
+					"Submitting answer for conceptId:",
+					currentQA.conceptId,
+				);
+
+				const response = await axios.post(
+					`${API_BASE_URL}/api/verify-answer`,
+					{
+						question: currentQA.question,
+						userAnswer: trimmedInput,
+						correctAnswer: currentQA.answer,
+						conceptId: currentQA.conceptId,
+						isRetry: isRetry,
+						graph_id: currentChat?.graph_id,
+					},
+					{ withCredentials: true },
+				);
+
+				const verificationResult = response.data;
+				console.log(
+					"[Quiz] Verification raw result:",
+					verificationResult,
+				);
+
+				// Defensive shape check
+				const hasIsCorrect =
+					typeof verificationResult?.isCorrect === "boolean";
+				const hasFeedback =
+					typeof verificationResult?.feedback === "string" &&
+					verificationResult.feedback.length > 0;
+				if (!hasIsCorrect || !hasFeedback) {
+					const diagnosticContent = `Verification response missing expected keys.\nExpected: { isCorrect: boolean, feedback: string, followUpQuestion?: string }\nReceived: ${JSON.stringify(verificationResult, null, 2)}`;
+					const diagnosticMessage: Message = {
+						id: generateMessageId(),
+						content: diagnosticContent,
+						sender: "ai",
+						timestamp: new Date(),
+					};
+					setChats((prevChats) =>
+						prevChats.map((chat) =>
+							chat.id === currentChatId
+								? {
+										...chat,
+										messages: [
+											...chat.messages,
+											diagnosticMessage,
+										],
+									}
+								: chat,
+						),
+					);
+					try {
+						await axios.post(
+							`${API_BASE_URL}/chat/message`,
+							{
+								chat_id: currentChatId,
+								sender: "ai",
+								text: diagnosticMessage.content,
+							},
+							{ withCredentials: true },
+						);
+					} catch (persistErr) {
+						console.error(
+							"[Quiz] Failed to persist diagnostic message",
+							persistErr,
+						);
+					}
+					return; // Abort normal flow
+				}
+
+				console.log("Verification result:", verificationResult);
+
+				// Refresh concept progress after answering
+				await fetchConceptProgress();
+
+				if (verificationResult.isCorrect) {
+					// Track this answer
+					setUserAnswers((prev) => [...prev, trimmedInput]);
+					// Persist updated answers
+					if (currentChatId) {
+						const existing = loadQuizState(currentChatId) || {};
+						const updated = {
+							...(existing || {}),
+							userAnswers: [
+								...(existing.userAnswers || []),
+								trimmedInput,
+							],
+						};
+						saveQuizState(currentChatId, updated);
+					}
+
+					if (qaData.length > currentQuestionIndex + 1) {
+						const nextQuestionMessage: Message = {
+							id: generateMessageId(),
+							content: `Correct! Let's move on to the next question:\n\n${qaData[currentQuestionIndex + 1].question}`,
+							sender: "ai",
+							timestamp: new Date(),
+							isQuestion: true,
+							questionData: {
+								question:
+									qaData[currentQuestionIndex + 1].question,
+								correctAnswer:
+									qaData[currentQuestionIndex + 1].answer,
+								conceptId:
+									qaData[currentQuestionIndex + 1].conceptId,
+								questionIndex: currentQuestionIndex + 1,
+								totalQuestions: qaData.length,
+							},
+						};
+
+						const feedbackMessage: Message = {
+							id: generateMessageId(),
+							content: verificationResult.feedback,
+							sender: "ai",
+							timestamp: new Date(),
+						};
+
+						setChats((prevChats) =>
+							prevChats.map((chat) =>
+								chat.id === currentChatId
+									? {
+											...chat,
+											messages: [
+												...chat.messages,
+												feedbackMessage,
+												nextQuestionMessage,
+											],
+										}
+									: chat,
+							),
+						);
+
+						await axios.post(
+							`${API_BASE_URL}/chat/message`,
+							{
+								chat_id: currentChatId,
+								sender: "ai",
+								text: feedbackMessage.content,
+							},
+							{ withCredentials: true },
+						);
+
+						await axios.post(
+							`${API_BASE_URL}/chat/message`,
+							{
+								chat_id: currentChatId,
+								sender: "ai",
+								text: nextQuestionMessage.content,
+							},
+							{ withCredentials: true },
+						);
+
+						setCurrentQuestionIndex((prev) => prev + 1);
+						// update persisted index
+						if (currentChatId) {
+							const existing = loadQuizState(currentChatId) || {};
+							existing.currentQuestionIndex =
+								(existing.currentQuestionIndex || 0) + 1;
+							saveQuizState(currentChatId, existing);
+						}
+						console.log(
+							"[Quiz] Advanced to next question index",
+							currentQuestionIndex + 1,
+						);
+					} else {
+						const finalMessage: Message = {
+							id: generateMessageId(),
+							content: `${verificationResult.feedback}\n\nCongratulations! You've successfully answered all the questions. You have a good understanding of the material.`,
+							sender: "ai",
+							timestamp: new Date(),
+						};
+
+						setChats((prevChats) =>
+							prevChats.map((chat) =>
+								chat.id === currentChatId
+									? {
+											...chat,
+											messages: [
+												...chat.messages,
+												finalMessage,
+											],
+										}
+									: chat,
+							),
+						);
+
+						await axios.post(
+							`${API_BASE_URL}/chat/message`,
+							{
+								chat_id: currentChatId,
+								sender: "ai",
+								text: finalMessage.content,
+							},
+							{ withCredentials: true },
+						);
+
+						try {
+							// Add the final answer to userAnswers
+							const allAnswers = [...userAnswers, trimmedInput];
+
+							// Filter out questions with empty conceptIds
+							const validQaData = qaData.filter((qa, index) => {
+								const hasConceptId =
+									qa.conceptId && qa.conceptId.trim() !== "";
+								if (!hasConceptId) {
+									console.warn(
+										`⚠️ Skipping question ${index + 1} - empty conceptId:`,
+										qa,
+									);
+								}
+								return hasConceptId;
+							});
+
+							if (validQaData.length === 0) {
+								console.error(
+									"❌ Cannot save quiz history: All questions have empty conceptIds!",
+								);
+								console.error("Raw qaData:", qaData);
+							} else {
+								const quizHistoryData = {
+									concepts: validQaData.map((qa, idx) => ({
+										conceptID: qa.conceptId, // Use the actual conceptId from the question
+										name: `Question ${idx + 1} Concept`,
+									})),
+									questions: validQaData.map((qa, index) => {
+										const originalIndex =
+											qaData.indexOf(qa);
+										return {
+											questionText: qa.question,
+											userAnswer:
+												allAnswers[originalIndex] ||
+												"No answer provided",
+											correctAnswer: qa.answer,
+											explanation: `This question tests understanding of the material covered in the graph.`,
+											timestamp: new Date().toISOString(),
+										};
+									}),
+								};
+
+								console.log(
+									"💾 Saving quiz history with conceptIds:",
+									validQaData.map((qa) => qa.conceptId),
+								);
+								console.log(
+									`📊 Valid questions: ${validQaData.length}/${qaData.length}`,
+								);
+
+								try {
+									const response = await axios.post(
+										`${API_BASE_URL}/api/quiz-history`,
+										quizHistoryData,
+										{
+											withCredentials: true,
+										},
+									);
+
+									console.log(
+										"✅ Quiz history saved successfully:",
+										response.data,
+									);
+									console.log(
+										`✅ Progress records created: ${response.data.progressRecordsCreated || 0}`,
+									);
+								} catch (error: any) {
+									console.error(
+										"❌ Error saving quiz history:",
+										error,
+									);
+									console.error("Error details:", {
+										message: error.message,
+										status: error.response?.status,
+										data: error.response?.data,
+									});
+								}
+							}
+						} catch (error) {
+							console.error(
+								"❌ Error in quiz completion:",
+								error,
+							);
+						}
+
+						setIsAnswering(false);
+						console.log("[Quiz] Quiz completed successfully");
+						// Allow the user to start a new quiz after finishing the previous one
+						setShouldStartQuiz(true);
+						setQuizCompleted(true);
+						// Clear persisted quiz state when finished
+						if (currentChatId) clearQuizState(currentChatId);
+					}
+				} else {
+					const feedbackMessage: Message = {
+						id: generateMessageId(),
+						content: `${verificationResult.feedback}\n\n${verificationResult.followUpQuestion}\n\nTry answering the original question again:`,
+						sender: "ai",
+						timestamp: new Date(),
+						isQuestion: true,
+						questionData: {
+							question: currentQA.question,
+							correctAnswer: currentQA.answer,
+							conceptId: currentQA.conceptId,
+							questionIndex: currentQuestionIndex,
+							totalQuestions: qaData.length,
+						},
+					};
+
+					setChats((prevChats) =>
+						prevChats.map((chat) =>
+							chat.id === currentChatId
+								? {
+										...chat,
+										messages: [
+											...chat.messages,
+											feedbackMessage,
+										],
+									}
+								: chat,
+						),
+					);
+
+					await axios.post(
+						`${API_BASE_URL}/chat/message`,
+						{
+							chat_id: currentChatId,
+							sender: "ai",
+							text: feedbackMessage.content,
+						},
+						{ withCredentials: true },
+					);
+				}
+			} catch (error) {
+				console.error("Error verifying answer:", error);
+				const errorMessage: Message = {
+					id: generateMessageId(),
+					content:
+						"Sorry, I encountered an error while verifying your answer. Please try again.",
+					sender: "ai",
+					timestamp: new Date(),
+				};
+
+				setChats((prevChats) =>
+					prevChats.map((chat) =>
+						chat.id === currentChatId
+							? {
+									...chat,
+									messages: [...chat.messages, errorMessage],
+								}
+							: chat,
+					),
+				);
+
+				await axios.post(
+					`${API_BASE_URL}/chat/message`,
+					{
+						chat_id: currentChatId,
+						sender: "ai",
+						text: errorMessage.content,
+					},
+					{ withCredentials: true },
+				);
+			} finally {
+				setIsTyping(false);
+			}
+		} else if (currentChat?.graph_id) {
+			try {
+				setIsTyping(true);
+				console.log("[Conversation] Sending request", {
+					message: trimmedInput,
+					graph_id: currentChat.graph_id,
+				});
+				const response = await axios.post(
+					`${API_BASE_URL}/api/generate-conversation-response`,
+					{ message: trimmedInput, graph_id: currentChat.graph_id },
+					{ withCredentials: true },
+				);
+				console.log("[Conversation] Raw response", response.data);
+				const aiMessage: Message = {
+					id: generateMessageId(),
+					content:
+						response.data.response ||
+						response.data.message ||
+						"I received your message.",
+					sender: "ai",
+					timestamp: new Date(),
+				};
+
+				setChats((prevChats) =>
+					prevChats.map((chat) =>
+						chat.id === currentChatId
+							? {
+									...chat,
+									lastMessage: aiMessage.content,
+									timestamp: new Date(),
+									messages: [...chat.messages, aiMessage],
+								}
+							: chat,
+					),
+				);
+
+				// Save AI response to backend
+				await axios.post(
+					`${API_BASE_URL}/chat/message`,
+					{
+						chat_id: currentChatId,
+						sender: "ai",
+						text: aiMessage.content,
+					},
+					{ withCredentials: true },
+				);
+			} catch (error) {
+				console.error("Error generating conversation response:", error);
+				const errorMessage: Message = {
+					id: generateMessageId(),
+					content:
+						"Sorry, I could not generate a response. Please retry or rephrase.",
+					sender: "ai",
+					timestamp: new Date(),
+				};
+				setChats((prevChats) =>
+					prevChats.map((chat) =>
+						chat.id === currentChatId
+							? {
+									...chat,
+									messages: [...chat.messages, errorMessage],
+								}
+							: chat,
+					),
+				);
+				try {
+					await axios.post(
+						`${API_BASE_URL}/chat/message`,
+						{
+							chat_id: currentChatId,
+							sender: "ai",
+							text: errorMessage.content,
+						},
+						{ withCredentials: true },
+					);
+				} catch (persistErr) {
+					console.error(
+						"Failed to persist AI error message",
+						persistErr,
+					);
+				}
+			} finally {
+				setIsTyping(false);
+			}
+		} else {
+			try {
+				setIsTyping(true);
+				const aiMessage = await generateAIResponse(input);
+
+				setChats((prevChats) =>
+					prevChats.map((chat) =>
+						chat.id === currentChatId
+							? {
+									...chat,
+									lastMessage: aiMessage.content,
+									timestamp: new Date(),
+									messages: [...chat.messages, aiMessage],
+								}
+							: chat,
+					),
+				);
+
+				await axios.post(
+					`${API_BASE_URL}/chat/message`,
+					{
+						chat_id: currentChatId,
+						sender: "ai",
+						text: aiMessage.content,
+					},
+					{ withCredentials: true },
+				);
+			} catch (error) {
+				console.error("Error generating AI response:", error);
+				const errorMessage: Message = {
+					id: generateMessageId(),
+					content:
+						"Sorry, I encountered an error while generating a response. Please try again.",
+					sender: "ai",
+					timestamp: new Date(),
+				};
+
+				setChats((prevChats) =>
+					prevChats.map((chat) =>
+						chat.id === currentChatId
+							? {
+									...chat,
+									messages: [...chat.messages, errorMessage],
+								}
+							: chat,
+					),
+				);
+
+				await axios.post(
+					`${API_BASE_URL}/chat/message`,
+					{
+						chat_id: currentChatId,
+						sender: "ai",
+						text: errorMessage.content,
+					},
+					{ withCredentials: true },
+				);
+			} finally {
+				setIsTyping(false);
+			}
+		}
+	};
+
+	const handleSkip = async () => {
+		const currentQA = qaData[currentQuestionIndex];
+		if (!isAnswering || !currentQA) return;
+
+		try {
+			setIsTyping(true);
+			console.log("[Quiz] Skipping question", {
+				currentQuestionIndex,
+				totalQuestions: qaData.length,
+				question: currentQA.question,
+				conceptId: currentQA.conceptId,
+			});
+
+			// Treat skip as incorrect answer for confidence tracking
+			await axios.post(
+				`${API_BASE_URL}/api/verify-answer`,
+				{
+					question: currentQA.question,
+					userAnswer: "SKIPPED",
+					correctAnswer: currentQA.answer,
+					conceptId: currentQA.conceptId,
+					isRetry: false,
+					graph_id: currentChat?.graph_id,
+				},
+				{ withCredentials: true },
+			);
+
+			// Track skipped answer
+			setUserAnswers((prev) => [...prev, "SKIPPED"]);
+			if (currentChatId) {
+				const existing = loadQuizState(currentChatId) || {};
+				const updated = {
+					...existing,
+					userAnswers: [...(existing.userAnswers || []), "SKIPPED"],
+				};
+				saveQuizState(currentChatId, updated);
+			}
+
+			// Refresh concept progress after skipping
+			await fetchConceptProgress();
+
+			// Add skip message
+			const skipMessage: Message = {
+				id: generateMessageId(),
+				content: `You skipped this question. The correct answer was: ${currentQA.answer}\n\nLet's move on to the next question.`,
+				sender: "ai",
+				timestamp: new Date(),
+			};
+
+			if (qaData.length > currentQuestionIndex + 1) {
+				const nextQuestionMessage: Message = {
+					id: generateMessageId(),
+					content: `Question ${currentQuestionIndex + 2} of ${qaData.length}:\n\n${qaData[currentQuestionIndex + 1].question}`,
+					sender: "ai",
+					timestamp: new Date(),
+					isQuestion: true,
+					questionData: {
+						question: qaData[currentQuestionIndex + 1].question,
+						correctAnswer: qaData[currentQuestionIndex + 1].answer,
+						conceptId: qaData[currentQuestionIndex + 1].conceptId,
+						questionIndex: currentQuestionIndex + 1,
+						totalQuestions: qaData.length,
+					},
+				};
+
+				setChats((prevChats) =>
+					prevChats.map((chat) =>
+						chat.id === currentChatId
+							? {
+									...chat,
+									messages: [
+										...chat.messages,
+										skipMessage,
+										nextQuestionMessage,
+									],
+								}
+							: chat,
+					),
+				);
+
+				await axios.post(
+					`${API_BASE_URL}/chat/message`,
+					{
+						chat_id: currentChatId,
+						sender: "ai",
+						text: skipMessage.content,
+					},
+					{ withCredentials: true },
+				);
+
+				await axios.post(
+					`${API_BASE_URL}/chat/message`,
+					{
+						chat_id: currentChatId,
+						sender: "ai",
+						text: nextQuestionMessage.content,
+					},
+					{ withCredentials: true },
+				);
+
+				setCurrentQuestionIndex((prev) => prev + 1);
+				if (currentChatId) {
+					const existing = loadQuizState(currentChatId) || {};
+					existing.currentQuestionIndex =
+						(existing.currentQuestionIndex || 0) + 1;
+					saveQuizState(currentChatId, existing);
+				}
+			} else {
+				// Quiz completed
+				const finalMessage: Message = {
+					id: generateMessageId(),
+					content: `${skipMessage.content}\n\nYou've completed all the questions.`,
+					sender: "ai",
+					timestamp: new Date(),
+				};
+
+				setChats((prevChats) =>
+					prevChats.map((chat) =>
+						chat.id === currentChatId
+							? {
+									...chat,
+									messages: [...chat.messages, finalMessage],
+								}
+							: chat,
+					),
+				);
+
+				await axios.post(
+					`${API_BASE_URL}/chat/message`,
+					{
+						chat_id: currentChatId,
+						sender: "ai",
+						text: finalMessage.content,
+					},
+					{ withCredentials: true },
+				);
+
+				// Save quiz history
+				try {
+					const allAnswers = [...userAnswers, "SKIPPED"];
+					const validQaData = qaData.filter(
+						(qa) => qa.conceptId && qa.conceptId.trim() !== "",
+					);
+
+					if (validQaData.length > 0) {
+						const quizHistoryData = {
+							concepts: validQaData.map((qa, idx) => ({
+								conceptID: qa.conceptId,
+								name: `Question ${idx + 1} Concept`,
+							})),
+							questions: validQaData.map((qa, index) => {
+								const originalIndex = qaData.indexOf(qa);
+								return {
+									questionText: qa.question,
+									userAnswer:
+										allAnswers[originalIndex] || "SKIPPED",
+									correctAnswer: qa.answer,
+									explanation: `This question tests understanding of the material covered in the graph.`,
+									timestamp: new Date().toISOString(),
+								};
+							}),
+						};
+
+						await axios.post(
+							`${API_BASE_URL}/api/quiz-history`,
+							quizHistoryData,
+							{
+								withCredentials: true,
+							},
+						);
+						console.log(
+							"✅ Quiz history saved with skipped question",
+						);
+					}
+				} catch (error) {
+					console.error("❌ Error saving quiz history:", error);
+				}
+
+				setIsAnswering(false);
+				setShouldStartQuiz(true);
+				setQuizCompleted(true);
+				if (currentChatId) clearQuizState(currentChatId);
+			}
+		} catch (error: any) {
+			console.error("[Quiz] Error skipping question:", error);
+			const errorMessage: Message = {
+				id: generateMessageId(),
+				content:
+					"Sorry, there was an error processing your skip. Please try again.",
+				sender: "ai",
+				timestamp: new Date(),
+			};
+
+			setChats((prevChats) =>
+				prevChats.map((chat) =>
+					chat.id === currentChatId
+						? {
+								...chat,
+								messages: [...chat.messages, errorMessage],
+							}
+						: chat,
+				),
+			);
+
+			await axios.post(
+				`${API_BASE_URL}/chat/message`,
+				{
+					chat_id: currentChatId,
+					sender: "ai",
+					text: errorMessage.content,
+				},
+				{ withCredentials: true },
+			);
+		} finally {
+			setIsTyping(false);
+		}
+	};
+
+	const handleChatSelect = (chatId: string) => {
+		// Clear graph data immediately when switching chats to prevent showing wrong graph
+		setGraphData(null);
+		setQaData([]);
+		setIsAnswering(false);
+		setCurrentQuestionIndex(0);
+		setUserAnswers([]);
+		setQuizCompleted(false);
+		setCurrentChatId(chatId);
+	};
+
+	const handleNewChat = useCallback(async () => {
+		try {
+			console.log("Creating new chat...");
+
+			// Clear all graph and quiz state immediately when creating new chat
+			setGraphData(null);
+			setQaData([]);
+			setIsAnswering(false);
+			setCurrentQuestionIndex(0);
+			setUserAnswers([]);
+			setQuizCompleted(false);
+			setIsGeneratingQuestions(false);
+
+			const response = await axios.post(
+				`${API_BASE_URL}/chat/new`,
+				{},
+				{ withCredentials: true },
+			);
+
+			console.log("Create chat response:", response.data);
+
+			const newChatFromBackend = response.data.chat;
+
+			const newChat: Chat = {
+				id: newChatFromBackend.chat_id,
+				title: "New Chat",
+				lastMessage:
+					"Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.",
+				timestamp: new Date(newChatFromBackend.date_created),
+				messages: [
+					{
+						id: "welcome",
+						content:
+							"Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.",
+						sender: "ai",
+						timestamp: new Date(),
+					},
+				],
+			};
+
+			console.log("New chat object to add to state:", newChat);
+
+			setChats((prev) => [
+				newChat,
+				...prev.filter((chat) => chat.id !== newChat.id),
+			]);
+			setCurrentChatId(newChat.id);
+
+			const welcomeMessage =
+				"Hello! I am your personal assistant. I will show you the Smart Path to your studies. Please upload a PDF file to get started.";
+
+			await axios.post(
+				`${API_BASE_URL}/chat/message`,
+				{
+					chat_id: newChat.id,
+					sender: "ai",
+					text: welcomeMessage,
+				},
+				{ withCredentials: true },
+			);
+
+			return newChat;
+		} catch (error: any) {
+			console.error("Error creating new chat:", error);
+			if (error.response) {
+				console.error("Backend error response:", error.response.data);
+			}
+			showErrorToast("Failed to create a new chat.");
+			return undefined;
+		}
+	}, []);
+
+	const fetchUserChats = useCallback(
+		async (createIfEmpty = false) => {
+			setChatsLoading(true);
+			try {
+				const resUser = await axios.get(`${API_BASE_URL}/chat/user`, {
+					withCredentials: true,
+				});
+				const userId = resUser.data;
+
+				if (!userId) {
+					console.warn("No user ID returned while fetching chats");
+					setChatsLoading(false);
+					return;
+				}
+
+				const resChats = await axios.get(
+					`${API_BASE_URL}/chat/${userId}/chats`,
+					{
+						withCredentials: true,
+					},
+				);
+				const userChats = Array.isArray(resChats.data)
+					? resChats.data
+					: [];
+
+				if (userChats.length === 0) {
+					if (createIfEmpty) {
+						await handleNewChat();
+					} else {
+						setChats([]);
+						setCurrentChatId("");
+					}
+					setChatsLoading(false);
+					return;
+				}
+
+				const formattedChats: Chat[] = userChats.map((chat: any) => ({
+					id: chat.chat_id,
+					title: chat.title || "Chat",
+					lastMessage:
+						chat.messages?.at?.(-1)?.text || "No messages yet",
+					timestamp: new Date(chat.date_created),
+					messages: (chat.messages || []).map(
+						(msg: any, index: number) => ({
+							id: `${chat.chat_id}-${index}`,
+							content: msg.text,
+							sender: msg.sender,
+							timestamp: new Date(msg.timestamp),
+						}),
+					),
+					graph_id: chat.graph_id,
+					folder_id: chat.folder_id ?? null,
+				}));
+
+				setChats(formattedChats);
+				setCurrentChatId((prevId) => {
+					if (
+						prevId &&
+						formattedChats.some((chat) => chat.id === prevId)
+					) {
+						return prevId;
+					}
+					return formattedChats[0]?.id ?? prevId;
+				});
+			} catch (err) {
+				console.error("Error fetching chats:", err);
+			} finally {
+				setChatsLoading(false);
+			}
+		},
+		[handleNewChat],
+	);
+
+	useEffect(() => {
+		fetchUserChats(true);
+	}, [fetchUserChats]);
+
+	useEffect(() => {
+		if (!currentChatId && chats.length > 0) {
+			setCurrentChatId(chats[0].id);
+		}
+	}, [chats, currentChatId]);
+
+	// DEBUG: Log when isAnswering changes
+	useEffect(() => {
+		console.log("🟢 isAnswering state changed:", isAnswering);
+		console.log("🟢 qaData length:", qaData.length);
+		console.log("🟢 Should show End Quiz button:", isAnswering);
+	}, [isAnswering, qaData]);
+
+	const getFileIcon = (type: string) => {
+		if (type.startsWith("image/")) {
+			return <Image className="w-5 h-5" />;
+		} else if (type.includes("document") || type.includes("pdf")) {
+			return <FileText className="w-5 h-5" />;
+		}
+		return <File className="w-5 h-5" />;
+	};
+
+	const formatQuestion = (text: string): React.ReactNode => {
+		if (!text) return text;
+
+		const lines = text.split("\n");
+		const formattedLines: React.ReactNode[] = [];
+
+		lines.forEach((line, lineIndex) => {
+			const multipleChoicePattern =
+				/\b([A-Z])[\)\.]\s+([^A-Z\)\.]+?)(?=\s+[A-Z][\)\.]|$)/g;
+			let matches = Array.from(line.matchAll(multipleChoicePattern));
+
+			if (matches.length < 2) {
+				const altPattern =
+					/\b([A-Z])[\)\.]([^A-Z\)\.]+?)(?=\s*[A-Z][\)\.]|$)/g;
+				matches = Array.from(line.matchAll(altPattern));
+			}
+
+			if (matches.length >= 2) {
+				const firstMatch = matches[0];
+				const firstMatchIndex = line.indexOf(firstMatch[0]);
+				const questionPart = line.substring(0, firstMatchIndex).trim();
+
+				if (questionPart) {
+					formattedLines.push(
+						<div
+							key={`q-${lineIndex}`}
+							className="mb-3 font-medium"
+						>
+							{questionPart}
+						</div>,
+					);
+				}
+
+				matches.forEach((match, matchIndex) => {
+					const choiceLetter = match[1];
+					const choiceText = match[2].trim();
+					formattedLines.push(
+						<div
+							key={`choice-${lineIndex}-${matchIndex}`}
+							className="ml-1 mb-2 px-3 py-2 rounded-lg border border-slate-200/80 bg-slate-50/50 hover:bg-teal-50 hover:border-teal-300 transition-all duration-150 cursor-default flex items-center gap-2"
+						>
+							<span className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+								{choiceLetter}
+							</span>
+							<span className="text-sm">{choiceText}</span>
+						</div>,
+					);
+				});
+			} else {
+				if (line.trim()) {
+					if (line.match(/Question\s+\d+\s+of\s+\d+/i)) {
+						formattedLines.push(
+							<div
+								key={`q-header-${lineIndex}`}
+								className="mb-3 font-semibold text-teal-600"
+							>
+								{line}
+							</div>,
+						);
+					} else {
+						formattedLines.push(
+							<div
+								key={`line-${lineIndex}`}
+								className={lineIndex > 0 ? "mt-2" : ""}
+							>
+								{line}
+							</div>,
+						);
+					}
+				}
+			}
+		});
+
+		return formattedLines.length > 0 ? (
+			<div className="space-y-1">{formattedLines}</div>
+		) : (
+			text
+		);
+	};
+
+	const handleRenameChat = async (chatId: string) => {
+		if (renamingChatId !== chatId) return;
+		if (renameInFlightRef.current === chatId) return;
+
+		const trimmed = renameValue.trim();
+		const currentTitle = chats.find((c) => c.id === chatId)?.title ?? "";
+		renameInFlightRef.current = chatId;
+		setRenamingChatId(null);
+		if (!trimmed || trimmed === currentTitle) {
+			renameInFlightRef.current = null;
+			return;
+		}
+
+		// Optimistic update
+		setChats((prev) =>
+			prev.map((c) => (c.id === chatId ? { ...c, title: trimmed } : c)),
+		);
+		try {
+			await axios.patch(
+				`${API_BASE_URL}/chat/rename/${chatId}`,
+				{ title: trimmed },
+				{ withCredentials: true },
+			);
+		} catch (err) {
+			console.error("Error renaming chat:", err);
+			// Revert on failure by refetching
+			fetchUserChats(false);
+		} finally {
+			renameInFlightRef.current = null;
+		}
+	};
+
+	const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
+		e.stopPropagation();
+		e.preventDefault();
+
+		if (deletingChatRef.current === chatId) {
+			console.log("⚠️ Delete already in progress for chat:", chatId);
+			return;
+		}
+
+		console.log("🗑️ Delete button clicked for chat:", chatId);
+		console.log(
+			"Current chats:",
+			chats.map((c) => c.id),
+		);
+
+		deletingChatRef.current = chatId;
+
+		console.log("✅ Proceeding with delete...");
+		console.log(
+			"Sending DELETE request to:",
+			`${API_BASE_URL}/chat/delete/${chatId}`,
+		);
+
+		console.log("Updating local state optimistically...");
+		setChats((prev) => {
+			const beforeCount = prev.length;
+			const filtered = prev.filter((chat) => chat.id !== chatId);
+			console.log(
+				`Chats: ${beforeCount} -> ${filtered.length} (removed ${beforeCount - filtered.length})`,
+			);
+			return filtered;
+		});
+
+		if (currentChatId === chatId) {
+			console.log("Clearing current chat ID because it was deleted");
+			setCurrentChatId("");
+		}
+
+		try {
+			const response = await axios.delete(
+				`${API_BASE_URL}/chat/delete/${chatId}`,
+				{
+					withCredentials: true,
+				},
+			);
+
+			console.log("✅ Delete response received:", response.data);
+			console.log("Response status:", response.status);
+			console.log("✅ Chat deleted successfully on server");
+
+			deletingChatRef.current = null;
+		} catch (error: any) {
+			console.error("❌ Error deleting chat on server:", error);
+
+			deletingChatRef.current = null;
+			console.error("Error details:", {
+				message: error?.message,
+				response: error?.response,
+				status: error?.response?.status,
+				data: error?.response?.data,
+			});
+
+			console.log("Restoring chat in UI since server deletion failed...");
+			await fetchUserChats(false);
+
+			if (error?.response) {
+				console.error("Backend error status:", error.response.status);
+				console.error("Backend error response:", error.response.data);
+				showErrorToast(
+					`Failed to delete chat: ${error.response.data?.message || error.response.statusText || "Unknown error"}`,
+				);
+			} else if (error?.request) {
+				console.error("No response received from server");
+				showErrorToast(
+					"Failed to delete chat: No response from server. Is the server running?",
+				);
+			} else {
+				console.error("Request setup error:", error.message);
+				showErrorToast(`Failed to delete chat: ${error.message}`);
+			}
+		}
+	};
+
+	const ResizeHandle = ({ className = "" }) => (
+		<PanelResizeHandle
+			className={`w-2 hover:bg-teal-500/20 transition-colors duration-150 ${className}`}
+		>
+			<div className="h-full w-[2px] bg-gray-200 mx-auto" />
+		</PanelResizeHandle>
+	);
+
+	useEffect(() => {
+		const currentChat = chats.find((chat) => chat.id === currentChatId);
+
+		// Check if there's already quiz state for this chat (user may have ended it or is in progress)
+		const existingQuizState = currentChat
+			? loadQuizState(currentChat.id)
+			: null;
+
+		if (currentChat?.graph_id) {
+			// Check if there's an existing quiz in progress
+			if (existingQuizState) {
+				// Restore quiz state if it exists
+				setShouldStartQuiz(false);
+			} else {
+				// Show start quiz button - user must manually start the quiz
+				setShouldStartQuiz(true);
+			}
+		} else {
+			latestGraphRequestRef.current = null;
+			setIsGraphLoading(false);
+			setGraphData(null);
+			setQaData([]);
+			setIsAnswering(false);
+			setShouldStartQuiz(false);
+		}
+
+		return () => {
+			setIsGeneratingQuestions(false);
+		};
+	}, [currentChatId, chats]);
+
+	const startQuiz = async () => {
+		if (isGeneratingQuestions || !currentChat?.graph_id) return;
+		// clear completed flag when starting a new quiz
+		setQuizCompleted(false);
+
+		try {
+			setIsGeneratingQuestions(true);
+			const qaResponse = await axios.get(
+				`${API_BASE_URL}/api/generate-questions-with-answers?graph_id=${currentChat.graph_id}&length=${quizLength}&format=${questionFormat}`,
+				{ withCredentials: true },
+			);
+			const qaResponseData = qaResponse.data;
+
+			if (
+				qaResponseData.status === "success" &&
+				qaResponseData.qa_pairs
+			) {
+				console.log(
+					"🔍 Raw QA Pairs from API:",
+					qaResponseData.qa_pairs,
+				);
+				console.log(
+					"🔍 First QA Pair structure:",
+					qaResponseData.qa_pairs[0],
+				);
+				console.log(
+					"🔍 COMPLETE First QA Pair (JSON):",
+					JSON.stringify(qaResponseData.qa_pairs[0], null, 2),
+				);
+				console.log(
+					"🔍 All keys in first QA pair:",
+					Object.keys(qaResponseData.qa_pairs[0]),
+				);
+
+				const normalizedPairs = qaResponseData.qa_pairs.map(
+					(p: QAPair, idx: number) => {
+						const conceptId =
+							p.conceptId ||
+							p.concept_id ||
+							p.topicId ||
+							p.topic_id ||
+							p.id ||
+							"";
+						const sourceField = p.conceptId
+							? "conceptId"
+							: p.concept_id
+								? "concept_id"
+								: p.topicId
+									? "topicId"
+									: p.topic_id
+										? "topic_id"
+										: p.id
+											? "id"
+											: "NONE";
+
+						console.log(
+							`📝 Question ${idx + 1} - conceptId extracted from field: ${sourceField}, value: ${conceptId}`,
+						);
+
+						return {
+							question: p.question,
+							answer:
+								p.answer === "T" || p.answer === "True"
+									? "True"
+									: p.answer === "F" || p.answer === "False"
+										? "False"
+										: p.answer,
+							conceptId: conceptId,
+						};
+					},
+				);
+
+				console.log(
+					"🔍 Normalized pairs with conceptIds:",
+					normalizedPairs.map((p: QAPair) => ({
+						q: p.question.substring(0, 50),
+						conceptId: p.conceptId,
+					})),
+				);
+
+				setQaData(normalizedPairs);
+				setCurrentQuestionIndex(0);
+				setIsAnswering(true);
+				setUserAnswers([]); // Reset user answers for new quiz
+				setShouldStartQuiz(false); // Hide the start button
+				// Persist quiz state so navigating away doesn't lose it
+				if (currentChatId) {
+					saveQuizState(currentChatId, {
+						qaData: normalizedPairs,
+						currentQuestionIndex: 0,
+						userAnswers: [],
+						isAnswering: true,
+						quizCompleted: false,
+					});
+				}
+				const firstQuestionMessage: Message = {
+					id: generateMessageId(),
+					content: `Let's test your understanding. I'll ask you questions one by one.\n\nQuestion 1 of ${normalizedPairs.length}:\n\n${normalizedPairs[0].question}`,
+					sender: "ai",
+					timestamp: new Date(),
+					isQuestion: true,
+					questionData: {
+						question: normalizedPairs[0].question,
+						correctAnswer: normalizedPairs[0].answer,
+						conceptId: normalizedPairs[0].conceptId,
+						questionIndex: 0,
+						totalQuestions: normalizedPairs.length,
+					},
+				};
+
+				// Remove any leftover question messages from previous quizzes before adding the new first question.
+				setChats((prevChats) =>
+					prevChats.map((chat) =>
+						chat.id === currentChatId
+							? {
+									...chat,
+									messages: [
+										...chat.messages.filter(
+											(m) => !m.isQuestion,
+										),
+										firstQuestionMessage,
+									],
+								}
+							: chat,
+					),
+				);
+
+				await axios.post(
+					`${API_BASE_URL}/chat/message`,
+					{
+						chat_id: currentChatId,
+						sender: "ai",
+						text: firstQuestionMessage.content,
+					},
+					{ withCredentials: true },
+				);
+			}
+		} catch (error) {
+			console.error("Error fetching QA data:", error);
+		} finally {
+			setIsGeneratingQuestions(false);
+		}
+	};
+
+	// Add useEffect to load graph and restore quiz state when chat changes
+	useEffect(() => {
+		const currentChat = chats.find((chat) => chat.id === currentChatId);
+		if (currentChat?.graph_id) {
+			setGraphData(null);
+			setIsGraphLoading(true);
+			fetchGraphData(currentChat.graph_id, currentChatId);
+
+			// Try to restore persisted quiz state first
+			const persisted = currentChatId
+				? loadQuizState(currentChatId)
+				: null;
+			const hasExistingQuestions = currentChat.messages.some(
+				(m) => m.isQuestion,
+			);
+
+			if (persisted && persisted.qaData) {
+				// Restore persisted state
+				setQaData(persisted.qaData);
+				setCurrentQuestionIndex(persisted.currentQuestionIndex || 0);
+				setUserAnswers(persisted.userAnswers || []);
+				setIsAnswering(!!persisted.isAnswering);
+				setQuizCompleted(!!persisted.quizCompleted);
+				setShouldStartQuiz(false);
+			} else if (hasExistingQuestions && qaData.length === 0) {
+				// Reconstruct quiz state from chat message history (do not call startQuiz which requests new questions)
+				const reconstructed: QAPair[] = currentChat.messages
+					.filter((m) => m.isQuestion && m.questionData)
+					.map((m) => ({
+						question: m.questionData!.question,
+						answer: m.questionData!.correctAnswer,
+						conceptId: m.questionData!.conceptId,
+					}));
+
+				if (reconstructed.length > 0) {
+					setQaData(reconstructed);
+					const lastQuestion = currentChat.messages
+						.slice()
+						.reverse()
+						.find((m) => m.isQuestion && m.questionData);
+					const lastIndex =
+						lastQuestion?.questionData?.questionIndex ?? 0;
+					setCurrentQuestionIndex(lastIndex);
+					setIsAnswering(true);
+					setShouldStartQuiz(false);
+					// Persist reconstructed state for durability
+					if (currentChatId) {
+						saveQuizState(currentChatId, {
+							qaData: reconstructed,
+							currentQuestionIndex: lastIndex,
+							userAnswers: [],
+							isAnswering: true,
+							quizCompleted: false,
+						});
+					}
+				}
+			} else if (!hasExistingQuestions) {
+				// If there are no questions in history, reset the quiz state and show the Start Quiz button.
+				setQaData([]);
+				setIsAnswering(false);
+				// If this chat has a graph, allow starting a quiz from the UI (e.g. after returning from Profile).
+				if (currentChat?.graph_id) {
+					setShouldStartQuiz(true);
+				}
+			}
+		} else {
+			// This is a chat without a document/graph, so reset everything.
+			latestGraphRequestRef.current = null;
+			setIsGraphLoading(false);
+			setGraphData(null);
+			setQaData([]);
+			setIsAnswering(false);
+			setShouldStartQuiz(false);
+		}
+	}, [currentChatId, currentChat?.graph_id]); // Dependency array ensures this runs when the chat changes
+
+	const renderChatItem = (chat: Chat) => {
+		const isSelected = currentChatId === chat.id;
+		const isMenuOpen = activeMenuChatId === chat.id;
+
+		return (
+			<div
+				key={chat.id}
+				draggable
+				onDragStart={(e) => handleChatDragStart(e, chat.id)}
+				onDragEnd={() => {
+					setDraggedChatId(null);
+					setDragOverFolderId(null);
+				}}
+				onClick={(e) => {
+					if (
+						(e.target as HTMLElement).closest(
+							'button[title="Delete chat"]',
+						) ||
+						(e.target as HTMLElement).closest(
+							'button[title="Rename chat"]',
+						) ||
+						(e.target as HTMLElement).closest(
+							'button[title="Move to folder"]',
+						) ||
+						renamingChatId === chat.id
+					) {
+						return;
+					}
+					handleChatSelect(chat.id);
+				}}
+				className={`p-3 min-h-[64px] hover:bg-slate-800/70 cursor-grab active:cursor-grabbing border-b border-slate-700/30 transition-colors duration-150 relative group ${
+					isSelected
+						? "bg-slate-800 border-l-2 border-l-teal-400"
+						: ""
+				}`}
+			>
+				<div className="flex items-center space-x-3">
+					<MessageSquare className="w-5 h-5 text-teal-400 flex-shrink-0" />
+					<div className="flex-1 min-w-0">
+						{renamingChatId === chat.id ? (
+							<form
+								onSubmit={(e) => {
+									e.preventDefault();
+									handleRenameChat(chat.id);
+								}}
+								className="flex items-center gap-1"
+							>
+								<input
+									autoFocus
+									value={renameValue}
+									onChange={(e) =>
+										setRenameValue(e.target.value)
+									}
+									onBlur={() => handleRenameChat(chat.id)}
+									onKeyDown={(e) => {
+										if (e.key === "Escape") {
+											setRenamingChatId(null);
+											setRenameValue(chat.title);
+										}
+									}}
+									className="w-full bg-slate-700 text-slate-200 text-sm rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-teal-400"
+								/>
+								<button
+									type="submit"
+									className="p-0.5 hover:bg-teal-500/20 rounded flex-shrink-0"
+									title="Confirm rename"
+								>
+									<Check className="w-3.5 h-3.5 text-teal-400" />
+								</button>
+							</form>
+						) : (
+							<>
+								<h3 className="text-sm font-medium text-slate-200 truncate">
+									{chat.title}
+								</h3>
+								<p className="text-xs text-slate-500 truncate">
+									{chat.lastMessage}
+								</p>
+							</>
+						)}
+					</div>
+
+					<div
+						className="flex items-center gap-0.5"
+						onClick={(e) => {
+							e.stopPropagation();
+							e.preventDefault();
+						}}
+					>
+						{/* Move to Folder Button */}
+						<button
+							onClick={(e) => {
+								e.stopPropagation();
+								e.preventDefault();
+								setActiveMenuChatId(
+									isMenuOpen ? null : chat.id,
+								);
+							}}
+							className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-teal-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
+							title="Move to folder"
+							type="button"
+						>
+							<Folder className="w-3.5 h-3.5 text-yellow-500 hover:text-yellow-400" />
+						</button>
+
+						{/* Rename Button */}
+						<button
+							onClick={(e) => {
+								e.stopPropagation();
+								e.preventDefault();
+								setRenamingChatId(chat.id);
+								setRenameValue(chat.title);
+							}}
+							className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-teal-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
+							title="Rename chat"
+							type="button"
+						>
+							<Pencil className="w-3.5 h-3.5 text-teal-400 hover:text-teal-300" />
+						</button>
+
+						{/* Delete Button */}
+						<button
+							onClick={(e) => {
+								e.stopPropagation();
+								e.preventDefault();
+								handleDeleteChat(chat.id, e);
+							}}
+							className="opacity-0 group-hover:opacity-70 hover:!opacity-100 p-1.5 hover:bg-red-500/20 rounded transition-all duration-150 z-50 relative flex-shrink-0"
+							title="Delete chat"
+							type="button"
+						>
+							<Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-300" />
+						</button>
+					</div>
+				</div>
+
+				{/* Move Folder Dropdown Menu */}
+				{isMenuOpen && (
+					<div
+						className="absolute right-2 top-10 z-50 w-48 bg-slate-900 border border-slate-700 rounded-md shadow-xl py-1 text-xs"
+						onClick={(e) => e.stopPropagation()}
+					>
+						<div className="px-3 py-1 font-semibold text-slate-400 border-b border-slate-800">
+							Move to Folder
+						</div>
+						{(chat as any).folder_id && (
+							<button
+								onClick={() => handleMoveChat(chat.id, null)}
+								className="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-amber-400 border-b border-slate-800"
+							>
+								✕ Remove from folder
+							</button>
+						)}
+						{folders.length === 0 ? (
+							<div className="px-3 py-1.5 text-slate-500 italic">
+								No folders created
+							</div>
+						) : (
+							folders.map((f) => (
+								<button
+									key={f.folder_id}
+									onClick={() =>
+										handleMoveChat(chat.id, f.folder_id)
+									}
+									className={`w-full text-left px-3 py-1.5 hover:bg-slate-800 truncate ${
+										(chat as any).folder_id === f.folder_id
+											? "text-teal-400 font-semibold"
+											: "text-slate-300"
+									}`}
+								>
+									<span className="inline-flex items-center gap-2">
+										<Folder className="w-4 h-4 text-yellow-500" />
+										{f.name}
+									</span>
+								</button>
+							))
+						)}
+					</div>
+				)}
+			</div>
+		);
+	};
+
+	const renderFolderTree = (
+		folder: (typeof folders)[number],
+		depth: number,
+	): React.ReactNode => {
+		const normalizedSearch = searchQuery.trim().toLowerCase();
+		const folderHasSearchMatch = (
+			candidate: (typeof folders)[number],
+		): boolean => {
+			if (!normalizedSearch) return true;
+			if (candidate.name.toLowerCase().includes(normalizedSearch))
+				return true;
+			if (
+				chats.some(
+					(chat) =>
+						chat.folder_id === candidate.folder_id &&
+						chat.title.toLowerCase().includes(normalizedSearch),
+				)
+			)
+				return true;
+			return folders
+				.filter(
+					(child) => child.parent_folder_id === candidate.folder_id,
+				)
+				.some(folderHasSearchMatch);
+		};
+
+		if (!folderHasSearchMatch(folder)) return null;
+
+		const folderChats = chats.filter(
+			(chat) =>
+				chat.folder_id === folder.folder_id &&
+				(!normalizedSearch ||
+					chat.title.toLowerCase().includes(normalizedSearch)),
+		);
+		const childFolders = folders.filter(
+			(child) =>
+				child.parent_folder_id === folder.folder_id &&
+				folderHasSearchMatch(child),
+		);
+		const isExpanded = !!expandedFolders[folder.folder_id];
+
+		return (
+			<div
+				key={folder.folder_id}
+				className="space-y-1"
+				style={{ marginLeft: `${depth * 12}px` }}
+				onDragOver={(e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					e.dataTransfer.dropEffect = "move";
+					setDragOverFolderId(folder.folder_id);
+				}}
+				onDragLeave={(e) => {
+					if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+						setDragOverFolderId(null);
+					}
+				}}
+				onDrop={(e) => {
+					e.stopPropagation();
+					void handleChatDrop(e, folder.folder_id);
+				}}
+			>
+				<div
+					draggable
+					onDragStart={(e) =>
+						handleFolderDragStart(e, folder.folder_id)
+					}
+					onDragEnd={() => {
+						setDragOverFolderId(null);
+					}}
+					onClick={() =>
+						setExpandedFolders((prev) => ({
+							...prev,
+							[folder.folder_id]: !prev[folder.folder_id],
+						}))
+					}
+					className={`group flex min-h-[64px] cursor-grab items-center justify-between rounded p-2 text-sm font-medium text-slate-200 transition-colors hover:text-white active:cursor-grabbing ${
+						dragOverFolderId === folder.folder_id
+							? "bg-teal-500/20 ring-1 ring-teal-400"
+							: "hover:bg-slate-800"
+					}`}
+				>
+					<span className="flex min-w-0 flex-1 items-center gap-2">
+						<span
+							className="text-xs text-slate-400"
+							aria-hidden="true"
+						>
+							{isExpanded ? "▼" : "▶"}
+						</span>
+						<Folder className="h-5 w-5 flex-shrink-0 text-yellow-500" />
+						{renamingFolderId === folder.folder_id ? (
+							<form
+								className="min-w-0 flex-1"
+								onClick={(e) => e.stopPropagation()}
+								onSubmit={(e) => {
+									e.preventDefault();
+									e.stopPropagation();
+									void handleRenameFolder(folder.folder_id);
+								}}
+							>
+								<input
+									autoFocus
+									value={folderRenameValue}
+									onChange={(e) =>
+										setFolderRenameValue(e.target.value)
+									}
+									onBlur={() =>
+										void handleRenameFolder(
+											folder.folder_id,
+										)
+									}
+									onKeyDown={(e) => {
+										if (e.key === "Escape")
+											setRenamingFolderId(null);
+									}}
+									className="w-full rounded bg-slate-700 px-1.5 py-0.5 text-sm text-slate-200 outline-none focus:ring-1 focus:ring-teal-400"
+								/>
+							</form>
+						) : (
+							<span className="truncate">{folder.name}</span>
+						)}
+					</span>
+					<div className="flex items-center gap-1">
+						<span className="rounded-full bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">
+							{folderChats.length}
+						</span>
+						<button
+							type="button"
+							title="Create subfolder"
+							onClick={(e) => {
+								e.stopPropagation();
+								setNewFolderParentId(folder.folder_id);
+								setIsCreatingFolder(true);
+								setExpandedFolders((prev) => ({
+									...prev,
+									[folder.folder_id]: true,
+								}));
+							}}
+							className="rounded p-1.5 opacity-0 transition-all duration-150 hover:bg-teal-500/20 hover:!opacity-100 group-hover:opacity-70"
+						>
+							<Folder className="h-3.5 w-3.5 text-yellow-500" />
+						</button>
+						<button
+							type="button"
+							title="Rename folder"
+							onClick={(e) => {
+								e.stopPropagation();
+								setRenamingFolderId(folder.folder_id);
+								setFolderRenameValue(folder.name);
+							}}
+							className="rounded p-1.5 opacity-0 transition-all duration-150 hover:bg-teal-500/20 hover:!opacity-100 group-hover:opacity-70"
+						>
+							<Pencil className="h-3.5 w-3.5 text-teal-300" />
+						</button>
+						<button
+							type="button"
+							title="Delete folder"
+							onClick={(e) =>
+								requestDeleteFolder(folder.folder_id, e)
+							}
+							className="p-1.5 opacity-0 transition-all duration-150 hover:!opacity-100 hover:bg-red-500/20 group-hover:opacity-70 rounded"
+						>
+							<Trash2 className="h-3.5 w-3.5 text-red-400 hover:text-red-300" />
+						</button>
+					</div>
+				</div>
+
+				{isExpanded && (
+					<div className="ml-2 space-y-1 border-l border-slate-700/50 pl-2">
+						{childFolders.map((child) =>
+							renderFolderTree(child, depth + 1),
+						)}
+						{folderChats.length === 0 &&
+						childFolders.length === 0 ? (
+							<div className="px-2 py-1 text-[11px] italic text-slate-500">
+								Folder is empty
+							</div>
+						) : (
+							folderChats.map((chat) => renderChatItem(chat))
+						)}
+					</div>
+				)}
+			</div>
+		);
+	};
+
+	// Show loading state while fetching chats
+	if (chatsLoading) {
+		return (
+			<div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50 via-slate-50 to-blue-50">
+				<div className="text-center space-y-4">
+					<div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500"></div>
+					<p className="text-slate-500">Loading chats...</p>
+				</div>
+			</div>
+		);
+	}
+
+	// Only show "No chats yet" if loading is complete and there are no chats
+	if (!currentChat && chats.length === 0) {
+		return (
+			<div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50 via-slate-50 to-blue-50">
+				<div className="text-center space-y-4">
+					<h2 className="text-2xl font-semibold text-slate-800">
+						No chats yet
+					</h2>
+					<p className="text-slate-500">
+						Start a new conversation to begin chatting with your
+						study assistant.
+					</p>
+					<button
+						onClick={() => void handleNewChat()}
+						className="px-6 py-2.5 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all duration-200 shadow-md shadow-teal-500/20 btn-lift"
+					>
+						Start a New Chat
+					</button>
+				</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="flex h-screen bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
+			{errorToast && (
+				<div
+					role="alert"
+					className="fixed bottom-5 right-5 z-[200] flex max-w-sm items-start gap-3 rounded-lg border border-red-400/40 bg-slate-900 px-4 py-3 text-sm text-red-100 shadow-xl shadow-slate-950/30"
+				>
+					<span className="flex-1">{errorToast}</span>
+					<button
+						type="button"
+						aria-label="Dismiss error"
+						onClick={() => setErrorToast(null)}
+						className="shrink-0 rounded p-0.5 text-red-200 hover:bg-red-400/20 hover:text-white"
+					>
+						<X className="h-4 w-4" />
+					</button>
+				</div>
+			)}
+			{folderToDelete && (
+				<div
+					className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+					onMouseDown={(e) => {
+						if (e.target === e.currentTarget)
+							setFolderToDelete(null);
+					}}
+				>
+					<div
+						role="dialog"
+						aria-modal="true"
+						aria-labelledby="delete-folder-title"
+						className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl"
+						onMouseDown={(e) => e.stopPropagation()}
+					>
+						<h2
+							id="delete-folder-title"
+							className="text-base font-semibold"
+						>
+							Delete folder?
+						</h2>
+						<p className="mt-2 text-sm leading-5 text-slate-400">
+							Delete{" "}
+							<span className="font-medium text-slate-200">
+								{folderToDelete.name}
+							</span>
+							? Its chats will move to Unorganized.
+						</p>
+						<div className="mt-5 flex justify-end gap-2">
+							<button
+								type="button"
+								onClick={() => setFolderToDelete(null)}
+								className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-800"
+							>
+								Cancel
+							</button>
+							<button
+								type="button"
+								onClick={() => void handleDeleteFolder()}
+								className="rounded-lg bg-red-500/90 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-500"
+							>
+								Delete folder
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+			<div
+				className={`relative flex flex-col bg-slate-900 ${isResizingSidebar ? "select-none" : "transition-[width] duration-300"}`}
+				style={{
+					width: isSidebarCollapsed ? 64 : sidebarWidth,
+					minWidth: isSidebarCollapsed ? 64 : 220,
+				}}
+			>
+				<div className="p-4 border-b border-slate-700/50 flex justify-between items-center">
+					{!isSidebarCollapsed && (
+						<h2 className="text-lg font-semibold text-slate-100">
+							Chats
+						</h2>
+					)}
+					<button
+						onClick={() =>
+							setIsSidebarCollapsed(!isSidebarCollapsed)
+						}
+						className="p-1 hover:bg-slate-700/50 rounded-lg transition-colors duration-150"
+					>
+						{isSidebarCollapsed ? (
+							<ChevronRight className="w-5 h-5 text-slate-400" />
+						) : (
+							<ChevronLeft className="w-5 h-5 text-slate-400" />
+						)}
+					</button>
+				</div>
+
+				{/* Search Bar */}
+				{!isSidebarCollapsed && (
+					<div className="px-4 pt-3 pb-1">
+						<input
+							ref={searchInputRef}
+							type="text"
+							placeholder="Search chats..."
+							value={searchQuery}
+							onChange={(e) => setSearchQuery(e.target.value)}
+							className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-teal-400"
+						/>
+					</div>
+				)}
+
+				{/* Action Buttons: New Chat & + Folder */}
+				{isSidebarCollapsed && (
+					<div className="px-2 pt-2">
+						<button
+							type="button"
+							onClick={focusSearchAfterExpand}
+							className="flex min-h-[50px] w-full items-center justify-center rounded-lg border border-slate-700 bg-slate-800 p-2 text-slate-200 transition-all duration-200 hover:bg-slate-700"
+							title="Search chats"
+							aria-label="Search chats"
+						>
+							<Search className="h-4 w-4 text-gray-400" />
+						</button>
+					</div>
+				)}
+				<div
+					className={
+						isSidebarCollapsed
+							? "flex flex-col gap-2 p-2"
+							: "grid grid-cols-2 gap-2 p-4"
+					}
+				>
+					<button
+						onClick={() => void handleNewChat()}
+						className="p-2 min-h-[50px] bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition-all duration-200 flex items-center justify-center gap-1.5 text-xs font-semibold"
+					>
+						<MessageSquare className="w-4 h-4 text-teal-400" />
+						{!isSidebarCollapsed && <span>+ Chat</span>}
+					</button>
+
+					<button
+						onClick={() => {
+							setIsSidebarCollapsed(false);
+							setNewFolderParentId(null);
+							setIsCreatingFolder(true);
+						}}
+						className="p-2 min-h-[50px] bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition-all duration-200 flex items-center justify-center gap-1.5 text-xs font-semibold"
+						title="Create folder"
+						aria-label="Create folder"
+					>
+						<Folder className="w-4 h-4 text-yellow-500" />
+						{!isSidebarCollapsed && <span>+ Folder</span>}
+					</button>
+				</div>
+
+				{/* Inline Create Folder Form */}
+				{!isSidebarCollapsed && isCreatingFolder && (
+					<form
+						onSubmit={handleCreateFolderSubmit}
+						className="mx-4 mb-3 p-2 bg-slate-800/90 border border-slate-700 rounded-lg flex items-center gap-1.5 min-w-0"
+					>
+						<input
+							autoFocus
+							type="text"
+							placeholder={
+								newFolderParentId
+									? "Subfolder name..."
+									: "Folder name..."
+							}
+							value={newFolderName}
+							onChange={(e) => setNewFolderName(e.target.value)}
+							className="w-full min-w-0 bg-slate-900 border border-teal-500/50 rounded px-2 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-400"
+						/>
+						<button
+							type="submit"
+							className="shrink-0 px-2.5 py-1 bg-teal-500 hover:bg-teal-600 text-white text-xs font-semibold rounded transition-colors"
+						>
+							Add
+						</button>
+						<button
+							type="button"
+							onClick={() => {
+								setIsCreatingFolder(false);
+								setNewFolderName("");
+								setNewFolderParentId(null);
+							}}
+							className="shrink-0 px-1.5 py-1 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-xs rounded transition-colors"
+						>
+							✕
+						</button>
+					</form>
+				)}
+
+				{/* Folder & Chat List Container */}
+				{!isSidebarCollapsed && (
+					<div className="flex-1 overflow-y-auto px-2 space-y-2">
+						{/* 1. Folders Tree */}
+						{folders
+							.filter((folder) => !folder.parent_folder_id)
+							.map((folder) => renderFolderTree(folder, 0))}
+
+						<div
+							onDragOver={(e) => {
+								e.preventDefault();
+								e.stopPropagation();
+								e.dataTransfer.dropEffect = "move";
+								setDragOverFolderId("root");
+							}}
+							onDragLeave={(e) => {
+								if (
+									!e.currentTarget.contains(
+										e.relatedTarget as Node,
+									)
+								) {
+									setDragOverFolderId(null);
+								}
+							}}
+							onDrop={(e) => {
+								e.stopPropagation();
+								void handleChatDrop(e, null);
+							}}
+							className={`rounded transition-colors ${dragOverFolderId === "root" ? "bg-teal-500/10 ring-1 ring-teal-400" : ""}`}
+						>
+							{/* 2. Unorganized Header */}
+							{folders.length > 0 && (
+								<div className="pt-2 px-2 min-h-[28px] flex items-center justify-between text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+									<span>Unorganized</span>
+									<span className="normal-case text-[10px] bg-slate-800 px-1.5 py-0.5 rounded-full text-slate-400">
+										{
+											chats.filter(
+												(chat) =>
+													!chat.folder_id &&
+													chat.title
+														.toLowerCase()
+														.includes(
+															searchQuery.toLowerCase(),
+														),
+											).length
+										}
+									</span>
+								</div>
+							)}
+
+							{/* 3. Unorganized Chats */}
+							{chats
+								.filter(
+									(c: any) =>
+										!c.folder_id &&
+										c.title
+											.toLowerCase()
+											.includes(
+												searchQuery.toLowerCase(),
+											),
+								)
+								.sort(
+									(a, b) =>
+										b.timestamp.getTime() -
+										a.timestamp.getTime(),
+								)
+								.map((chat) => renderChatItem(chat))}
+						</div>
+					</div>
+				)}
+				<div
+					className={`${isSidebarCollapsed ? "p-2" : "p-4"} mt-auto border-t border-slate-700/50 flex flex-col gap-2`}
+				>
+					<button
+						onClick={() => navigate("/")}
+						className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200"
+						title="Home"
+						aria-label="Home"
+					>
+						<Home className="w-5 h-5" />
+						{!isSidebarCollapsed && (
+							<span className="text-sm">Home</span>
+						)}
+					</button>
+					<button
+						onClick={() => navigate("/profile")}
+						className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200"
+						title="Profile"
+						aria-label="Profile"
+					>
+						<User className="w-5 h-5" />
+						{!isSidebarCollapsed && (
+							<span className="text-sm">Profile</span>
+						)}
+					</button>
+					<button
+						className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors flex items-center gap-2 text-slate-400 hover:text-slate-200 opacity-50 cursor-not-allowed"
+						title="Settings (coming soon)"
+						aria-label="Settings (coming soon)"
+					>
+						<Settings className="w-5 h-5" />
+						{!isSidebarCollapsed && (
+							<span className="text-sm">Settings</span>
+						)}
+					</button>
+				</div>
+				{!isSidebarCollapsed && (
+					<div
+						role="separator"
+						aria-orientation="vertical"
+						aria-label="Resize sidebar"
+						onMouseDown={startSidebarResize}
+						className="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize bg-transparent transition-colors hover:bg-teal-400/60"
+					/>
+				)}
+			</div>
+
+			<PanelGroup direction="horizontal" className="flex-1">
+				<Panel defaultSize={40} minSize={20}>
+					<div className="h-full p-4 bg-transparent">
+						<div className="h-full rounded-xl bg-white/80 backdrop-blur-sm border border-slate-200/60 shadow-sm">
+							{isProcessingFile ? (
+								<div className="h-full flex flex-col items-center justify-center px-8">
+									<FileText className="w-12 h-12 text-teal-500 mb-4 animate-pulse" />
+									<p className="text-gray-800 text-lg font-semibold mb-1">
+										Processing your PDF{loadingDots}
+									</p>
+									<p className="text-gray-500 text-sm mb-6">
+										{progressMessage ||
+											"Extracting concepts and building your knowledge graph"}
+									</p>
+									<div className="w-full max-w-xs">
+										<div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+											<div
+												className="h-full bg-teal-500 rounded-full transition-all duration-700 ease-out"
+												style={{
+													width: `${uploadProgress}%`,
+												}}
+											/>
+										</div>
+										<p className="text-center text-xs text-gray-400 mt-2">
+											{uploadProgress}%
+										</p>
+									</div>
+									<button
+										onClick={async () => {
+											// 1. Abort the client-side fetch (closes SSE connection)
+											uploadAbortRef.current?.abort();
+											// 2. Tell the server to cancel the AI processing
+											try {
+												await fetch(
+													`${API_BASE_URL}/upload/cancel-processing`,
+													{
+														method: "POST",
+														credentials: "include",
+													},
+												);
+											} catch {
+												// Best-effort — server may already have cleaned up
+											}
+											// 3. Reset client UI state
+											setIsProcessingFile(false);
+											setSelectedFile(null);
+											setUploadProgress(0);
+											setProgressMessage("");
+											if (fileInputRef.current)
+												fileInputRef.current.value = "";
+										}}
+										className="mt-6 px-4 py-2 text-sm text-red-500 border border-red-300 rounded-lg hover:bg-red-50 transition-colors duration-150"
+									>
+										Cancel
+									</button>
+								</div>
+							) : (
+								<GraphVisualization
+									data={graphData}
+									conceptProgress={conceptProgress}
+									isLoading={isGraphLoading}
+								/>
+							)}
+						</div>
+					</div>
+				</Panel>
+
+				<ResizeHandle className="w-2 hover:bg-teal-400/20 transition-colors duration-150" />
+
+				<Panel minSize={30}>
+					<div className="h-full flex flex-col">
+						<div
+							className="bg-white/80 backdrop-blur-sm p-4 border-b border-slate-200/60 flex justify-between items-center"
+							style={{ zIndex: 1000, position: "relative" }}
+						>
+							<h1 className="text-xl font-semibold text-slate-800 flex-1 min-w-0 truncate">
+								{currentChat?.title || "Loading..."}
+							</h1>
+							<div
+								className="flex items-center gap-4 flex-wrap max-w-full flex-shrink-0"
+								style={{ zIndex: 100, position: "relative" }}
+							>
+								{/* Quiz Length Control */}
+								<div className="flex items-center gap-3">
+									<label className="text-sm font-medium text-slate-600">
+										Quiz Length:
+									</label>
+									<select
+										value={quizLength}
+										onChange={(e) =>
+											setQuizLength(
+												Number(e.target.value) as
+													| 5
+													| 10
+													| 15,
+											)
+										}
+										className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 cursor-pointer bg-white hover:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 transition-all max-w-[9rem]"
+										style={{
+											zIndex: 101,
+											position: "relative",
+											pointerEvents: "auto",
+										}}
+										disabled={isAnswering}
+									>
+										<option value={5}>5 questions</option>
+										<option value={10}>10 questions</option>
+										<option value={15}>15 questions</option>
+									</select>
+								</div>
+
+								{/* Question Type Control */}
+								<div className="flex items-center gap-2">
+									<label className="text-sm font-medium text-slate-600">
+										Question Type:
+									</label>
+									<select
+										value={questionFormat}
+										onChange={(e) =>
+											setQuestionFormat(
+												e.target.value as
+													| "mixed"
+													| "mcq"
+													| "true-false"
+													| "open-ended",
+											)
+										}
+										className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 cursor-pointer bg-white hover:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 transition-all max-w-[11rem]"
+										style={{
+											zIndex: 101,
+											position: "relative",
+											pointerEvents: "auto",
+										}}
+										disabled={isAnswering}
+									>
+										<option value="mixed">
+											Mixed (Random)
+										</option>
+										<option value="mcq">
+											Multiple Choice
+										</option>
+										<option value="true-false">
+											True/False
+										</option>
+										<option value="open-ended">
+											Open-Ended
+										</option>
+									</select>
+								</div>
+
+								{/* Divider */}
+								<div className="h-8 w-px bg-slate-200"></div>
+
+								<button
+									onClick={() => {
+										if (currentChat?.graph_id) {
+											navigate("/progress");
+										} else {
+											showErrorToast(
+												"Please upload a document to view progress.",
+											);
+										}
+									}}
+									className="px-4 py-2 bg-white text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 hover:border-teal-300 transition-all duration-200 flex items-center justify-center gap-2 font-medium shadow-sm btn-lift"
+								>
+									View Progress
+								</button>
+
+								{/* Start Quiz button moved to header for better placement */}
+								{shouldStartQuiz &&
+									!isAnswering &&
+									currentChat?.graph_id && (
+										<button
+											onClick={startQuiz}
+											disabled={isGeneratingQuestions}
+											className={`px-4 py-2 ${isGeneratingQuestions ? "bg-slate-200 text-slate-500" : "bg-gradient-to-r from-teal-500 to-teal-600 text-white hover:from-teal-600 hover:to-teal-700 shadow-md shadow-teal-500/20 animate-gentle-pulse"} rounded-lg transition-all duration-200 flex items-center gap-2 font-medium btn-lift`}
+											title={
+												isGeneratingQuestions
+													? "Generating questions..."
+													: "Start quiz based on this document"
+											}
+										>
+											{isGeneratingQuestions
+												? "Generating..."
+												: quizCompleted
+													? "Start New Quiz"
+													: "Start Quiz"}
+										</button>
+									)}
+
+								{/* End Quiz button - shows when quiz is active */}
+								{isAnswering && (
+									<button
+										onClick={async () => {
+											console.log(
+												"🔴 END QUIZ BUTTON CLICKED!",
+											);
+											console.log(
+												"🟡 Resetting quiz state...",
+											);
+
+											// Reset all quiz state
+											setIsAnswering(false);
+											setQaData([]);
+											setCurrentQuestionIndex(0);
+											setUserAnswers([]);
+											setQuizCompleted(false);
+											setShouldStartQuiz(true); // Show start quiz button again
+
+											console.log(
+												"✅ Quiz state reset! isAnswering=false",
+											);
+
+											// Clear persisted quiz state
+											if (currentChatId) {
+												clearQuizState(currentChatId);
+												console.log(
+													"✅ Cleared persisted quiz state",
+												);
+											}
+
+											// Add a message to chat indicating quiz was ended
+											const endMessage: Message = {
+												id: generateMessageId(),
+												content:
+													'Quiz ended. You can start a new quiz anytime by clicking "Start Quiz".',
+												sender: "ai",
+												timestamp: new Date(),
+											};
+
+											setChats((prevChats) =>
+												prevChats.map((chat) =>
+													chat.id === currentChatId
+														? {
+																...chat,
+																messages: [
+																	...chat.messages,
+																	endMessage,
+																],
+															}
+														: chat,
+												),
+											);
+
+											// Save the end message to backend (consistent with other messages)
+											try {
+												await axios.post(
+													`${API_BASE_URL}/chat/message`,
+													{
+														chat_id: currentChatId,
+														sender: "ai",
+														text: endMessage.content,
+													},
+													{ withCredentials: true },
+												);
+												console.log(
+													"✅ End quiz message saved to backend",
+												);
+											} catch (error) {
+												console.error(
+													"Error saving end quiz message:",
+													error,
+												);
+												// Don't show error to user since quiz state is already cleared locally
+											}
+										}}
+										className="px-4 py-2 bg-red-500 text-white hover:bg-red-600 rounded-lg transition-colors duration-200 flex items-center gap-2 font-medium"
+										style={{
+											zIndex: 9999,
+											position: "relative",
+											pointerEvents: "auto",
+											cursor: "pointer",
+										}}
+										title="End the current quiz without finishing"
+									>
+										End Quiz
+									</button>
+								)}
+							</div>
+						</div>
+
+						{/* Quiz progress step bar */}
+						{isAnswering && qaData.length > 0 && (
+							<div className="px-4 py-2.5 bg-white/60 backdrop-blur-sm border-b border-slate-200/60">
+								<div className="flex items-center gap-2 mb-1.5">
+									<span className="text-xs font-semibold text-slate-600">
+										Question {currentQuestionIndex + 1} of{" "}
+										{qaData.length}
+									</span>
+									<span className="text-xs text-slate-400">
+										(
+										{Math.round(
+											(currentQuestionIndex /
+												qaData.length) *
+												100,
+										)}
+										% complete)
+									</span>
+								</div>
+								<div className="flex gap-1">
+									{qaData.map((_, idx) => (
+										<div
+											key={idx}
+											className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
+												idx < currentQuestionIndex
+													? "bg-teal-500"
+													: idx ===
+														  currentQuestionIndex
+														? "bg-teal-400 animate-pulse"
+														: "bg-slate-200"
+											}`}
+										/>
+									))}
+								</div>
+							</div>
+						)}
+
+						<div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-slate-50/80 to-slate-100/50">
+							{currentChat?.messages.map((message) => (
+								<div
+									key={message.id}
+									className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"} ${message.sender === "user" ? "animate-slide-in-right" : "animate-slide-in-left"} group/msg`}
+								>
+									<div
+										className={`flex items-end gap-2 max-w-[75%] ${
+											message.sender === "user"
+												? "flex-row-reverse"
+												: ""
+										}`}
+									>
+										{/* Avatar */}
+										<div
+											className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+												message.sender === "user"
+													? "bg-gradient-to-br from-teal-400 to-teal-600"
+													: "bg-gradient-to-br from-slate-200 to-slate-300"
+											}`}
+										>
+											{message.sender === "user" ? (
+												<User className="w-3.5 h-3.5 text-white" />
+											) : (
+												<Bot className="w-3.5 h-3.5 text-slate-600" />
+											)}
+										</div>
+										{/* Bubble */}
+										<div
+											className={`px-3.5 py-2.5 ${
+												message.sender === "user"
+													? "bg-gradient-to-br from-teal-500 to-teal-600 text-white rounded-2xl rounded-br-md shadow-md shadow-teal-500/15"
+													: "bg-white text-slate-800 rounded-2xl rounded-bl-md border border-slate-200/60 shadow-sm"
+											}`}
+										>
+											<div className="text-sm whitespace-pre-wrap leading-relaxed">
+												{message.isQuestion
+													? formatQuestion(
+															message.content,
+														)
+													: message.content}
+											</div>
+											{message.file && (
+												<div
+													className={`mt-2 p-2 rounded-lg ${
+														message.sender ===
+														"user"
+															? "bg-white/20"
+															: "bg-slate-100"
+													}`}
+												>
+													<div className="flex items-center space-x-2">
+														{getFileIcon(
+															message.file.type,
+														)}
+														<a
+															href={
+																message.file.url
+															}
+															target="_blank"
+															rel="noopener noreferrer"
+															className={`text-sm truncate underline ${
+																message.sender ===
+																"user"
+																	? "text-white hover:text-teal-100"
+																	: "text-teal-600 hover:text-teal-500"
+															}`}
+														>
+															{message.file.name}
+														</a>
+													</div>
+													{message.file.type.startsWith(
+														"image/",
+													) && (
+														<img
+															src={
+																message.file.url
+															}
+															alt={
+																message.file
+																	.name
+															}
+															className="mt-2 max-w-full h-auto rounded-lg"
+														/>
+													)}
+												</div>
+											)}
+											{/* Hover timestamp */}
+											<div
+												className={`text-[10px] mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200 ${
+													message.sender === "user"
+														? "text-teal-100"
+														: "text-slate-400"
+												}`}
+											>
+												{message.timestamp.toLocaleTimeString(
+													[],
+													{
+														hour: "2-digit",
+														minute: "2-digit",
+													},
+												)}
+											</div>
+										</div>
+									</div>
+								</div>
+							))}
+							{isTyping && (
+								<div className="flex justify-start animate-slide-in-left">
+									<div className="flex items-end gap-2">
+										<div className="w-7 h-7 rounded-full flex items-center justify-center bg-gradient-to-br from-slate-200 to-slate-300 flex-shrink-0">
+											<Bot className="w-3.5 h-3.5 text-slate-600" />
+										</div>
+										<div className="bg-white px-4 py-3 rounded-2xl rounded-bl-md border border-slate-200/60 shadow-sm">
+											<div className="flex items-center gap-1">
+												<span className="w-2 h-2 bg-slate-400 rounded-full typing-dot"></span>
+												<span className="w-2 h-2 bg-slate-400 rounded-full typing-dot"></span>
+												<span className="w-2 h-2 bg-slate-400 rounded-full typing-dot"></span>
+											</div>
+										</div>
+									</div>
+								</div>
+							)}
+							{/* Start Quiz button is now located in the header for improved UX */}
+							<div ref={messagesEndRef} />
+						</div>
+
+						<form
+							onSubmit={handleSubmit}
+							className="p-4 bg-white/80 backdrop-blur-sm border-t border-slate-200/60"
+						>
+							{isProcessingFile && (
+								<div className="mb-2 p-3 bg-teal-50 border border-teal-200 rounded-lg">
+									<div className="flex items-center justify-between mb-1">
+										<span className="text-sm font-medium text-teal-700">
+											{progressMessage ||
+												"Processing PDF..."}
+										</span>
+										<span className="text-xs font-semibold text-teal-600">
+											{uploadProgress}%
+										</span>
+									</div>
+									<div className="h-1.5 bg-teal-100 rounded-full overflow-hidden">
+										<div
+											className="h-full bg-teal-500 rounded-full transition-all duration-700 ease-out"
+											style={{
+												width: `${uploadProgress}%`,
+											}}
+										/>
+									</div>
+								</div>
+							)}
+							{selectedFile && !isProcessingFile && (
+								<div className="mb-2 p-2 bg-slate-50 rounded-lg flex items-center justify-between border border-slate-200/60">
+									<div className="flex items-center space-x-2">
+										{getFileIcon(selectedFile.type)}
+										<span className="text-sm text-slate-600 truncate">
+											{selectedFile.name}
+										</span>
+									</div>
+									<button
+										type="button"
+										onClick={handleRemoveFile}
+										className="text-slate-400 hover:text-slate-600"
+									>
+										<X className="w-4 h-4" />
+									</button>
+								</div>
+							)}
+							<div className="flex space-x-2">
+								<input
+									type="text"
+									value={input}
+									onChange={(e) => setInput(e.target.value)}
+									placeholder={
+										isAnswering
+											? "Type your answer..."
+											: "Type your message..."
+									}
+									className="flex-1 px-4 py-2 bg-white text-slate-900 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 placeholder-slate-400 transition-all"
+								/>
+								<input
+									type="file"
+									ref={fileInputRef}
+									onChange={handleFileSelect}
+									className="hidden"
+								/>
+								{!isAnswering && (
+									<button
+										type="button"
+										onClick={() =>
+											fileInputRef.current?.click()
+										}
+										disabled={isProcessingFile}
+										className="px-4 py-2 bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500/30 flex items-center transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+									>
+										<Paperclip className="w-5 h-5" />
+									</button>
+								)}
+								{isAnswering && (
+									<button
+										type="button"
+										onClick={handleSkip}
+										disabled={isTyping}
+										className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 flex items-center transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+										title="Skip this question (counts as incorrect)"
+									>
+										Skip
+									</button>
+								)}
+								<button
+									type="submit"
+									disabled={isTyping}
+									className="px-4 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30 flex items-center transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-teal-500/20 btn-lift"
+								>
+									<Send className="w-5 h-5" />
+								</button>
+							</div>
+						</form>
+					</div>
+				</Panel>
+			</PanelGroup>
+		</div>
+	);
 }
 
 export default App;

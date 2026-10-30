@@ -100,6 +100,10 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         if (!user) {
             return res.status(401).json({ message: 'Invalid email or password' });
         }
+        // Google accounts have no password; bcrypt throws on a missing hash
+        if (!user.password || !password) {
+            return res.status(401).json({ message: 'This account uses Google sign-in. Use "Continue with Google".' });
+        }
         const isMatch = yield bcrypt_1.default.compare(password, user.password);
         if (!isMatch) {
             return res.status(401).json({ message: 'Invalid email or password' });
@@ -156,6 +160,7 @@ const checkAuth = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 user: {
                     email: user.email,
                     displayName: user.displayName,
+                    folders: user.folders || [],
                 }
             });
         }

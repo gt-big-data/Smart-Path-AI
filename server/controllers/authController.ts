@@ -104,8 +104,13 @@ export const login = async (req: Request, res: Response) => {
       if (!user) {
         return res.status(401).json({ message: 'Invalid email or password' });
       }
-  
-      const isMatch = await bcrypt.compare(password, user.password!);
+
+      // Google accounts have no password; bcrypt throws on a missing hash
+      if (!user.password || !password) {
+        return res.status(401).json({ message: 'This account uses Google sign-in. Use "Continue with Google".' });
+      }
+
+      const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
         return res.status(401).json({ message: 'Invalid email or password' });
       }
@@ -165,6 +170,7 @@ export const checkAuth = async (req: Request, res: Response) => {
                 user: {
                     email: user.email,
                     displayName: user.displayName,
+                  folders: user.folders || [],
                 }
             });
         } else {
