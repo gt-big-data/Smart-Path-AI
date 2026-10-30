@@ -1,5 +1,6 @@
 import type { Edge, Node } from 'reactflow';
 import type { PathHighlight } from './pathHighlight';
+import type { CollapseLayer } from './collapse';
 
 /**
  * Graph view styling, kept apart from graph structure.
@@ -7,7 +8,7 @@ import type { PathHighlight } from './pathHighlight';
  * GraphVisualization builds the base graph (labels, colors, sizes, positions)
  * from the graph data alone. Everything that changes while the graph is open
  * lives in its own state and is layered on here: confidence scores, custom
- * edits, search hits, the active path (P1), and later the collapsed set (C1).
+ * edits, search hits, the active path (P1) and collapsed branches (C1).
  * Adding a layer means adding a field to GraphLayers and handling it in
  * applyGraphStyles; nothing writes styles onto the nodes directly.
  */
@@ -47,6 +48,8 @@ export interface GraphLayers {
   searchHits: Set<string>;
   /** Route from the center to the clicked node; null when no path is shown */
   activePath: PathHighlight | null;
+  /** Nodes hidden by collapsed branches, and how many each collapsed node hides (C1) */
+  collapse: CollapseLayer;
 }
 
 export const DEFAULT_NODE_BORDER = '1px solid rgba(255,255,255,0.2)';
@@ -116,7 +119,7 @@ export function resolveConfidenceScores(
 
 /** Combine the base graph with every layer into the nodes and edges React Flow renders */
 export function applyGraphStyles(base: BaseGraph, layers: GraphLayers): { nodes: Node[]; edges: Edge[] } {
-  const { confidenceScores, nodeEdits, searchHits, activePath } = layers;
+  const { confidenceScores, nodeEdits, searchHits, activePath, collapse } = layers;
   const hasPath = activePath !== null && activePath.nodeIds.length > 0;
 
   const nodes = base.nodes.map((node) => {
@@ -143,12 +146,14 @@ export function applyGraphStyles(base: BaseGraph, layers: GraphLayers): { nodes:
 
     return {
       ...node,
+      hidden: collapse.hiddenIds.has(String(node.id)),
       data: {
         ...node.data,
         confidenceScore: confidenceScores.get(node.id) ?? null,
         customLabel: edit?.label,
         color,
         pathStep,
+        hiddenCount: collapse.hiddenCounts.get(String(node.id)) ?? 0,
       },
       style: {
         ...node.style,
@@ -168,6 +173,8 @@ export function applyGraphStyles(base: BaseGraph, layers: GraphLayers): { nodes:
 
     return {
       ...edge,
+      // Covers cross-links too: an edge into a collapsed branch hides with it
+      hidden: collapse.hiddenIds.has(String(edge.source)) || collapse.hiddenIds.has(String(edge.target)),
       animated: onPath,
       label: onPath ? edge.label : undefined,
       style: {

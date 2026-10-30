@@ -18,6 +18,7 @@ import { Search, X } from 'lucide-react';
 import PathBar from './graph/PathBar';
 import { computeNodeSizes } from '../lib/nodesizing';
 import { buildGraphTree, GraphTree } from '../lib/graphTree';
+import { useCollapse } from '../lib/collapse';
 import { radialLayout, toTopLeft, NodeSize, Point, RadialTreeNode } from '../lib/radialLayout';
 import { getPathHighlight } from '../lib/pathHighlight';
 import { applyGraphStyles, BaseGraph, ConfidenceKeys, DEFAULT_NODE_BORDER, NodeEdit, resolveConfidenceScores } from '../lib/graphStyles';
@@ -884,10 +885,11 @@ useEffect(() => {
   );
   // The search API may return numeric ids; node ids are strings
   const searchHits = useMemo(() => new Set(searchResults.map(String)), [searchResults]);
+  const collapse = useCollapse(graphTree, baseGraph?.nodes);
 
   const styledGraph = useMemo(
-    () => baseGraph && applyGraphStyles(baseGraph, { confidenceScores, nodeEdits, searchHits, activePath }),
-    [baseGraph, confidenceScores, nodeEdits, searchHits, activePath]
+    () => baseGraph && applyGraphStyles(baseGraph, { confidenceScores, nodeEdits, searchHits, activePath, collapse: collapse.layer }),
+    [baseGraph, confidenceScores, nodeEdits, searchHits, activePath, collapse.layer]
   );
 
   // Push the styled graph into React Flow. A new base graph replaces everything; a style-only
@@ -907,14 +909,15 @@ useEffect(() => {
       const prevById = new Map(prev.map(node => [node.id, node]));
       return styledGraph.nodes.map(node => {
         const current = prevById.get(node.id);
-        return current ? { ...current, data: node.data, style: node.style, hidden: node.hidden } : node;
+        // A node that gets hidden is deselected too, so Backspace can't delete it unseen
+        return current ? { ...current, data: node.data, style: node.style, hidden: node.hidden, selected: current.selected && !node.hidden } : node;
       });
     });
     setEdges(prev => {
       const prevById = new Map(prev.map(edge => [edge.id, edge]));
       return styledGraph.edges.map(edge => {
         const current = prevById.get(edge.id);
-        return current ? { ...edge, selected: current.selected } : edge;
+        return current ? { ...edge, selected: current.selected && !edge.hidden } : edge;
       });
     });
   }, [baseGraph, styledGraph, setNodes, setEdges]);
