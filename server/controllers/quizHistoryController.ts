@@ -2,6 +2,9 @@ import { Request, Response, NextFunction } from 'express';
 import QuizHistory, { IQuizHistory, IConcept, IQuestion } from '../models/QuizHistory';
 import ConceptProgress from '../models/ConceptProgress';
 
+// Older clients send placeholder names like "Question 1 Concept"; only keep real topic names
+const isRealConceptName = (name: unknown) => typeof name === 'string' && !!name.trim() && !/^Question \d+ Concept$/.test(name.trim());
+
 // Save a new QuizHistory record when a quiz is completed
 export const saveQuizHistory = async (req: Request, res: Response, next: NextFunction) => {
   console.log('[Quiz History] POST /api/quiz-history endpoint called');
@@ -57,27 +60,12 @@ export const saveQuizHistory = async (req: Request, res: Response, next: NextFun
     console.log('[Quiz History] Creating progress records from quiz answers...');
     let progressCreated = 0;
     for (let i = 0; i < questions.length; i++) {
-      const question = questions[i];
       const concept = concepts[i];
       
       if (!concept || !concept.conceptID) {
         console.warn(`[Quiz History] Skipping question ${i + 1} - no conceptID`);
         continue;
       }
-      
-      // Check if answer is correct (normalize both answers for comparison)
-      const userAnswer = String(question.userAnswer).trim().toUpperCase();
-      const correctAnswer = String(question.correctAnswer).trim().toUpperCase();
-      
-      // Treat skipped questions as incorrect
-      const isSkipped = userAnswer === 'SKIPPED' || userAnswer === 'SKIP';
-      const isCorrect = !isSkipped && (
-        userAnswer === correctAnswer || 
-        (correctAnswer === 'T' && userAnswer === 'TRUE') ||
-        (correctAnswer === 'F' && userAnswer === 'FALSE') ||
-        (correctAnswer === 'TRUE' && userAnswer === 'T') ||
-        (correctAnswer === 'FALSE' && userAnswer === 'F')
-      );
       
       try {
         // Find or create progress record
@@ -95,20 +83,14 @@ export const saveQuizHistory = async (req: Request, res: Response, next: NextFun
           });
         }
         
-        // Update confidence score
-        if (isCorrect) {
-          progress.confidenceScore += 0.1;
-        } else {
-          progress.confidenceScore -= 0.1;
-        }
-        
-        // Clamp between 0 and 1
-        progress.confidenceScore = Math.max(0, Math.min(1, progress.confidenceScore));
+        // The score was already updated once per answer by /api/verify-answer, which also grades
+        // open-ended answers correctly. Re-scoring here counted every answer twice.
+        if (isRealConceptName(concept.name)) progress.conceptName = String(concept.name).trim();
         progress.lastAttempted = new Date();
-        
+
         await progress.save();
         progressCreated++;
-        console.log(`[Quiz History] ✅ Created/updated progress for concept ${concept.conceptID}: score=${progress.confidenceScore.toFixed(2)}, correct=${isCorrect}`);
+        console.log(`[Quiz History] ✅ Saved progress for concept ${concept.conceptID} (${progress.conceptName || 'no name'}): score=${progress.confidenceScore.toFixed(2)}`);
       } catch (error) {
         console.error(`[Quiz History] ❌ Error creating progress for concept ${concept.conceptID}:`, error);
       }

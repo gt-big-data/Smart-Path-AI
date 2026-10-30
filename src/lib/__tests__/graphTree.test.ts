@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ancestorsOf, buildGraphTree, pathTo, RawGraph } from '../graphTree';
+import { ancestorsOf, buildGraphTree, centerNodeName, pathTo, RawGraph } from '../graphTree';
 import { assertTreeInvariants } from './treeInvariants';
 
 type NodeSpec = [id: string, label: string, isCenter?: boolean | string];
@@ -20,6 +20,22 @@ const build = (graph: RawGraph) => {
   assertTreeInvariants(graph, tree);
   return tree;
 };
+
+describe('centerNodeName (auto chat titles)', () => {
+  it('returns the isCenter Topic name, tidied', () => {
+    const graph = g([['hub', 'Topic'], ['c', 'Topic', true]], [['c', 'hub']]);
+    graph.nodes[1].properties!.name = '  Cellular   Respiration ';
+    expect(centerNodeName(graph)).toBe('Cellular Respiration');
+  });
+
+  it('shortens long names and returns null when there is nothing to use', () => {
+    const graph = g([['c', 'Topic', true]]);
+    graph.nodes[0].properties!.name = 'x'.repeat(80);
+    expect(centerNodeName(graph, 60)).toBe(`${'x'.repeat(59)}…`);
+    expect(centerNodeName({ nodes: [], relationships: [] })).toBeNull();
+    expect(centerNodeName({ nodes: [{ id: 'm', labels: ['GraphMetadata'], properties: {} }], relationships: [] })).toBeNull();
+  });
+});
 
 describe('center selection', () => {
   it('uses the isCenter Topic even when another Topic has more connections', () => {
