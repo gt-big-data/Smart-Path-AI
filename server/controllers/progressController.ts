@@ -1,13 +1,15 @@
 //progressController.ts
 import { Request, Response, NextFunction } from 'express';
 import ConceptProgress from '../models/ConceptProgress';
+import User from '../models/User';
 
-const updateConfidenceScore = async (userId: string, conceptId: string, isCorrect: boolean, isRetry: boolean) => {
-  let progress = await ConceptProgress.findOne({ user: userId, conceptId });
+const updateConfidenceScore = async (userId: string, chatId: string, conceptId: string, isCorrect: boolean, isRetry: boolean) => {
+  let progress = await ConceptProgress.findOne({ user: userId, chatId, conceptId });
 
   if (!progress) {
     progress = new ConceptProgress({
       user: userId,
+      chatId,
       conceptId,
       confidenceScore: 0.5, // Starting confidence score
     });
@@ -33,14 +35,18 @@ export const updateConceptProgress = async (req: Request, res: Response, next: N
     return res.status(401).json({ message: 'Unauthorized' });
   }
 
-  const { conceptId, isCorrect, isRetry } = req.body;
+  const { chat_id: chatId, conceptId, isCorrect, isRetry } = req.body;
 
-  if (typeof conceptId !== 'string' || typeof isCorrect !== 'boolean' || typeof isRetry !== 'boolean') {
+  if (typeof chatId !== 'string' || !chatId.trim() || typeof conceptId !== 'string' || !conceptId.trim() || typeof isCorrect !== 'boolean' || typeof isRetry !== 'boolean') {
     return res.status(400).json({ message: 'Invalid request body' });
   }
 
   try {
-    const progress = await updateConfidenceScore(userId, conceptId, isCorrect, isRetry);
+    const chatOwner = await User.exists({ _id: userId, 'chats.chat_id': chatId });
+    if (!chatOwner) {
+      return res.status(404).json({ message: 'Chat not found' });
+    }
+    const progress = await updateConfidenceScore(userId, chatId, conceptId.trim(), isCorrect, isRetry);
     res.status(200).json(progress);
   } catch (error) {
     console.error('Error updating concept progress:', error);
@@ -60,7 +66,11 @@ export const getConceptProgress = async (req: Request, res: Response, next: Next
     }
 
     try {
-        const progress = await ConceptProgress.find({ user: userId });
+        const chatId = typeof req.query.chat_id === 'string' ? req.query.chat_id : undefined;
+        const progress = await ConceptProgress.find({
+          user: userId,
+          ...(chatId ? { chatId } : {}),
+        });
         console.log(`[getConceptProgress] Found ${progress.length} progress records for user ${userId}`);
         
         if (progress.length > 0) {

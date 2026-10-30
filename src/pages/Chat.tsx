@@ -507,11 +507,12 @@ function App() {
   }, [isProcessingFile]);
 
   // Add function to fetch concept progress
-  const fetchConceptProgress = useCallback(async () => {
+  const fetchConceptProgress = useCallback(async (chatId = currentChatId) => {
     try {
       const response = await axios.get(
         `${API_BASE_URL}/api/concept-progress`,
         {
+          params: chatId ? { chat_id: chatId } : undefined,
           withCredentials: true,
         },
       );
@@ -522,7 +523,7 @@ function App() {
       // Set empty array on error to avoid breaking the UI
       setConceptProgress([]);
     }
-  }, []);
+  }, [currentChatId]);
 
   const generateAIResponse = async (
     userMessage: string,
@@ -665,7 +666,7 @@ function App() {
       setCurrentChatId((currentId) => {
         if (!expectedChatId || currentId === expectedChatId) {
           setGraphData({ ...selectedData, graph_id: graphId });
-          void fetchConceptProgress();
+          void fetchConceptProgress(expectedChatId || currentChatId);
         }
         return currentId;
       });
@@ -873,7 +874,7 @@ function App() {
                 ...responseData,
                 graph_id: responseData.graph_id,
               });
-              void fetchConceptProgress();
+              void fetchConceptProgress(currentChatId);
             }
             return currentId;
           });
@@ -1365,6 +1366,7 @@ function App() {
       console.log("✅ Delete response received:", response.data);
       console.log("Response status:", response.status);
       console.log("✅ Chat deleted successfully on server");
+      sessionStorage.removeItem("progressPageCache:v2");
 
       deletingChatRef.current = null;
     } catch (error: any) {

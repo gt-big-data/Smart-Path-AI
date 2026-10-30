@@ -12,9 +12,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.clarifyQuizQuestion = exports.semanticSearchGraph = exports.searchGraph = exports.getNodeMetadata = exports.getUserProfile = exports.generateConversationResponse = exports.verifyAnswer = exports.generateQuestionsWithAnswers = exports.viewGraph = void 0;
+exports.clarifyQuizQuestion = exports.semanticSearchGraph = exports.searchGraph = exports.getNodeMetadata = exports.getUserProfile = exports.generateConversationResponse = exports.verifyAnswer = exports.exactChoiceVerdict = exports.generateQuestionsWithAnswers = exports.viewGraph = void 0;
 const openai_1 = __importDefault(require("openai"));
 const ConceptProgress_1 = __importDefault(require("../models/ConceptProgress"));
+const User_1 = __importDefault(require("../models/User"));
 const axiosConfig_1 = require("../utils/axiosConfig");
 // Initialize OpenAI with explicit API key
 const openai = new openai_1.default({
@@ -25,35 +26,39 @@ if (!process.env.OPENAI_API_KEY) {
     console.error('Warning: OPENAI_API_KEY is not set in environment variables');
 }
 // Helper function to update confidence score
-const updateConfidenceScore = (userId, conceptId, isCorrect, isRetry) => __awaiter(void 0, void 0, void 0, function* () {
-    if (!userId || !conceptId) {
-        console.log('Skipping confidence score update: missing userId or conceptId.');
-        return;
+const updateConfidenceScore = (userId, chatId, conceptId, isCorrect, isRetry, submissionId) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!userId || !chatId || !conceptId) {
+        console.log('Skipping confidence score update: missing userId, chatId, or conceptId.');
+        throw new Error('Confidence score update requires userId, chatId, and conceptId');
     }
-    let progress = yield ConceptProgress_1.default.findOne({ user: userId, conceptId });
-    if (!progress) {
-        progress = new ConceptProgress_1.default({ user: userId, conceptId, confidenceScore: 0.5 });
-    }
-    if (isCorrect) {
-        progress.confidenceScore += isRetry ? 0.05 : 0.1;
-    }
-    else {
-        progress.confidenceScore -= 0.1;
-    }
-    // Clamp the score between 0 and 1
-    progress.confidenceScore = Math.max(0, Math.min(1, progress.confidenceScore));
-    yield progress.save();
-    console.log(`Updated confidence score for concept ${conceptId} to ${progress.confidenceScore}`);
-});
-const updateConfidenceScoreSafe = (userId, conceptId, isCorrect, isRetry) => __awaiter(void 0, void 0, void 0, function* () {
-    if (!userId || !conceptId)
-        return;
+    const filter = { user: userId, chatId, conceptId };
+    const delta = isCorrect ? (isRetry ? 0.05 : 0.1) : -0.1;
     try {
-        yield updateConfidenceScore(userId, conceptId, isCorrect, isRetry);
+        yield ConceptProgress_1.default.updateOne(filter, {
+            $setOnInsert: { confidenceScore: 0.5, submissionIds: [] },
+        }, { upsert: true });
     }
-    catch (err) {
-        console.error('Non-fatal confidence update error:', err);
+    catch (error) {
+        // Concurrent first submissions can race to create the same uniquely indexed record.
+        if (error.code !== 11000)
+            throw error;
     }
+    const updated = yield ConceptProgress_1.default.findOneAndUpdate(Object.assign(Object.assign({}, filter), { submissionIds: { $ne: submissionId } }), [{
+            $set: {
+                confidenceScore: {
+                    $max: [0, { $min: [1, { $add: [{ $ifNull: ['$confidenceScore', 0.5] }, delta] }] }],
+                },
+                submissionIds: {
+                    $setUnion: [{ $ifNull: ['$submissionIds', []] }, [submissionId]],
+                },
+                lastAttempted: new Date(),
+            },
+        }], { new: true });
+    const progress = updated || (yield ConceptProgress_1.default.findOne(filter));
+    if (!progress)
+        throw new Error('Confidence record could not be created');
+    console.log(`Updated confidence score for concept ${conceptId} to ${progress.confidenceScore}`);
+    return progress;
 });
 const viewGraph = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -82,6 +87,7 @@ const generateQuestionsWithAnswers = (req, res) => __awaiter(void 0, void 0, voi
     try {
         const graph_id = req.query.graph_id;
         const userId = (_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user;
+        const chatId = req.query.chat_id;
         const rawLength = req.query.length;
         const parsedLength = Number(rawLength);
         const allowed = [5, 10, 15];
@@ -100,10 +106,29 @@ const generateQuestionsWithAnswers = (req, res) => __awaiter(void 0, void 0, voi
             // For now, let's return an error to make the dependency clear.
             return res.status(401).json({ error: 'User not authenticated. Cannot generate personalized questions.' });
         }
+        if (typeof chatId !== 'string' || !chatId.trim()) {
+            return res.status(400).json({ error: 'chat_id is required' });
+        }
+        const chatOwner = yield User_1.default.exists({
+            _id: userId,
+            chats: { $elemMatch: { chat_id: chatId, graph_id: String(graph_id) } },
+        });
+        if (!chatOwner) {
+            return res.status(404).json({ error: 'Chat not found' });
+        }
+        const progress = yield ConceptProgress_1.default.find({ user: userId, chatId })
+            .select({ conceptId: 1, confidenceScore: 1, _id: 0 })
+            .lean();
         const id = encodeURIComponent(String(graph_id));
-        const url = `/questions/${id}?user_id=${userId}&length=${length}&format=${questionFormat}`;
+        const url = `/questions/${id}?user_id=${encodeURIComponent(String(userId))}&length=${length}&format=${questionFormat}`;
+        const mongoProgress = progress.reduce((scores, item) => {
+            scores[item.conceptId] = item.confidenceScore;
+            return scores;
+        }, {});
         console.log(`Requesting questions from AI server: ${url}`);
-        const response = yield axiosConfig_1.pythonServiceClient.post(url, {});
+        const response = yield axiosConfig_1.pythonServiceClient.post(url, {
+            mongo_progress: mongoProgress,
+        });
         // The AI server returns { questions: [ { text, correct_answer, topic_id }, ... ] }
         const questions = (_c = response.data) === null || _c === void 0 ? void 0 : _c.questions;
         if (!Array.isArray(questions)) {
@@ -206,17 +231,34 @@ const verifyAnswer = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         return res.status(401).json({ error: 'User not authenticated' });
     }
     try {
-        const { question, userAnswer, correctAnswer, conceptId, isRetry } = req.body;
+        const { question, userAnswer, correctAnswer, conceptId, isRetry, chat_id: chatId, graph_id: graphId } = req.body;
+        if (typeof chatId !== 'string' || !chatId.trim()) {
+            return res.status(400).json({ error: 'chat_id is required' });
+        }
+        if (typeof conceptId !== 'string' || !conceptId.trim()) {
+            return res.status(400).json({ error: 'conceptId is required' });
+        }
+        const submissionId = req.body.submission_id;
+        if (typeof submissionId !== 'string' || !submissionId.trim()) {
+            return res.status(400).json({ error: 'submission_id is required' });
+        }
+        const chatOwner = yield User_1.default.exists(Object.assign({ _id: userId }, (graphId
+            ? { chats: { $elemMatch: { chat_id: chatId, graph_id: graphId } } }
+            : { 'chats.chat_id': chatId })));
+        if (!chatOwner) {
+            return res.status(404).json({ error: 'Chat not found' });
+        }
+        const normalizedConceptId = conceptId.trim();
         // Handle skipped questions - treat as incorrect
         if (userAnswer === 'SKIPPED' || userAnswer.trim().toUpperCase() === 'SKIP') {
-            yield updateConfidenceScoreSafe(userId, conceptId, false, false);
+            yield updateConfidenceScore(userId, chatId, normalizedConceptId, false, false, submissionId);
             return res.json({
                 isCorrect: false,
                 feedback: `You skipped this question. Skipped questions are counted as incorrect for confidence tracking.`,
                 followUpQuestion: ''
             });
         }
-        const exact = exactChoiceVerdict(userAnswer, correctAnswer || '');
+        const exact = (0, exports.exactChoiceVerdict)(userAnswer, correctAnswer || '');
         // Construct the prompt for GPT
         const systemPrompt = `You are an educational assistant that evaluates student answers based on conceptual understanding rather than exact wording.
 Your role is to:
@@ -238,10 +280,7 @@ Return valid JSON only.`;
 Question: "${question}"
 Student's Answer: "${userAnswer}"
 Reference Correct Answer: "${correctAnswer || ''}"
-${exact === null ? '' : `
-This is a multiple-choice or true/false question, and the student's answer is ${exact ? 'CORRECT' : 'INCORRECT'}. Your feedback must match that.
-`}
-
+${exact === null ? '' : `\nThis is a multiple-choice or true/false question, and the student's answer is ${exact ? 'CORRECT' : 'INCORRECT'}. Your feedback must match that.\n`}
 Provide feedback in this JSON format:
 {
   "isCorrect": boolean (true if understanding is demonstrated, even if not perfectly worded),
@@ -250,6 +289,7 @@ Provide feedback in this JSON format:
   "conceptualHint": "If needed, a hint about missing concepts without giving away the answer",
   "thinkingPrompt": "A question to help the student think deeper about the topic"
 }`;
+        let response;
         try {
             // Prefer LLM conceptual grading, but keep a deterministic fallback if formatting/service fails.
             const completion = yield openai.chat.completions.create({
@@ -273,31 +313,24 @@ Provide feedback in this JSON format:
                 .trim();
             const result = JSON.parse(cleaned);
             const isCorrect = exact !== null && exact !== void 0 ? exact : result.score >= 70;
-            // Update confidence score
-            yield updateConfidenceScoreSafe(userId, conceptId, isCorrect, isRetry || false);
-            // Transform the result to match the expected frontend format while preserving the new evaluation approach
-            const transformedResult = {
+            response = {
                 isCorrect, // Consider answers with 70% or higher understanding as correct
                 feedback: result.feedback,
                 followUpQuestion: isCorrect
                     ? result.thinkingPrompt
                     : `Hint: ${result.conceptualHint}`
             };
-            res.json(transformedResult);
         }
         catch (llmError) {
             console.error('LLM verify fallback engaged:', llmError);
-            const fallback = evaluateAnswerFallback(userAnswer, correctAnswer || '');
-            yield updateConfidenceScoreSafe(userId, conceptId, fallback.isCorrect, isRetry || false);
-            res.json(fallback);
+            response = evaluateAnswerFallback(userAnswer, correctAnswer || '');
         }
+        yield updateConfidenceScore(userId, chatId, normalizedConceptId, response.isCorrect, isRetry || false, submissionId);
+        return res.json(response);
     }
     catch (error) {
         console.error('Error verifying answer:', error);
-        const { userAnswer, correctAnswer, conceptId, isRetry } = req.body || {};
-        const fallback = evaluateAnswerFallback(String(userAnswer || ''), String(correctAnswer || ''));
-        yield updateConfidenceScoreSafe(userId, conceptId, fallback.isCorrect, Boolean(isRetry));
-        res.json(fallback);
+        return res.status(500).json({ error: 'Failed to verify answer or save progress' });
     }
 });
 exports.verifyAnswer = verifyAnswer;

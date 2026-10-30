@@ -41,6 +41,7 @@ const express_session_1 = __importDefault(require("express-session"));
 const connect_mongo_1 = __importDefault(require("connect-mongo"));
 const axios_1 = __importDefault(require("axios"));
 const User_1 = __importDefault(require("./models/User"));
+const ConceptProgress_1 = __importDefault(require("./models/ConceptProgress"));
 require("./config/passport");
 const app = (0, express_1.default)();
 const isProduction = process.env.NODE_ENV === 'production';
@@ -61,6 +62,26 @@ const sessionStore = process.env.MONGO_URI
 const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
     try {
         yield mongoose_1.default.connect(process.env.MONGO_URI);
+        let indexes = [];
+        try {
+            indexes = yield ConceptProgress_1.default.collection.listIndexes().toArray();
+        }
+        catch (error) {
+            if (error.code !== 26 && error.codeName !== 'NamespaceNotFound')
+                throw error;
+        }
+        const oldUserConceptIndex = indexes.find((index) => {
+            var _a, _b;
+            return index.unique &&
+                ((_a = index.key) === null || _a === void 0 ? void 0 : _a.user) === 1 &&
+                ((_b = index.key) === null || _b === void 0 ? void 0 : _b.conceptId) === 1 &&
+                Object.keys(index.key).length === 2;
+        });
+        if (oldUserConceptIndex) {
+            yield ConceptProgress_1.default.collection.dropIndex(oldUserConceptIndex.name);
+            console.log('Removed the obsolete user/concept-only progress index (records preserved)');
+        }
+        yield ConceptProgress_1.default.createIndexes();
         console.log('MongoDB connected');
     }
     catch (err) {
@@ -68,7 +89,6 @@ const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
         process.exit(1);
     }
 });
-connectDB();
 // CORS
 app.use((0, cors_1.default)({
     origin: corsOrigins.length <= 1 ? corsOrigins[0] : corsOrigins,
@@ -130,7 +150,9 @@ app.get('/flask/hi', (req, res) => __awaiter(void 0, void 0, void 0, function* (
         res.status(500).send('Error calling Flask server');
     }
 }));
-// Start server
-app.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}`);
+// Start serving only after MongoDB and the scoped progress index are ready.
+void connectDB().then(() => {
+    app.listen(port, () => {
+        console.log(`Server running on http://localhost:${port}`);
+    });
 });

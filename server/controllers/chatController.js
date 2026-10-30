@@ -14,6 +14,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.renameFolder = exports.moveFolder = exports.getUserFolders = exports.moveChatToFolder = exports.deleteFolder = exports.createFolder = exports.renameChat = exports.deleteChat = exports.getUserGraphIds = exports.getUserChats = exports.addMessageToChat = exports.createNewChat = exports.getCurrentUserId = void 0;
 const User_1 = __importDefault(require("../models/User"));
+const ConceptProgress_1 = __importDefault(require("../models/ConceptProgress"));
+const QuizHistory_1 = __importDefault(require("../models/QuizHistory"));
 const uuid_1 = require("uuid");
 /**
  * Get current logged in user's ID
@@ -259,6 +261,8 @@ const deleteChat = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             return;
         }
         console.log(`Found chat at index ${chatIndex}, deleting...`);
+        yield ConceptProgress_1.default.deleteMany({ user: userId, chatId: chat_id });
+        yield QuizHistory_1.default.deleteMany({ userID: String(userId), chatID: chat_id });
         // Remove the chat from the array
         user.chats.splice(chatIndex, 1);
         yield user.save();

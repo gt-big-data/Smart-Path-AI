@@ -28,6 +28,7 @@ import session from 'express-session';
 import MongoStore from 'connect-mongo';
 import axios from 'axios';
 import User from './models/User';
+import ConceptProgress from './models/ConceptProgress';
 
 import './config/passport';
 
@@ -51,13 +52,29 @@ const sessionStore = process.env.MONGO_URI
 const connectDB = async () => {
     try {
         await mongoose.connect(process.env.MONGO_URI!);
+        let indexes: { name: string; key: Record<string, unknown>; unique?: boolean }[] = [];
+        try {
+            indexes = await ConceptProgress.collection.listIndexes().toArray();
+        } catch (error: any) {
+            if (error.code !== 26 && error.codeName !== 'NamespaceNotFound') throw error;
+        }
+        const oldUserConceptIndex = indexes.find((index) =>
+            index.unique &&
+            index.key?.user === 1 &&
+            index.key?.conceptId === 1 &&
+            Object.keys(index.key).length === 2
+        );
+        if (oldUserConceptIndex) {
+            await ConceptProgress.collection.dropIndex(oldUserConceptIndex.name);
+            console.log('Removed the obsolete user/concept-only progress index (records preserved)');
+        }
+        await ConceptProgress.createIndexes();
         console.log('MongoDB connected');
     } catch (err) {
         console.error('Could not connect to MongoDB', err);
         process.exit(1);
     }
 };
-connectDB();
 
 // CORS
 app.use(cors({
@@ -140,7 +157,9 @@ app.get('/flask/hi', async (req, res) => {
     }
 });
 
-// Start server
-app.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}`);
+// Start serving only after MongoDB and the scoped progress index are ready.
+void connectDB().then(() => {
+    app.listen(port, () => {
+        console.log(`Server running on http://localhost:${port}`);
+    });
 });

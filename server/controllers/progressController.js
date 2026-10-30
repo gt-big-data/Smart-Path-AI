@@ -14,11 +14,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getConceptProgress = exports.updateConceptProgress = void 0;
 const ConceptProgress_1 = __importDefault(require("../models/ConceptProgress"));
-const updateConfidenceScore = (userId, conceptId, isCorrect, isRetry) => __awaiter(void 0, void 0, void 0, function* () {
-    let progress = yield ConceptProgress_1.default.findOne({ user: userId, conceptId });
+const User_1 = __importDefault(require("../models/User"));
+const updateConfidenceScore = (userId, chatId, conceptId, isCorrect, isRetry) => __awaiter(void 0, void 0, void 0, function* () {
+    let progress = yield ConceptProgress_1.default.findOne({ user: userId, chatId, conceptId });
     if (!progress) {
         progress = new ConceptProgress_1.default({
             user: userId,
+            chatId,
             conceptId,
             confidenceScore: 0.5, // Starting confidence score
         });
@@ -41,12 +43,16 @@ const updateConceptProgress = (req, res, next) => __awaiter(void 0, void 0, void
     if (!userId) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
-    const { conceptId, isCorrect, isRetry } = req.body;
-    if (typeof conceptId !== 'string' || typeof isCorrect !== 'boolean' || typeof isRetry !== 'boolean') {
+    const { chat_id: chatId, conceptId, isCorrect, isRetry } = req.body;
+    if (typeof chatId !== 'string' || !chatId.trim() || typeof conceptId !== 'string' || !conceptId.trim() || typeof isCorrect !== 'boolean' || typeof isRetry !== 'boolean') {
         return res.status(400).json({ message: 'Invalid request body' });
     }
     try {
-        const progress = yield updateConfidenceScore(userId, conceptId, isCorrect, isRetry);
+        const chatOwner = yield User_1.default.exists({ _id: userId, 'chats.chat_id': chatId });
+        if (!chatOwner) {
+            return res.status(404).json({ message: 'Chat not found' });
+        }
+        const progress = yield updateConfidenceScore(userId, chatId, conceptId.trim(), isCorrect, isRetry);
         res.status(200).json(progress);
     }
     catch (error) {
@@ -65,7 +71,8 @@ const getConceptProgress = (req, res, next) => __awaiter(void 0, void 0, void 0,
         return res.status(401).json({ message: 'Unauthorized' });
     }
     try {
-        const progress = yield ConceptProgress_1.default.find({ user: userId });
+        const chatId = typeof req.query.chat_id === 'string' ? req.query.chat_id : undefined;
+        const progress = yield ConceptProgress_1.default.find(Object.assign({ user: userId }, (chatId ? { chatId } : {})));
         console.log(`[getConceptProgress] Found ${progress.length} progress records for user ${userId}`);
         if (progress.length > 0) {
             console.log('[getConceptProgress] Sample progress records:');

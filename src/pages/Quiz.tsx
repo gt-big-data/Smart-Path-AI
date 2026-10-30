@@ -54,7 +54,7 @@ function QuizRunner() {
     const length = params.get('length') || '5';
     const format = params.get('format') || 'mixed';
     axios.get(`${API_BASE_URL}/api/generate-questions-with-answers`, {
-      params: { graph_id: graphId, length, format }, withCredentials: true,
+      params: { graph_id: graphId, chat_id: chatId, length, format }, withCredentials: true,
     }).then(response => {
       const pairs = response.data?.qa_pairs;
       if (response.data?.status !== 'success' || !Array.isArray(pairs) || !pairs.length) {
@@ -68,7 +68,7 @@ function QuizRunner() {
         explanation: pair.explanation,
         format: pair.format,
       }));
-      const next = { qaData, currentQuestionIndex: 0, results: qaData.map(() => null), completed: false };
+      const next = { attemptId: crypto.randomUUID(), qaData, currentQuestionIndex: 0, results: qaData.map(() => null), completed: false };
       localStorage.setItem(quizKey(chatId), JSON.stringify(next));
       setQuiz(next);
     }).catch(err => setError(err.message || 'Could not generate the quiz.')).finally(() => setLoading(false));
@@ -109,6 +109,7 @@ function QuizRunner() {
     if (valid.length) {
       try {
         await axios.post(`${API_BASE_URL}/api/quiz-history`, {
+          chat_id: chatId,
           concepts: valid.map(({ question, index }) => ({ conceptID: question.conceptId, name: question.conceptName || `Question ${index + 1} Concept` })),
           questions: valid.map(({ question, result }) => ({
             questionText: question.question,
@@ -154,6 +155,8 @@ function QuizRunner() {
         userAnswer: answer,
         correctAnswer: question.answer,
         conceptId: question.conceptId,
+        chat_id: chatId,
+        submission_id: `${quiz.attemptId}:${index}`,
         isRetry: false,
         graph_id: graphId,
       }, { withCredentials: true });
