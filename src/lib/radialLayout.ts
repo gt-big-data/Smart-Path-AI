@@ -29,7 +29,7 @@ export interface Point {
 export interface RadialLayoutOptions {
   /** Minimum clear space between two node boxes, in px. */
   nodeGap?: number;
-  /** Extra space between neighbouring rings, in px. Scale this for Compact / Normal / Roomy. */
+  /** Extra clear space between neighbouring rings, in px. */
   ringGap?: number;
   /** Upper bound on overlap passes, so a bad graph can't freeze the page. */
   maxOverlapPasses?: number;
@@ -52,7 +52,9 @@ export interface RadialLayoutResult {
 
 const DEFAULTS: Required<RadialLayoutOptions> = {
   nodeGap: 24,
-  ringGap: 60,
+  // D0 rejected a user-facing spacing selector. Keep one readable default,
+  // tuned against the 554-node fixture, rather than maintaining UI presets.
+  ringGap: 80,
   maxOverlapPasses: 30,
   defaultSize: { width: 280, height: 110 },
 };
