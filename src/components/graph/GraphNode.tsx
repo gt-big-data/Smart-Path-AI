@@ -297,8 +297,9 @@ export const GraphNode = memo((props: GraphNodeProps) => {
               style={collapseBadgeStyle(isCollapsed, badgeHovered)}
               onClick={handleCollapseClick}
               onKeyDown={handleCollapseKeyDown}
-              onMouseEnter={() => setBadgeHovered(true)}
-              onMouseLeave={() => setBadgeHovered(false)}
+              // Mouse only: a touch tap would leave the hover look stuck on
+              onPointerEnter={(e) => setBadgeHovered(e.pointerType === 'mouse')}
+              onPointerLeave={() => setBadgeHovered(false)}
               title={collapseLabel}
               aria-label={collapseLabel}
               aria-expanded={!isCollapsed}
