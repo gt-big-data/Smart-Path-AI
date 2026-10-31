@@ -154,6 +154,7 @@ export function applyGraphStyles(base: BaseGraph, layers: GraphLayers): { nodes:
         color,
         pathStep,
         hiddenCount: collapse.hiddenCounts.get(String(node.id)) ?? 0,
+        collapsible: collapse.collapsibleIds.has(String(node.id)),
       },
       style: {
         ...node.style,

@@ -19,6 +19,8 @@ export interface CollapseLayer {
   hiddenIds: Set<string>;
   /** How many drawn nodes each collapsed node hides */
   hiddenCounts: Map<string, number>;
+  /** Nodes with at least one drawn node below them, so they can collapse. These get the collapse badge (C2). */
+  collapsibleIds: Set<string>;
 }
 
 const NO_IDS: ReadonlySet<string> = new Set();
@@ -35,17 +37,25 @@ export function countBelow(tree: GraphTree, nodeId: string, drawn?: ReadonlySet<
   return count;
 }
 
-/** Which nodes the collapsed set hides, and how many drawn nodes each collapsed node hides */
+/** Which nodes the collapsed set hides, how many drawn nodes each collapsed node hides, and which nodes can collapse */
 export function collapseLayer(tree: GraphTree, collapsedIds: ReadonlySet<string>, drawn?: ReadonlySet<string>): CollapseLayer {
   const hiddenIds = new Set<string>();
   const hiddenCounts = new Map<string, number>();
+  const collapsibleIds = new Set<string>();
+
+  // Walking tree.order backwards settles every child before its parent
+  for (let i = tree.order.length - 1; i >= 0; i--) {
+    const id = tree.order[i];
+    const children = tree.nodes.get(id)!.children;
+    if (children.some(child => !drawn || drawn.has(child) || collapsibleIds.has(child))) collapsibleIds.add(id);
+  }
 
   // A node with nothing drawn below it has nothing to hide
   for (const id of collapsedIds) {
     const count = countBelow(tree, id, drawn);
     if (count > 0) hiddenCounts.set(id, count);
   }
-  if (hiddenCounts.size === 0) return { hiddenIds, hiddenCounts };
+  if (hiddenCounts.size === 0) return { hiddenIds, hiddenCounts, collapsibleIds };
 
   // Parents come before children in tree.order, so one pass reaches every node under a collapsed one
   for (const id of tree.order) {
@@ -53,7 +63,7 @@ export function collapseLayer(tree: GraphTree, collapsedIds: ReadonlySet<string>
     if (parentId !== null && (hiddenCounts.has(parentId) || hiddenIds.has(parentId))) hiddenIds.add(id);
   }
 
-  return { hiddenIds, hiddenCounts };
+  return { hiddenIds, hiddenCounts, collapsibleIds };
 }
 
 /** The collapsed set with every ancestor of nodeId opened. Returns the same set if none was collapsed. */

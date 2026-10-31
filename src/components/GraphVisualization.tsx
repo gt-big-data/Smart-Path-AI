@@ -552,11 +552,6 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
   // Node edit popup state
   const [nodeEditState, setNodeEditState] = useState<NodeEditState | null>(null);
 
-  // Passes the edit callback to every GraphNode as a prop. Memoized so React Flow gets the same nodeTypes each render.
-  const nodeTypes = useMemo(() => ({
-    default: (props: NodeProps) => <GraphNode {...props} onEditRequest={setNodeEditState} />,
-  }), []);
-
 const graphTree = useMemo(
   () =>
     buildGraphTree(
@@ -886,6 +881,14 @@ useEffect(() => {
   // The search API may return numeric ids; node ids are strings
   const searchHits = useMemo(() => new Set(searchResults.map(String)), [searchResults]);
   const collapse = useCollapse(graphTree, baseGraph?.nodes);
+
+  // Passes the edit and collapse callbacks to every GraphNode as props. Both never change,
+  // so React Flow gets the same nodeTypes each render.
+  const nodeTypes = useMemo(() => ({
+    default: (props: NodeProps) => (
+      <GraphNode {...props} onEditRequest={setNodeEditState} onToggleCollapse={collapse.toggleCollapsed} />
+    ),
+  }), [collapse.toggleCollapsed]);
 
   const styledGraph = useMemo(
     () => baseGraph && applyGraphStyles(baseGraph, { confidenceScores, nodeEdits, searchHits, activePath, collapse: collapse.layer }),
