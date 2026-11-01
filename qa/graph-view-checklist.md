@@ -12,7 +12,11 @@ npm i --no-save playwright && npx playwright install chromium   # once
 npm run qa:harness       # terminal 1: Vite serves the harness on :5199
 npm run qa:checklist     # terminal 2: writes qa/results/latest.md + screenshots
 npm run bench:layout     # layout timing on every fixture
+node --test qa/tests/*.mjs  # runner regression tests; no browser needed
 ```
+
+The checklist writes its reports before exiting: status `1` means a check failed or a fixture crashed;
+status `0` means no failures. `INFO` rows are reported as not exercised, not as passing checks.
 
 The harness (`qa/harness/`) mounts the real `GraphVisualization` with a fixture and a fake concept-progress list. You don't need a login, Mongo or the AI server. To click around by hand, open `http://localhost:5199/?fixture=large`. The buttons along the top switch fixtures without a reload.
 
@@ -89,7 +93,7 @@ The runner stubs `/api/search-graph` and `/api/semantic-search-graph`. Each stub
 | ID | Check | How |
 |---|---|---|
 | C-01 | Each node shows three dots, filled by score: >0 one, >0.4 two, >0.7 three. The runner tests 0, 0.2, 0.4, 0.41, 0.7, 0.71 and 1, keyed both by node id and by `<prefix>_<name>` | Auto |
-| C-02 | A score of 0 looks different from "no score yet" | Auto |
+| C-02 | A score of 0 is distinguishable from "no score yet" by indicator styling, text or accessible label; both may have zero filled dots | Auto |
 | C-03 | Dots update when progress changes, and nodes stay put | Auto |
 | C-04 | One progress entry fills at most one node | Auto |
 | C-05 | A short or partial conceptId doesn't match unrelated nodes | Auto |

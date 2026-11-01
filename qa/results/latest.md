@@ -1,6 +1,6 @@
 # Graph view checklist: automated run
 
-Run 2026-10-30T21:38:09.637Z · fixtures: small, no-center, history, large
+Run 2026-11-01T16:58:01.845Z · fixtures: small, no-center, history, large
 
 | Check | small | no-center | history | large |
 |---|:-:|:-:|:-:|:-:|
@@ -48,19 +48,19 @@ Run 2026-10-30T21:38:09.637Z · fixtures: small, no-center, history, large
 
 ## Failures and notes
 
-- **small · C-02 score 0 looks different from "no score yet"**: both show 0 filled dots; a student can't tell "never quizzed" from "got it all wrong"
+- **small · C-02 score 0 looks different from "no score yet"**: confidence indicators have identical styling, text and accessible labels (0 filled dots)
 - **small · C-04 one progress entry lights at most one node**: a single entry with conceptId "apoc.create.uuid()" filled 10 nodes (fixture Topics share that literal topicID)
-- **no-center · C-02 score 0 looks different from "no score yet"**: both show 0 filled dots; a student can't tell "never quizzed" from "got it all wrong"
+- **no-center · C-02 score 0 looks different from "no score yet"**: confidence indicators have identical styling, text and accessible labels (0 filled dots)
 - **no-center · C-04 one progress entry lights at most one node**: a single entry with conceptId "apoc.create.uuid()" filled 10 nodes (fixture Topics share that literal topicID)
-- **history · C-02 score 0 looks different from "no score yet"**: both show 0 filled dots; a student can't tell "never quizzed" from "got it all wrong"
+- **history · C-02 score 0 looks different from "no score yet"**: confidence indicators have identical styling, text and accessible labels (0 filled dots)
 - **history · C-04 one progress entry lights at most one node**: a single entry with conceptId "apoc.create.uuid()" filled 3 nodes (fixture Topics share that literal topicID)
 - **large · L-05 first view shows the center and its first two rings**: 1/255 on screen at zoom 0.10 (minZoom 0.1); ring 1 mean radius 9166 px
-- **large · C-02 score 0 looks different from "no score yet"**: both show 0 filled dots; a student can't tell "never quizzed" from "got it all wrong"
+- **large · C-02 score 0 looks different from "no score yet"**: confidence indicators have identical styling, text and accessible labels (0 filled dots)
 - **large · C-04 one progress entry lights at most one node**: a single entry with conceptId "apoc.create.uuid()" filled 36 nodes (fixture Topics share that literal topicID)
 
 ## Browser first-render time (harness load to all nodes in the DOM)
 
-- small: 259 ms
-- no-center: 257 ms
-- history: 289 ms
-- large: 1197 ms
+- small: 91 ms
+- no-center: 70 ms
+- history: 77 ms
+- large: 295 ms

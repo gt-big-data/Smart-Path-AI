@@ -15,6 +15,7 @@ import { createRequire } from 'module';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { confidenceDistinction } from './checklist-checks.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -47,6 +48,19 @@ const readNodes = page => page.evaluate(() => {
     const dotWrap = inner?.firstElementChild;
     const dots = dotWrap ? [...dotWrap.children] : [];
     const filled = dots.filter(d => d.style.backgroundColor && d.style.backgroundColor !== 'transparent').length;
+    // Compare only the indicators, not unrelated node labels or background colors.
+    const confidenceAppearance = dotWrap ? JSON.stringify([dotWrap, ...dots].map(indicator => {
+      const style = getComputedStyle(indicator);
+      return {
+        backgroundColor: style.backgroundColor, color: style.color,
+        border: style.border, borderRadius: style.borderRadius,
+        boxShadow: style.boxShadow, outline: style.outline,
+        opacity: style.opacity, visibility: style.visibility,
+        width: style.width, height: style.height,
+        text: [...indicator.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim(),
+        accessibleLabel: indicator.getAttribute('aria-label') ?? '',
+      };
+    })) : null;
     const badge = el.querySelector('[aria-label^="Path step"]');
     const text = [...(inner?.childNodes ?? [])].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();
     return {
@@ -59,6 +73,7 @@ const readNodes = page => page.evaluate(() => {
       background: el.style.background || el.style.backgroundColor,
       dotCount: dots.length,
       filled,
+      confidenceAppearance,
       step: badge ? Number(badge.textContent) : null,
       label: text,
     };
@@ -218,10 +233,8 @@ async function runFixture(browser, fixture) {
   const zeroScoreIds = Object.entries(ctx.expectedScores).filter(([, s]) => s === 0).map(([id]) => id);
   const unscored = nodes.find(n => !(n.id in ctx.expectedScores));
   const zero = nodes.find(n => zeroScoreIds.includes(n.id));
-  if (zero && unscored) {
-    record(fixture, 'C-02 score 0 looks different from "no score yet"', zero.filled !== unscored.filled ? 'PASS' : 'FAIL',
-      `both show ${zero.filled} filled dots; a student can't tell "never quizzed" from "got it all wrong"`);
-  }
+  const distinction = confidenceDistinction(zero, unscored);
+  record(fixture, 'C-02 score 0 looks different from "no score yet"', distinction.status, distinction.detail);
 
   const before = posKey(nodes);
   await page.evaluate(() => window.__qa.shiftProgress(3));
@@ -499,4 +512,7 @@ fs.writeFileSync(path.join(OUT, 'latest.md'), md);
 fs.writeFileSync(path.join(OUT, 'latest.json'), JSON.stringify({ results, renderTimes }, null, 2));
 
 const fails = results.filter(r => r.status === 'FAIL').length;
-console.log(`\n${results.length - fails}/${results.length} checks passed · report: qa/results/latest.md`);
+const passes = results.filter(r => r.status === 'PASS').length;
+const unexercised = results.filter(r => r.status === 'INFO').length;
+console.log(`\n${passes}/${results.length} checks passed · ${unexercised} not exercised · report: qa/results/latest.md`);
+process.exitCode = fails > 0 ? 1 : 0;
