@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import QuizHistory, { IQuizHistory, IConcept, IQuestion } from '../models/QuizHistory';
 import ConceptProgress from '../models/ConceptProgress';
+import { calculateDecayedConfidence } from '../utils/confidenceDecay';
 
 // Older clients send placeholder names like "Question 1 Concept"; only keep real topic names
 const isRealConceptName = (name: unknown) => typeof name === 'string' && !!name.trim() && !/^Question \d+ Concept$/.test(name.trim());
@@ -86,7 +87,11 @@ export const saveQuizHistory = async (req: Request, res: Response, next: NextFun
         // The score was already updated once per answer by /api/verify-answer, which also grades
         // open-ended answers correctly. Re-scoring here counted every answer twice.
         if (isRealConceptName(concept.name)) progress.conceptName = String(concept.name).trim();
-        progress.lastAttempted = new Date();
+        const now = new Date();
+        progress.confidenceScore = calculateDecayedConfidence(
+          progress.confidenceScore, progress.lastAttempted, now.getTime(),
+        );
+        progress.lastAttempted = now;
 
         await progress.save();
         progressCreated++;
@@ -244,6 +249,7 @@ export const processAllQuizHistory = async (req: Request, res: Response, next: N
         );
         
         try {
+          const practicedAt = question.timestamp || new Date();
           let progress = await ConceptProgress.findOne({ 
             user: userId, 
             conceptId: concept.conceptID 
@@ -256,7 +262,7 @@ export const processAllQuizHistory = async (req: Request, res: Response, next: N
               user: userId,
               conceptId: concept.conceptID,
               confidenceScore: 0.5,
-              lastAttempted: question.timestamp || new Date()
+              lastAttempted: practicedAt
             });
             totalProgressCreated++;
           } else {
@@ -264,6 +270,9 @@ export const processAllQuizHistory = async (req: Request, res: Response, next: N
           }
           
           // Update confidence score
+          progress.confidenceScore = calculateDecayedConfidence(
+            progress.confidenceScore, progress.lastAttempted, practicedAt.getTime(),
+          );
           if (isCorrect) {
             progress.confidenceScore += 0.1;
           } else {
@@ -271,8 +280,8 @@ export const processAllQuizHistory = async (req: Request, res: Response, next: N
           }
           
           progress.confidenceScore = Math.max(0, Math.min(1, progress.confidenceScore));
-          if (question.timestamp) {
-            progress.lastAttempted = question.timestamp;
+          if (!progress.lastAttempted || practicedAt > progress.lastAttempted) {
+            progress.lastAttempted = practicedAt;
           }
           
           await progress.save();
