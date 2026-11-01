@@ -27,6 +27,7 @@ import { GraphNode, NodeEditState, NODE_EDIT_POPUP_WIDTH, NODE_EDIT_POPUP_HEIGHT
 
 interface GraphData {
   status: string;
+  graph_id?: string;
   subject?: string;
   graph: {
     nodes: any[];
@@ -548,9 +549,21 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<string[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
   const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword');
+  const searchContext = useMemo(() => ({
+    graph: data?.graph, graphId: data?.graph_id, query: searchQuery, mode: searchMode,
+  }), [data?.graph, data?.graph_id, searchQuery, searchMode]);
+  const [searchResponse, setSearchResponse] = useState<{
+    context: typeof searchContext; nodeIds: string[];
+  } | null>(null);
+  const [pendingSearchNavigation, setPendingSearchNavigation] = useState<typeof searchContext | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  // Hide previous hits immediately, including the debounce before a new request starts.
+  const hasCurrentSearchResponse = searchResponse?.context === searchContext;
+  const searchResults = useMemo(
+    () => searchResponse?.context === searchContext ? searchResponse.nodeIds : [],
+    [searchContext, searchResponse]
+  );
 
   // Node edit popup state
   const [nodeEditState, setNodeEditState] = useState<NodeEditState | null>(null);
@@ -693,41 +706,38 @@ useEffect(() => {
     return color;
   };
 
-  const handleSearch = useCallback(async (query: string) => {
-    if (!query.trim() || !data?.graph) {
-      setSearchResults([]);
-      return;
-    }
-
-    const graphId = (data as any).graph_id;
-    if (!graphId) return;
-
-    setIsSearching(true);
-    try {
-      const endpoint = searchMode === 'semantic' ? 'semantic-search-graph' : 'search-graph';
-      const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
-      const response = await fetch(url, { credentials: 'include' });
-      const result = await response.json();
-      if (result.status === 'success') {
-        setSearchResults(result.node_ids || []);
-      } else {
-        setSearchResults([]);
-      }
-    } catch (error) {
-      console.error('[Graph Search] Error:', error);
-      setSearchResults([]);
-    } finally {
-      setIsSearching(false);
-    }
-  }, [data, searchMode]);
-
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (searchQuery) handleSearch(searchQuery);
-      else setSearchResults([]);
+    const { graph, graphId, query, mode } = searchContext;
+    setIsSearching(false);
+    if (!query.trim() || !graph || !graphId) return;
+
+    const controller = new AbortController();
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const endpoint = mode === 'semantic' ? 'semantic-search-graph' : 'search-graph';
+        const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${encodeURIComponent(graphId)}&query=${encodeURIComponent(query)}`;
+        const response = await fetch(url, { credentials: 'include', signal: controller.signal });
+        const result = await response.json();
+        if (!cancelled) {
+          setSearchResponse({ context: searchContext, nodeIds: result.status === 'success' ? result.node_ids || [] : [] });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('[Graph Search] Error:', error);
+          setSearchResponse({ context: searchContext, nodeIds: [] });
+        }
+      } finally {
+        if (!cancelled) setIsSearching(false);
+      }
     }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery, handleSearch]);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [searchContext]);
 
   // Graph structure: labels, colors, sizes and positions. Depends on the graph data only,
   // so quiz answers, edits and search never re-run the layout. Styling is layered on below.
@@ -975,6 +985,17 @@ useEffect(() => {
       });
     });
   }, [clearActivePath, flowInstance, graphTree.centerId]);
+
+  useEffect(() => {
+    if (!pendingSearchNavigation) return;
+    if (pendingSearchNavigation !== searchContext) {
+      setPendingSearchNavigation(null);
+      return;
+    }
+    if (!hasCurrentSearchResponse) return;
+    setPendingSearchNavigation(null);
+    if (searchResultItems.length > 0) handleSearchResultClick(searchResultItems[0].id);
+  }, [pendingSearchNavigation, searchContext, hasCurrentSearchResponse, searchResultItems, handleSearchResultClick]);
   const fittedBaseRef = useRef<BaseGraph | null>(null);
   useEffect(() => {
     if (!flowInstance || !baseGraph || fittedBaseRef.current === baseGraph || initialFocusNodes.length === 0) return;
@@ -1051,7 +1072,10 @@ useEffect(() => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && searchResultItems.length > 0) handleSearchResultClick(searchResultItems[0].id);
+              if (e.key !== 'Enter' || !searchQuery.trim()) return;
+              e.preventDefault();
+              if (!hasCurrentSearchResponse) setPendingSearchNavigation(searchContext);
+              else if (searchResultItems.length > 0) handleSearchResultClick(searchResultItems[0].id);
             }}
             placeholder="Search topics, concepts, definitions..."
             style={{
