@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import OpenAI from 'openai';
 import ConceptProgress from '../models/ConceptProgress';
 import { pythonServiceClient } from '../utils/axiosConfig';
+import { calculateDecayedConfidence } from '../utils/confidenceDecay';
 
 // Initialize OpenAI with explicit API key
 const openai = new OpenAI({
@@ -27,6 +28,10 @@ const updateConfidenceScore = async (userId: string, conceptId: string, isCorrec
     progress = new ConceptProgress({ user: userId, conceptId, confidenceScore: 0.5 });
   }
 
+  const now = new Date();
+  progress.confidenceScore = calculateDecayedConfidence(
+    progress.confidenceScore, progress.lastAttempted, now.getTime(),
+  );
   if (isCorrect) {
     progress.confidenceScore += isRetry ? 0.05 : 0.1;
   } else {
@@ -35,6 +40,7 @@ const updateConfidenceScore = async (userId: string, conceptId: string, isCorrec
 
   // Clamp the score between 0 and 1
   progress.confidenceScore = Math.max(0, Math.min(1, progress.confidenceScore));
+  progress.lastAttempted = now;
 
   await progress.save();
   console.log(`Updated confidence score for concept ${conceptId} to ${progress.confidenceScore}`);
