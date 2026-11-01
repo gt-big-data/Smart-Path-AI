@@ -37,7 +37,7 @@ const layers = (overrides: Partial<GraphLayers> = {}): GraphLayers => ({
   nodeEdits: {},
   searchHits: new Set(),
   activePath: null,
-  collapse: { hiddenIds: new Set(), hiddenCounts: new Map() },
+  collapse: { hiddenIds: new Set(), hiddenCounts: new Map(), collapsibleIds: new Set() },
   ...overrides,
 });
 
