@@ -1,24 +1,34 @@
-import { API_BASE_URL } from '../config/api';
 //GraphVisualization.tsx
-import React, { useCallback, useEffect, memo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import ReactFlow, {
   Node,
   Edge,
   Background,
   Controls,
   MiniMap,
+  NodeMouseHandler,
+  NodeProps,
+  ReactFlowInstance,
   useNodesState,
   useEdgesState,
-  NodeProps,
-  Handle,
-  Position,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Search, X } from 'lucide-react';
+import PathBar from './graph/PathBar';
 import { computeNodeSizes } from '../lib/nodesizing';
+import { buildGraphTree, GraphTree } from '../lib/graphTree';
+import { useCollapse } from '../lib/collapse';
+import { radialLayout, toTopLeft, NodeSize, Point, RadialTreeNode } from '../lib/radialLayout';
+import { getPathHighlight } from '../lib/pathHighlight';
+import { buildSearchResultItems } from '../lib/searchResults';
+import { applyGraphStyles, BaseGraph, ConfidenceKeys, DEFAULT_NODE_BORDER, NodeEdit, PATH_COLOR, resolveConfidenceScores } from '../lib/graphStyles';
+import { API_BASE_URL } from '../config/api';
+import { GraphNode, NodeEditState, NODE_EDIT_POPUP_WIDTH, NODE_EDIT_POPUP_HEIGHT, VIEWPORT_PADDING } from './graph/GraphNode';
 
 interface GraphData {
   status: string;
+  graph_id?: string;
   subject?: string;
   graph: {
     nodes: any[];
@@ -30,6 +40,53 @@ interface ConceptProgress {
   conceptId: string;
   confidenceScore: number;
   lastAttempted?: Date;
+}
+
+// Path bar preview with hardcoded steps; wired up in P2b
+// The current PathBar is a P2b preview with hardcoded steps and no handlers.
+// Keep it hidden until it is wired to the loaded graph and active path.
+const SHOW_PATH_BAR = false;
+
+// Must match the fallback size nodes are rendered at below
+const DEFAULT_NODE_SIZE: NodeSize = { width: 200, height: 70 };
+
+// Rings from the center that the first view zooms to; the rest of the graph is a pan away
+const INITIAL_FOCUS_DEPTH = 2;
+
+// Zoom a clicked search result is shown at, at least, so its label is readable
+const SEARCH_RESULT_MIN_ZOOM = 0.8;
+
+/**
+ * Top-left positions for React Flow: the center in the middle and one ring per depth
+ * (src/lib/radialLayout.ts). Nodes the tree doesn't reach go in a row under the outer ring.
+ */
+function layoutRadially(nodes: Node[], tree: GraphTree, sizes: Map<string, NodeSize>): Map<string, Point> {
+  const ids = new Set(nodes.map(node => node.id));
+  const sizeOf = (id: string) => sizes.get(id) ?? DEFAULT_NODE_SIZE;
+
+  // The tree is built from the raw graph; drop nodes that weren't rendered
+  const radialTree = new Map<string, RadialTreeNode>();
+  tree.nodes.forEach((treeNode, id) => {
+    if (ids.has(id)) radialTree.set(id, { id, children: treeNode.children.filter(child => ids.has(child)) });
+  });
+
+  const positions = new Map<string, Point>();
+  if (tree.centerId && radialTree.has(tree.centerId)) {
+    const { positions: centers } = radialLayout(tree.centerId, radialTree, sizes, { defaultSize: DEFAULT_NODE_SIZE });
+    centers.forEach((center, id) => positions.set(id, toTopLeft(center, sizeOf(id))));
+  }
+
+  const unplaced = nodes.filter(node => !positions.has(node.id));
+  if (unplaced.length > 0) {
+    let bottom = 0;
+    positions.forEach((pos, id) => { bottom = Math.max(bottom, pos.y + sizeOf(id).height); });
+    let x = 0;
+    unplaced.forEach(node => {
+      positions.set(node.id, { x, y: bottom + 200 });
+      x += sizeOf(node.id).width + 40;
+    });
+  }
+  return positions;
 }
 
 const SUBJECT_MAP: { [key: string]: string } = {
@@ -49,22 +106,6 @@ interface GraphVisualizationProps {
   isLoading?: boolean;
 }
 
-interface CustomNodeProps extends NodeProps {
-  style?: React.CSSProperties;
-}
-
-// Node edit popup state interface
-interface NodeEditState {
-  nodeId: string;
-  label: string;
-  color: string;
-  x: number;
-  y: number;
-}
-
-const NODE_EDIT_POPUP_WIDTH = 260;
-const NODE_EDIT_POPUP_HEIGHT = 340;
-const VIEWPORT_PADDING = 12;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -98,7 +139,7 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Source: COLOR_PALETTE.SLATE,
     Application: COLOR_PALETTE.ORANGE,
   },
-  
+
   english: {
     Topic: COLOR_PALETTE.BLUE,
     Subtopic: COLOR_PALETTE.TEAL,
@@ -112,7 +153,7 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Application: COLOR_PALETTE.ORANGE,
     Genre: COLOR_PALETTE.CYAN,
   },
-  
+
   history: {
     Topic: COLOR_PALETTE.BLUE,
     Event: COLOR_PALETTE.RED,
@@ -125,7 +166,7 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Definition: COLOR_PALETTE.TEAL,
     Source: COLOR_PALETTE.SLATE,
   },
-  
+
   math: {
     Topic: COLOR_PALETTE.BLUE,
     Subtopic: COLOR_PALETTE.TEAL,
@@ -137,7 +178,7 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Proof: COLOR_PALETTE.ORANGE,
     Application: COLOR_PALETTE.VIOLET,
   },
-  
+
   mathematics: {
     Topic: COLOR_PALETTE.BLUE,
     Subtopic: COLOR_PALETTE.TEAL,
@@ -149,7 +190,7 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Proof: COLOR_PALETTE.ORANGE,
     Application: COLOR_PALETTE.VIOLET,
   },
-  
+
   science: {
     Topic: COLOR_PALETTE.BLUE,
     Subtopic: COLOR_PALETTE.TEAL,
@@ -168,7 +209,7 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Evolution: COLOR_PALETTE.ROSE,
     Discovery: COLOR_PALETTE.FUCHSIA,
   },
-  
+
   default: {
     Topic: COLOR_PALETTE.BLUE,
     Subtopic: COLOR_PALETTE.TEAL,
@@ -177,53 +218,6 @@ const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } }
     Source: COLOR_PALETTE.SLATE,
     Application: COLOR_PALETTE.ORANGE,
   },
-};
-
-const nodeStyles = {
-  padding: '12px 20px',
-  fontSize: '18px',
-  fontWeight: '500' as const,
-  textAlign: 'center' as const,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: 'white',
-  letterSpacing: '0.5px',
-  lineHeight: '1.3',
-  width: '100%',
-  height: '100%',
-  margin: 0,
-  boxSizing: 'border-box' as const,
-  borderRadius: '24px',
-};
-
-const NodeTooltip = ({ content }: { content: string }) => {
-  if (!content) return null;
-  
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        bottom: '80px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        background: 'rgba(0, 0, 0, 0.85)',
-        color: 'white',
-        padding: '8px 12px',
-        borderRadius: '4px',
-        fontSize: '13px',
-        pointerEvents: 'none',
-        zIndex: 1000,
-        maxWidth: '250px',
-        whiteSpace: 'normal',
-        wordBreak: 'break-word',
-        textAlign: 'left',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-      }}
-    >
-      {content}
-    </div>
-  );
 };
 
 // Loading screen component
@@ -404,8 +398,9 @@ const NodeEditPopup = ({
         background: 'white',
         borderRadius: '10px',
         boxShadow: '0 8px 30px rgba(0,0,0,0.18)',
-        padding: '16px',
+        padding: '12px',
         width: `${NODE_EDIT_POPUP_WIDTH}px`,
+        boxSizing: 'border-box',
         border: '1px solid #e5e7eb',
       }}
     >
@@ -416,24 +411,24 @@ const NodeEditPopup = ({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          marginBottom: '12px',
+          marginBottom: '8px',
           cursor: 'move',
           userSelect: 'none',
         }}
       >
-        <span style={{ fontWeight: '600', fontSize: '14px', color: '#111827' }}>Edit Node</span>
+        <span style={{ fontWeight: '600', fontSize: '13px', color: '#111827' }}>Edit Node</span>
         <button
           onMouseDown={(e) => e.stopPropagation()}
           onClick={onClose}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}
         >
-          <X className="w-4 h-4" style={{ color: '#6b7280' }} />
+          <X className="w-3.5 h-3.5" style={{ color: '#6b7280' }} />
         </button>
       </div>
 
       {/* Label field */}
-      <div style={{ marginBottom: '12px' }}>
-        <label style={{ fontSize: '12px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '4px' }}>
+      <div style={{ marginBottom: '8px' }}>
+        <label style={{ fontSize: '11px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '3px' }}>
           Label
         </label>
         <input
@@ -442,10 +437,10 @@ const NodeEditPopup = ({
           onChange={(e) => setLabel(e.target.value)}
           style={{
             width: '100%',
-            padding: '7px 10px',
+            padding: '5px 8px',
             borderRadius: '6px',
             border: '1px solid #d1d5db',
-            fontSize: '13px',
+            fontSize: '12px',
             color: '#111827',
             outline: 'none',
             boxSizing: 'border-box',
@@ -456,18 +451,18 @@ const NodeEditPopup = ({
       </div>
 
       {/* Color picker */}
-      <div style={{ marginBottom: '14px' }}>
-        <label style={{ fontSize: '12px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '6px' }}>
+      <div style={{ marginBottom: '10px' }}>
+        <label style={{ fontSize: '11px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '3px' }}>
           Color
         </label>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
           {colorOptions.map((c) => (
             <button
               key={c}
               onClick={() => setColor(c)}
               style={{
-                width: '22px',
-                height: '22px',
+                width: '18px',
+                height: '18px',
                 borderRadius: '50%',
                 background: c,
                 border: color === c ? '2px solid #111827' : '2px solid transparent',
@@ -483,16 +478,16 @@ const NodeEditPopup = ({
       </div>
 
       {/* Preview */}
-      <div style={{ marginBottom: '14px' }}>
-        <label style={{ fontSize: '12px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '6px' }}>
+      <div style={{ marginBottom: '10px' }}>
+        <label style={{ fontSize: '11px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '3px' }}>
           Preview
         </label>
         <div style={{
           background: color,
           color: 'white',
-          padding: '8px 12px',
+          padding: '6px 10px',
           borderRadius: '6px',
-          fontSize: '13px',
+          fontSize: '12px',
           fontWeight: '500',
           textAlign: 'center',
           wordBreak: 'break-word',
@@ -507,12 +502,12 @@ const NodeEditPopup = ({
           onClick={onClose}
           style={{
             flex: 1,
-            padding: '7px',
+            padding: '5px',
             borderRadius: '6px',
             border: '1px solid #d1d5db',
             background: 'white',
             color: '#374151',
-            fontSize: '13px',
+            fontSize: '12px',
             cursor: 'pointer',
             fontWeight: '500',
           }}
@@ -523,12 +518,12 @@ const NodeEditPopup = ({
           onClick={() => { onSave(editState.nodeId, label, color); onClose(); }}
           style={{
             flex: 1,
-            padding: '7px',
+            padding: '5px',
             borderRadius: '6px',
             border: 'none',
             background: '#14b8a6',
             color: 'white',
-            fontSize: '13px',
+            fontSize: '12px',
             cursor: 'pointer',
             fontWeight: '500',
           }}
@@ -540,170 +535,102 @@ const NodeEditPopup = ({
   );
 };
 
-// Function to render confidence circles based on score
-const renderConfidenceCircles = (confidenceScore: number | null) => {
-  if (confidenceScore === null || confidenceScore === undefined) {
-    return (
-      <div style={{
-        position: 'absolute',
-        top: '6px',
-        left: '6px',
-        display: 'flex',
-        gap: '3px',
-        zIndex: 10,
-      }}>
-        {[1, 2, 3].map(i => (
-          <div
-            key={i}
-            style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: 'transparent',
-              border: '1.5px solid rgba(255, 255, 255, 0.7)',
-            }}
-          />
-        ))}
-      </div>
-    );
-  }
-
-  let filledCircles = 0;
-  if (confidenceScore > 0.7) {
-    filledCircles = 3;
-  } else if (confidenceScore > 0.4) {
-    filledCircles = 2;
-  } else if (confidenceScore > 0.0) {
-    filledCircles = 1;
-  } else {
-    filledCircles = 0;
-  }
-
-  return (
-    <div style={{
-      position: 'absolute',
-      top: '6px',
-      left: '6px',
-      display: 'flex',
-      gap: '3px',
-      zIndex: 10,
-    }}>
-      {[1, 2, 3].map(i => (
-        <div
-          key={i}
-          style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
-            backgroundColor: i <= filledCircles ? 'rgba(255, 255, 255, 0.9)' : 'transparent',
-            border: '1.5px solid rgba(255, 255, 255, 0.7)',
-          }}
-        />
-      ))}
-    </div>
-  );
-};
-
-// We need a global callback ref for the node edit popup trigger
-// This lets CustomNode (which doesn't have direct access to parent state) fire an event upward
-const nodeClickCallbacks = new Map<string, (e: React.MouseEvent) => void>();
-
-const CustomNode = memo((props: CustomNodeProps) => {
-  const { data, style = {}, id } = props;
-  const [showTooltip, setShowTooltip] = useState(false);
-  
-  const truncateText = (text: string) => {
-    if (!text) return '';
-    if (text.length <= 30) return text;
-    return text.substring(0, 30) + '...';
-  };
-
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const cb = nodeClickCallbacks.get('onNodeEdit');
-    if (cb) cb({ ...e, currentTarget: e.currentTarget, target: e.target } as React.MouseEvent);
-    // Store node info for the popup
-    const preferredX = e.clientX - NODE_EDIT_POPUP_WIDTH / 2;
-    const preferredYAbove = e.clientY - NODE_EDIT_POPUP_HEIGHT - 12;
-    const preferredYBelow = e.clientY + 12;
-    const maxX = window.innerWidth - NODE_EDIT_POPUP_WIDTH - VIEWPORT_PADDING;
-    const maxY = window.innerHeight - NODE_EDIT_POPUP_HEIGHT - VIEWPORT_PADDING;
-    const x = clamp(preferredX, VIEWPORT_PADDING, maxX);
-    const y = clamp(preferredYAbove > VIEWPORT_PADDING ? preferredYAbove : preferredYBelow, VIEWPORT_PADDING, maxY);
-    (window as any).__pendingNodeEdit = {
-      nodeId: id,
-      label: data.label,
-      color: (style as any).background || '#3b82f6',
-      x,
-      y,
-    };
-    window.dispatchEvent(new CustomEvent('node-edit-request'));
-  };
-  
-  return (
-    <>
-      <Handle 
-        type="target" 
-        position={Position.Top} 
-        style={{ background: '#555', width: '8px', height: '8px', top: '-4px' }} 
-      />
-      <div
-        style={{
-          ...nodeStyles,
-          ...style,
-          position: 'relative',
-          cursor: 'pointer',
-        }}
-        onMouseEnter={() => setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
-        onDoubleClick={handleDoubleClick}
-        title="Double-click to edit"
-      >
-        {renderConfidenceCircles(data.confidenceScore)}
-        {data.customLabel || truncateText(data.label)}
-      </div>
-      {showTooltip && !data.customLabel && <NodeTooltip content={data.description} />}
-      <Handle 
-        type="source" 
-        position={Position.Bottom} 
-        style={{ background: '#555', width: '8px', height: '8px', bottom: '-4px' }} 
-      />
-    </>
-  );
-});
-
-const nodeTypes = {
-  default: CustomNode,
-};
-
 const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptProgress, isLoading = false }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [activePathTargetId, setActivePathTargetId] = useState<string | null>(null);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [minimapLocked, setMinimapLocked] = useState(false);
-  const [currentSubject, setCurrentSubject] = useState<string>('default');
-  const [nodeTypesInGraph, setNodeTypesInGraph] = useState<Set<string>>(new Set());
-  
+
+  // Custom label/color edits by node id. Kept apart from the nodes so a restyle doesn't drop them,
+  // and tagged with the graph they were made on so a newly loaded graph doesn't inherit them.
+  const [nodeEditsState, setNodeEditsState] = useState<{ graph: BaseGraph | null; byId: Record<string, NodeEdit> }>(
+    { graph: null, byId: {} }
+  );
+
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<string[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
   const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword');
+  const searchContext = useMemo(() => ({
+    graph: data?.graph, graphId: data?.graph_id, query: searchQuery, mode: searchMode,
+  }), [data?.graph, data?.graph_id, searchQuery, searchMode]);
+  const [searchResponse, setSearchResponse] = useState<{
+    context: typeof searchContext; nodeIds: string[];
+  } | null>(null);
+  const [pendingSearchNavigation, setPendingSearchNavigation] = useState<typeof searchContext | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  // Hide previous hits immediately, including the debounce before a new request starts.
+  const hasCurrentSearchResponse = searchResponse?.context === searchContext;
+  const searchResults = useMemo(
+    () => searchResponse?.context === searchContext ? searchResponse.nodeIds : [],
+    [searchContext, searchResponse]
+  );
 
   // Node edit popup state
   const [nodeEditState, setNodeEditState] = useState<NodeEditState | null>(null);
 
-  // Listen for node edit requests from CustomNode
-  useEffect(() => {
-    const handler = () => {
-      const pending = (window as any).__pendingNodeEdit;
-      if (pending) {
-        setNodeEditState(pending);
-        (window as any).__pendingNodeEdit = null;
+  // Passes the edit callback to every GraphNode as a prop. Memoized so React Flow gets the same nodeTypes each render.
+  const nodeTypes = useMemo(() => ({
+    default: (props: NodeProps) => <GraphNode {...props} onEditRequest={setNodeEditState} />,
+  }), []);
+
+const graphTree = useMemo(
+  () =>
+    buildGraphTree(
+      data?.graph ?? {
+        nodes: [],
+        relationships: [],
       }
-    };
-    window.addEventListener('node-edit-request', handler);
-    return () => window.removeEventListener('node-edit-request', handler);
-  }, []);
+    ),
+  [data?.graph]
+);
+
+const activePath = useMemo(
+  () =>
+    activePathTargetId
+      ? getPathHighlight(graphTree, activePathTargetId)
+      : null,
+  [activePathTargetId, graphTree]
+);
+
+const clearActivePath = useCallback(() => {
+  setActivePathTargetId(null);
+}, []);
+
+const handleNodeClick = useCallback<NodeMouseHandler>(
+  (_, node) => {
+    if (node.id === graphTree.centerId) {
+      clearActivePath();
+      return;
+    }
+
+    setActivePathTargetId(node.id);
+  },
+  [clearActivePath, graphTree.centerId]
+);
+
+useEffect(() => {
+  const handleEscape = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      clearActivePath();
+    }
+  };
+
+  window.addEventListener('keydown', handleEscape);
+
+  return () => {
+    window.removeEventListener('keydown', handleEscape);
+  };
+}, [clearActivePath]);
+
+useEffect(() => {
+  if (
+    activePathTargetId &&
+    !graphTree.nodes.has(activePathTargetId)
+  ) {
+    clearActivePath();
+  }
+}, [activePathTargetId, clearActivePath, graphTree]);
 
   // Close popup when clicking elsewhere
   useEffect(() => {
@@ -715,57 +642,53 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
   }, [nodeEditState]);
 
   const handleNodeEditSave = (nodeId: string, label: string, color: string) => {
-    setNodes(prev => prev.map(node => {
-      if (node.id !== nodeId) return node;
-      return {
-        ...node,
-        data: { ...node.data, customLabel: label },
-        style: { ...node.style, background: color },
-      };
+    setNodeEditsState(prev => ({
+      graph: baseGraph,
+      byId: { ...(prev.graph === baseGraph ? prev.byId : {}), [nodeId]: { label, color } },
     }));
   };
 
   const getNodeLabel = (node: any) => {
     const nameBasedNodeTypes = [
-      'Topic', 'Subtopic', 'Event', 'Figure', 'Location', 
+      'Topic', 'Subtopic', 'Event', 'Figure', 'Location',
       'Concept', 'Document', 'Work', 'Author', 'LiteraryDevice',
       'Theme', 'CriticalTheory', 'Genre', 'Formula', 'Property',
       'Theorem', 'Proof', 'Equation', 'Principle', 'Theory',
       'Evidence', 'Scientist'
     ];
-    
+
     const shouldUseName = node.labels.some(label => nameBasedNodeTypes.includes(label));
-    
+
     const truncateText = (text: string, maxWords: number = 4): string => {
       const words = text.split(' ');
       if (words.length <= maxWords) return text;
       return words.slice(0, maxWords).join(' ') + '...';
     };
-    
+
     if (shouldUseName) {
       if (node.properties.name && node.properties.name.trim()) {
         return truncateText(node.properties.name.trim());
       }
     }
-    
+
     const possibleProperties = [
       'text', 'description', 'illustration', 'explanation',
       'content', 'title', 'label', 'summary', 'definition', 'name',
     ];
-    
+
     for (const prop of possibleProperties) {
       const value = node.properties[prop];
       if (value && typeof value === 'string' && value.trim()) {
         return truncateText(value.trim());
       }
     }
-    
+
     for (const [key, value] of Object.entries(node.properties || {})) {
       if (typeof value === 'string' && value.trim() && key !== 'id') {
         return truncateText(value.trim());
       }
     }
-    
+
     const nodeType = node.labels?.[0] || 'Node';
     console.warn('Node with no displayable properties, using fallback:', {
       labels: node.labels,
@@ -773,7 +696,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       id: node.id,
       fallback: nodeType
     });
-    
+
     return nodeType;
   };
 
@@ -784,99 +707,57 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     return color;
   };
 
-  const handleSearch = useCallback(async (query: string) => {
-    if (!query.trim() || !data?.graph) {
-      setSearchResults([]);
-      return;
-    }
+  useEffect(() => {
+    const { graph, graphId, query, mode } = searchContext;
+    setIsSearching(false);
+    if (!query.trim() || !graph || !graphId) return;
 
-    const graphId = (data as any).graph_id;
-    if (!graphId) return;
-
-    setIsSearching(true);
-    try {
-      const endpoint = searchMode === 'semantic' ? 'semantic-search-graph' : 'search-graph';
-      const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
-      const response = await fetch(url, { credentials: 'include' });
-      const result = await response.json();
-      if (result.status === 'success') {
-        setSearchResults(result.node_ids || []);
-      } else {
-        setSearchResults([]);
+    const controller = new AbortController();
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const endpoint = mode === 'semantic' ? 'semantic-search-graph' : 'search-graph';
+        const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${encodeURIComponent(graphId)}&query=${encodeURIComponent(query)}`;
+        const response = await fetch(url, { credentials: 'include', signal: controller.signal });
+        const result = await response.json();
+        if (!cancelled) {
+          setSearchResponse({ context: searchContext, nodeIds: result.status === 'success' ? result.node_ids || [] : [] });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('[Graph Search] Error:', error);
+          setSearchResponse({ context: searchContext, nodeIds: [] });
+        }
+      } finally {
+        if (!cancelled) setIsSearching(false);
       }
-    } catch (error) {
-      console.error('[Graph Search] Error:', error);
-      setSearchResults([]);
-    } finally {
-      setIsSearching(false);
-    }
-  }, [data, searchMode]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (searchQuery) handleSearch(searchQuery);
-      else setSearchResults([]);
     }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery, handleSearch]);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [searchContext]);
 
-  useEffect(() => {
-    if (searchResults.length > 0) {
-      setNodes(prevNodes => 
-        prevNodes.map(node => ({
-          ...node,
-          style: {
-            ...node.style,
-            border: searchResults.includes(node.id) 
-              ? '3px solid #fbbf24' 
-              : '1px solid rgba(255,255,255,0.2)',
-            boxShadow: searchResults.includes(node.id)
-              ? '0 0 15px rgba(251, 191, 36, 0.6)'
-              : 'none',
-            borderRadius: '24px',
-          }
-        }))
-      );
-    } else {
-      setNodes(prevNodes => 
-        prevNodes.map(node => ({
-          ...node,
-          style: {
-            ...node.style,
-            border: '1px solid rgba(255,255,255,0.2)',
-            boxShadow: 'none',
-            borderRadius: '24px',
-          }
-        }))
-      );
-    }
-  }, [searchResults, setNodes]);
+  // Graph structure: labels, colors, sizes and positions. Depends on the graph data only,
+  // so quiz answers, edits and search never re-run the layout. Styling is layered on below.
+  const baseGraph = useMemo((): BaseGraph | null => {
+    if (!data?.graph) return null;
 
-  const processGraphData = useCallback((graphData: GraphData) => {
-    if (!graphData) return;
-
-    const subject = graphData.subject || 'default';
-    setCurrentSubject(subject);
-
-    const confidenceMap = new Map<string, number>();
-    const confidenceByName = new Map<string, number>();
-    
-    conceptProgress.forEach(progress => {
-      confidenceMap.set(progress.conceptId, progress.confidenceScore);
-      const namePart = progress.conceptId.split('_').pop() || progress.conceptId;
-      confidenceByName.set(namePart.toLowerCase(), progress.confidenceScore);
-    });
+    const subject = data.subject || 'default';
 
     // One row per id: duplicate ids break React keys and inflate the graph.
     const seenNodeIds = new Set<string>();
-    const nodesInput = graphData.graph.nodes.filter((n) => {
+    const nodesInput = data.graph.nodes.filter((n) => {
       const id = String(n.id);
       if (seenNodeIds.has(id)) return false;
       seenNodeIds.add(id);
       return true;
     });
 
-    const processedEdges: Edge[] = graphData.graph.relationships.map((rel, i) => ({
+    // Edge ids end in the index into relationships[], which graphTree's parentEdgeIndex refers to
+    const processedEdges: Edge[] = data.graph.relationships.map((rel, i) => ({
       id: `${rel.source}-${rel.target}-${String(rel.type)}-${i}`,
       source: rel.source,
       target: rel.target,
@@ -884,7 +765,10 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       type: 'smoothstep',
       style: { stroke: '#888', strokeWidth: 2 },
       labelStyle: { fill: '#888', fontSize: 10 },
-      animated: true,
+      animated: false,
+      data: {
+        graphEdgeIndex: i,
+      },
     }));
 
     // Node Sizing
@@ -897,16 +781,13 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target)
     );
 
+    // Sizing ignores confidence (confidenceWeight defaults to 0), so it doesn't need scores here
     const { sizes, connectionCount } = computeNodeSizes(
       nodeIds,
       safeEdges,
-      confidenceMap,
+      new Map(),
       { scale: 'log' }
     );
-
-    const allWidths = [...sizes.values()].map(s => s.width).sort((a, b) => a - b);
-    const medianWidth = allWidths[Math.floor(allWidths.length / 2)] ?? 200;
-    const layoutSpacing = Math.max(360, medianWidth + 100);
 
     const connectedNodeIds = new Set<string>();
     safeEdges.forEach(edge => {
@@ -916,8 +797,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
     const isFallbackLabel = (label: string, nodeType: string): boolean => {
       const normalizedLabel = label.toLowerCase().trim();
-      return label === nodeType || 
-             label === 'Node' || 
+      return label === nodeType ||
+             label === 'Node' ||
              normalizedLabel === 'other' ||
              normalizedLabel === 'unknown' ||
              normalizedLabel === 'undefined' ||
@@ -925,58 +806,38 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
              normalizedLabel === '';
     };
 
-    const nodeTypeColorMap = new Map<string, string>();
-    
+    const confidenceKeys: ConfidenceKeys[] = [];
+    const nodeTypes: string[] = [];
+
     const processedNodes: Node[] = nodesInput
       .map((node) => {
         const nodeType = node.labels[0];
         const nodeColor = getNodeColor(nodeType, subject);
         const nodeLabel = getNodeLabel(node);
-        
-        if (!nodeTypeColorMap.has(nodeType)) {
-          nodeTypeColorMap.set(nodeType, nodeColor);
-        }
-        
+
         const hasFallbackLabel = isFallbackLabel(nodeLabel, nodeType);
         const hasConnections = connectedNodeIds.has(node.id);
-        
+
         if (hasFallbackLabel && !hasConnections) {
           return null;
         }
-        
-        let confidenceScore = confidenceMap.get(node.id) ?? null;
-        
-        if (confidenceScore === null) {
-          const possibleIds = [
+
+        if (!nodeTypes.includes(nodeType)) nodeTypes.push(nodeType);
+
+        confidenceKeys.push({
+          nodeId: node.id,
+          altIds: [
             node.properties.conceptId,
             node.properties.topicId,
             node.properties.topicID,
             node.properties.topic_id,
             node.properties.concept_id,
             node.properties.id,
-          ].filter(Boolean);
-          
-          for (const possibleId of possibleIds) {
-            confidenceScore = confidenceMap.get(String(possibleId)) ?? null;
-            if (confidenceScore !== null) break;
-          }
-        }
-        
-        if (confidenceScore === null && node.properties.name) {
-          const nodeName = node.properties.name.toLowerCase();
-          confidenceScore = confidenceByName.get(nodeName) ?? null;
-        }
-        
-        if (confidenceScore === null) {
-          for (const [conceptId, score] of confidenceMap.entries()) {
-            if (conceptId.includes(node.id) || node.id.includes(conceptId)) {
-              confidenceScore = score;
-              break;
-            }
-          }
-        }
-        
-        const size = sizes.get(node.id) ?? { width: 200, height: 70 };
+          ].filter(Boolean).map(String),
+          name: node.properties.name || undefined,
+        });
+
+        const size = sizes.get(node.id) ?? DEFAULT_NODE_SIZE;
         return {
           id: node.id,
           type: 'default',
@@ -985,14 +846,14 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
             description: node.properties.description || node.properties.text,
             type: nodeType,
             subject: subject,
-            confidenceScore: confidenceScore,
             connections: connectionCount.get(node.id) ?? 0,  // expose for tooltip
+            color: nodeColor,
           },
           position: { x: 0, y: 0 },
           style: {
             background: nodeColor,
             color: '#ffffff',
-            border: '1px solid rgba(255,255,255,0.2)',
+            border: DEFAULT_NODE_BORDER,
             width: `${size.width}px`,
             height: `${size.height}px`,
             padding: 0,
@@ -1010,115 +871,166 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
       validNodeIds.has(edge.source) && validNodeIds.has(edge.target)
     );
 
-    const nodePositions = forceDirectedLayout(processedNodes, validEdges, layoutSpacing);
-    processedNodes.forEach((node, index) => {
-      node.position = nodePositions[index];
+    const nodePositions = layoutRadially(processedNodes, graphTree, sizes);
+    processedNodes.forEach(node => {
+      node.position = nodePositions.get(node.id) ?? { x: 0, y: 0 };
     });
 
-    setNodes(processedNodes);
-    setEdges(validEdges);
-    
-    const typesInGraph = new Set<string>();
-    processedNodes.forEach(node => {
-      if (node.data?.type) typesInGraph.add(node.data.type);
+    return { subject, nodes: processedNodes, edges: validEdges, confidenceKeys, nodeTypes };
+  }, [data, graphTree]);
+
+  // The center and its nearest rings, for the first view of each graph
+  const initialFocusNodes = useMemo(() => {
+    if (!baseGraph) return [];
+    const rendered = new Set(baseGraph.nodes.map(node => node.id));
+    return graphTree.order
+      .filter(id => rendered.has(id) && (graphTree.nodes.get(id)?.depth ?? Infinity) <= INITIAL_FOCUS_DEPTH)
+      .map(id => ({ id }));
+  }, [baseGraph, graphTree]);
+
+  // Styling layers, each its own piece of state, combined in one place
+  const confidenceScores = useMemo(
+    () => resolveConfidenceScores(baseGraph?.confidenceKeys ?? [], conceptProgress),
+    [baseGraph, conceptProgress]
+  );
+  const nodeEdits = useMemo(
+    () => (nodeEditsState.graph === baseGraph ? nodeEditsState.byId : {}),
+    [nodeEditsState, baseGraph]
+  );
+  // The search API may return numeric ids; node ids are strings
+  const searchHits = useMemo(() => new Set(searchResults.map(String)), [searchResults]);
+  const collapse = useCollapse(graphTree, baseGraph?.nodes);
+
+  const styledGraph = useMemo(
+    () => baseGraph && applyGraphStyles(baseGraph, { confidenceScores, nodeEdits, searchHits, activePath, collapse: collapse.layer }),
+    [baseGraph, confidenceScores, nodeEdits, searchHits, activePath, collapse.layer]
+  );
+
+  // Push the styled graph into React Flow. A new base graph replaces everything; a style-only
+  // change keeps what React Flow tracks itself (dragged positions, measured sizes, selection).
+  const syncedBaseRef = useRef<BaseGraph | null>(null);
+  useEffect(() => {
+    if (!styledGraph) return;
+
+    if (syncedBaseRef.current !== baseGraph) {
+      syncedBaseRef.current = baseGraph;
+      setNodes(styledGraph.nodes);
+      setEdges(styledGraph.edges);
+      return;
+    }
+
+    setNodes(prev => {
+      const prevById = new Map(prev.map(node => [node.id, node]));
+      return styledGraph.nodes.map(node => {
+        const current = prevById.get(node.id);
+        // A node that gets hidden is deselected too, so Backspace can't delete it unseen
+        return current ? { ...current, data: node.data, style: node.style, hidden: node.hidden, selected: current.selected && !node.hidden } : node;
+      });
     });
-    setNodeTypesInGraph(typesInGraph);
-  }, [setNodes, setEdges, conceptProgress]);
+    setEdges(prev => {
+      const prevById = new Map(prev.map(edge => [edge.id, edge]));
+      return styledGraph.edges.map(edge => {
+        const current = prevById.get(edge.id);
+        return current ? { ...edge, selected: current.selected && !edge.hidden } : edge;
+      });
+    });
+  }, [baseGraph, styledGraph, setNodes, setEdges]);
+
+  // Normal relationship labels stay hidden until their edge is hovered. Path edges
+  // keep the label and animation supplied by applyGraphStyles.
+  const visibleEdges = useMemo(() => {
+    const baseEdgesById = new Map(
+      (baseGraph?.edges ?? []).map(edge => [edge.id, edge])
+    );
+
+    return edges.map(edge => {
+      const hovered = edge.id === hoveredEdgeId;
+      if (!hovered || edge.animated) return edge;
+
+      const baseEdge = baseEdgesById.get(edge.id);
+      return {
+        ...edge,
+        label: baseEdge?.label,
+        labelStyle: {
+          ...edge.labelStyle,
+          fill: '#374151',
+        },
+        zIndex: Math.max(Number(edge.zIndex ?? 0), 1),
+      };
+    });
+  }, [baseGraph, edges, hoveredEdgeId]);
+
+  // Search hits as list rows, in the order the API ranked them
+  const searchResultItems = useMemo(
+    () => buildSearchResultItems(searchResults.map(String), styledGraph?.nodes ?? [], graphTree),
+    [searchResults, styledGraph, graphTree]
+  );
+
+  // Zoom to the center's nearest rings once per graph, after its nodes reach React Flow
+  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
+
+  // Open a search result: show its path and pan to it, keeping the current zoom unless it's too far out to read.
+  // TODO(C1): call expandTo(nodeId) first so a result inside a collapsed branch is shown.
+  const handleSearchResultClick = useCallback((nodeId: string) => {
+    if (nodeId === graphTree.centerId) clearActivePath();
+    else setActivePathTargetId(nodeId);
+
+    if (!flowInstance) return;
+    requestAnimationFrame(() => {
+      const node = flowInstance.getNode(nodeId);
+      if (!node) return;
+      const position = node.positionAbsolute ?? node.position;
+      const width = node.width ?? DEFAULT_NODE_SIZE.width;
+      const height = node.height ?? DEFAULT_NODE_SIZE.height;
+      flowInstance.setCenter(position.x + width / 2, position.y + height / 2, {
+        zoom: Math.max(flowInstance.getZoom(), SEARCH_RESULT_MIN_ZOOM),
+        duration: 600,
+      });
+    });
+  }, [clearActivePath, flowInstance, graphTree.centerId]);
 
   useEffect(() => {
-    if (data?.graph) {
-      processGraphData(data);
+    if (!pendingSearchNavigation) return;
+    if (pendingSearchNavigation !== searchContext) {
+      setPendingSearchNavigation(null);
+      return;
     }
-  }, [data, processGraphData]);
-
-  const forceDirectedLayout = (nodes: Node[], edges: Edge[], spacing: number = 360) => {
-    const positions: { x: number; y: number }[] = [];
-    const width = Math.max(1000, nodes.length * 200);
-    const height = Math.max(800, nodes.length * 150);
-    
-    const cols = Math.ceil(Math.sqrt(nodes.length));
-    nodes.forEach((_, index) => {
-      const row = Math.floor(index / cols);
-      const col = index % cols;
-      positions.push({
-        x: col * spacing + (Math.random() * 50 - 25),
-        y: row * spacing + (Math.random() * 50 - 25),
-      });
+    if (!hasCurrentSearchResponse) return;
+    setPendingSearchNavigation(null);
+    if (searchResultItems.length > 0) handleSearchResultClick(searchResultItems[0].id);
+  }, [pendingSearchNavigation, searchContext, hasCurrentSearchResponse, searchResultItems, handleSearchResultClick]);
+  const fittedBaseRef = useRef<BaseGraph | null>(null);
+  useEffect(() => {
+    if (!flowInstance || !baseGraph || fittedBaseRef.current === baseGraph || initialFocusNodes.length === 0) return;
+    fittedBaseRef.current = baseGraph;
+    const frame = requestAnimationFrame(() => {
+      flowInstance.fitView({ nodes: initialFocusNodes, padding: 0.2, minZoom: 0.1, maxZoom: 1, duration: 600 });
     });
+    return () => cancelAnimationFrame(frame);
+  }, [flowInstance, baseGraph, initialFocusNodes]);
 
-    const iterations = 50;
-    for (let i = 0; i < iterations; i++) {
-      for (let j = 0; j < nodes.length; j++) {
-        for (let k = j + 1; k < nodes.length; k++) {
-          const dx = positions[k].x - positions[j].x;
-          const dy = positions[k].y - positions[j].y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          if (distance < spacing) {
-            const force = (spacing - distance) / distance;
-            const moveX = dx * force * 0.1;
-            const moveY = dy * force * 0.1;
-            positions[k].x += moveX;
-            positions[k].y += moveY;
-            positions[j].x -= moveX;
-            positions[j].y -= moveY;
-          }
-        }
-      }
-
-      edges.forEach(edge => {
-        const sourceIndex = nodes.findIndex(n => n.id === edge.source);
-        const targetIndex = nodes.findIndex(n => n.id === edge.target);
-        if (sourceIndex >= 0 && targetIndex >= 0) {
-          const dx = positions[targetIndex].x - positions[sourceIndex].x;
-          const dy = positions[targetIndex].y - positions[sourceIndex].y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          if (distance > spacing) {
-            const force = (distance - spacing) / distance;
-            const moveX = dx * force * 0.05;
-            const moveY = dy * force * 0.05;
-            positions[sourceIndex].x += moveX;
-            positions[sourceIndex].y += moveY;
-            positions[targetIndex].x -= moveX;
-            positions[targetIndex].y -= moveY;
-          }
-        }
-      });
-    }
-
-    const minX = Math.min(...positions.map(p => p.x));
-    const maxX = Math.max(...positions.map(p => p.x));
-    const minY = Math.min(...positions.map(p => p.y));
-    const maxY = Math.max(...positions.map(p => p.y));
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-    
-    positions.forEach(pos => {
-      pos.x = pos.x - centerX + width / 2;
-      pos.y = pos.y - centerY + height / 2;
-    });
-
-    return positions;
-  };
 
   // Show loading/empty state
   if (!data?.graph) {
     return <GraphLoadingScreen isLoading={isLoading} />;
   }
 
-  const legendEntries = Array.from(nodeTypesInGraph).map(type => ({
+  const legendEntries = (baseGraph?.nodeTypes ?? []).map(type => ({
     type,
-    color: getNodeColor(type, currentSubject)
+    color: getNodeColor(type, baseGraph?.subject)
   })).sort((a, b) => a.type.localeCompare(b.type));
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* Node Edit Popup */}
-      {nodeEditState && (
+      {/* Node Edit Popup. Portaled to <body> because the Chat page wraps the graph in a
+          backdrop-blur panel, which would make position: fixed relative to that panel. */}
+      {nodeEditState && createPortal(
         <NodeEditPopup
           editState={nodeEditState}
           onClose={() => setNodeEditState(null)}
           onSave={handleNodeEditSave}
-        />
+        />,
+        document.body
       )}
 
       {/* Hint tooltip */}
@@ -1135,7 +1047,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
         borderRadius: '20px',
         pointerEvents: 'none',
       }}>
-        Double-click a node to edit
+        Click a node to see its path
       </div>
 
       {/* Search Bar */}
@@ -1162,6 +1074,12 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || !searchQuery.trim()) return;
+              e.preventDefault();
+              if (!hasCurrentSearchResponse) setPendingSearchNavigation(searchContext);
+              else if (searchResultItems.length > 0) handleSearchResultClick(searchResultItems[0].id);
+            }}
             placeholder="Search topics, concepts, definitions..."
             style={{
               flex: 1,
@@ -1221,21 +1139,98 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
             </button>
           </div>
         </div>
-        {searchResults.length > 0 && (
+        {SHOW_PATH_BAR && (
+          <div style={{ marginTop: '10px' }}>
+            <PathBar
+              steps={[
+                { id: 'linear-algebra', label: 'Linear Algebra' },
+                { id: 'vector-spaces', label: 'Vector spaces' },
+                { id: 'eigenvalues', label: 'Eigenvalues' },
+              ]}
+              onStepClick={() => { }}
+              onFocus={() => { }}
+              onClear={() => { }}
+            />
+          </div>
+        )}
+        {searchResultItems.length > 0 && (
           <div style={{
             marginTop: '8px',
-            padding: '8px 12px',
             background: 'white',
             borderRadius: '8px',
             boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
             fontSize: '12px',
             color: '#6b7280',
+            overflow: 'hidden',
           }}>
-            Found {searchResults.length} matching node{searchResults.length !== 1 ? 's' : ''}
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6' }}>
+              Found {searchResultItems.length} matching node{searchResultItems.length !== 1 ? 's' : ''}
+            </div>
+            <ul style={{ listStyle: 'none', margin: 0, padding: '4px 0', maxHeight: '240px', overflowY: 'auto' }}>
+              {searchResultItems.map(item => {
+                const isActive = item.id === activePathTargetId;
+                return (
+                  <li key={item.id}>
+                    <button
+                      onClick={() => handleSearchResultClick(item.id)}
+                      title={item.trail.length > 0 ? [...item.trail, item.label].join(' › ') : item.label}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        width: '100%',
+                        padding: '6px 12px',
+                        border: 'none',
+                        background: isActive ? 'rgba(212, 88, 28, 0.08)' : 'transparent',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        font: 'inherit',
+                      }}
+                      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#f9fafb'; }}
+                      onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span style={{
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        background: item.color,
+                        flexShrink: 0,
+                      }} />
+                      <span style={{ minWidth: 0, flex: 1 }}>
+                        <span style={{
+                          display: 'block',
+                          fontSize: '13px',
+                          color: isActive ? PATH_COLOR : '#1f2937',
+                          fontWeight: isActive ? 600 : 500,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {item.label}
+                        </span>
+                        {item.trail.length > 0 && (
+                          <span style={{
+                            display: 'block',
+                            fontSize: '11px',
+                            color: '#9ca3af',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {item.trail.join(' › ')}
+                          </span>
+                        )}
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#9ca3af', flexShrink: 0 }}>{item.type}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         )}
       </div>
-      
+
       {/* Legend */}
       {legendEntries.length > 0 && (
         <div style={{
@@ -1286,24 +1281,33 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={visibleEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeClick={handleNodeClick}
+        onPaneClick={clearActivePath}
+        onEdgeMouseEnter={(_, edge) => {
+          setHoveredEdgeId(edge.id);
+        }}
+        onEdgeMouseLeave={(_, edge) => {
+          setHoveredEdgeId(currentId =>
+            currentId === edge.id ? null : currentId
+          );
+        }}
         nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.5, minZoom: 0.1, maxZoom: 1, duration: 800 }}
+        onInit={setFlowInstance}
         minZoom={0.1}
         maxZoom={4}
         defaultViewport={{ x: 0, y: 0, zoom: 0.2 }}
         defaultEdgeOptions={{
           type: 'smoothstep',
-          animated: true,
+          animated: false,
           style: { strokeWidth: 2 },
           labelStyle: { fontSize: 12, fill: '#888' },
         }}
       >
         <Background color="#888" gap={16} />
-        <Controls 
+        <Controls
           showZoom={true}
           showFitView={true}
           position="bottom-right"
@@ -1329,14 +1333,14 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
             {minimapLocked ? '🔒' : '🔓'}
           </button>
         </Controls>
-        <MiniMap 
-          style={{ 
+        <MiniMap
+          style={{
             background: 'rgba(255,255,255,0.1)',
             position: 'absolute',
             right: minimapLocked ? '0' : '20px',
             bottom: minimapLocked ? '0' : '20px',
           }}
-          nodeColor={(n) => (n.style?.background as string) || '#fff'} 
+          nodeColor={(n) => (n.style?.background as string) || '#fff'}
           zoomable={!minimapLocked}
           pannable={!minimapLocked}
           maskColor="rgba(0, 0, 0, 0.2)"

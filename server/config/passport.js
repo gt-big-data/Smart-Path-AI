@@ -15,6 +15,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const passport_1 = __importDefault(require("passport"));
 const passport_google_oauth20_1 = require("passport-google-oauth20");
 const User_1 = __importDefault(require("../models/User"));
+const googleCallbackUrl = process.env.GOOGLE_CALLBACK_URL ||
+    (process.env.SERVER_PUBLIC_URL
+        ? `${process.env.SERVER_PUBLIC_URL}/auth/google/callback`
+        : process.env.NODE_ENV === 'production'
+            ? 'https://smartpath-node-backend-361386464842.us-east1.run.app/auth/google/callback'
+            : 'http://localhost:4000/auth/google/callback');
 passport_1.default.serializeUser((user, done) => {
     done(null, user.id);
 });
@@ -30,7 +36,7 @@ passport_1.default.deserializeUser((id, done) => __awaiter(void 0, void 0, void 
 passport_1.default.use(new passport_google_oauth20_1.Strategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: process.env.GOOGLE_CALLBACK_URL || `${process.env.SERVER_PUBLIC_URL || 'https://smartpath-node-backend-361386464842.us-east1.run.app'}/auth/google/callback`,
+    callbackURL: googleCallbackUrl,
 }, (accessToken, refreshToken, profile, done) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {

@@ -4,12 +4,14 @@ import axios from 'axios';
 // Must match server runtime: use PYTHON_SERVICE_URL (e.g. Cloud Run AI URL or local dev).
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || 'https://smartpath-backend-361386464842.us-east1.run.app';
+const QUIZ_CLARIFY_SERVICE_TOKEN = process.env.QUIZ_CLARIFY_SERVICE_TOKEN;
 
 export const pythonServiceClient = axios.create({
   baseURL: PYTHON_SERVICE_URL,
   timeout: 120000, // 120 seconds (2 minutes) timeout for AI operations
   headers: {
     'Content-Type': 'application/json',
+    ...(QUIZ_CLARIFY_SERVICE_TOKEN ? { 'X-Quiz-Clarify-Token': QUIZ_CLARIFY_SERVICE_TOKEN } : {}),
   },
 });
 

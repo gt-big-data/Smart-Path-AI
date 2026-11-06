@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import OpenAI from 'openai';
 import ConceptProgress from '../models/ConceptProgress';
 import { pythonServiceClient } from '../utils/axiosConfig';
+import { calculateDecayedConfidence } from '../utils/confidenceDecay';
 
 // Initialize OpenAI with explicit API key
 const openai = new OpenAI({
@@ -28,6 +29,10 @@ const updateConfidenceScore = async (userId: string, conceptId: string, isCorrec
     progress = new ConceptProgress({ user: userId, conceptId, confidenceScore: 0.5 });
   }
 
+  const now = new Date();
+  progress.confidenceScore = calculateDecayedConfidence(
+    progress.confidenceScore, progress.lastAttempted, now.getTime(),
+  );
   if (isCorrect) {
     progress.confidenceScore += isRetry ? 0.05 : 0.1;
   } else {
@@ -36,6 +41,7 @@ const updateConfidenceScore = async (userId: string, conceptId: string, isCorrec
 
   // Clamp the score between 0 and 1
   progress.confidenceScore = Math.max(0, Math.min(1, progress.confidenceScore));
+  progress.lastAttempted = now;
 
   await progress.save();
   console.log(`Updated confidence score for concept ${conceptId} to ${progress.confidenceScore}`);
@@ -139,6 +145,7 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
         question: q.text || '',
         answer: q.correct_answer || '',
         conceptId: conceptId,
+        conceptName: q.concept_name || '',
         // Optional metadata for future UI use
         id: q.id,
         explanation: q.explanation,
@@ -174,6 +181,17 @@ const normalizeAnswer = (value: string = ''): string =>
     .toLowerCase()
     .replace(/[^\w\s]/g, '')
     .replace(/\s+/g, ' ');
+
+// Multiple-choice and true/false questions have exactly one right answer, so grade them exactly
+// instead of by LLM judgment. Returns null for open-ended questions.
+export const exactChoiceVerdict = (userAnswer: string, correctAnswer: string): boolean | null => {
+  const correct = correctAnswer.trim().toUpperCase();
+  const user = userAnswer.trim().toUpperCase();
+  if (/^[A-D]$/.test(correct)) return user.match(/^([A-D])(?:[).:\s]|$)/)?.[1] === correct;
+  const trueFalse = (value: string) => (value === 'T' || value === 'TRUE' ? 'TRUE' : value === 'F' || value === 'FALSE' ? 'FALSE' : null);
+  if (trueFalse(correct)) return trueFalse(user) === trueFalse(correct);
+  return null;
+};
 
 const evaluateAnswerFallback = (userAnswer: string, correctAnswer: string) => {
   const normalizedUser = normalizeAnswer(userAnswer);
@@ -225,6 +243,8 @@ export const verifyAnswer = async (req: Request, res: Response) => {
       });
     }
 
+    const exact = exactChoiceVerdict(userAnswer, correctAnswer || '');
+
     // Construct the prompt for GPT
     const systemPrompt = `You are an educational assistant that evaluates student answers based on conceptual understanding rather than exact wording.
 Your role is to:
@@ -247,7 +267,7 @@ Return valid JSON only.`;
 Question: "${question}"
 Student's Answer: "${userAnswer}"
 Reference Correct Answer: "${correctAnswer || ''}"
-
+${exact === null ? '' : `\nThis is a multiple-choice or true/false question, and the student's answer is ${exact ? 'CORRECT' : 'INCORRECT'}. Your feedback must match that.\n`}
 Provide feedback in this JSON format:
 {
   "isCorrect": boolean (true if understanding is demonstrated, even if not perfectly worded),
@@ -281,7 +301,7 @@ Provide feedback in this JSON format:
         .replace(/\s*```$/, '')
         .trim();
       const result = JSON.parse(cleaned);
-      const isCorrect = result.score >= 70;
+      const isCorrect = exact ?? result.score >= 70;
 
       // Update confidence score
       await updateConfidenceScoreSafe(userId, conceptId, isCorrect, isRetry || false);
@@ -290,8 +310,8 @@ Provide feedback in this JSON format:
       const transformedResult = {
         isCorrect, // Consider answers with 70% or higher understanding as correct
         feedback: result.feedback,
-        followUpQuestion: result.score >= 70 
-          ? result.thinkingPrompt 
+        followUpQuestion: isCorrect
+          ? result.thinkingPrompt
           : `Hint: ${result.conceptualHint}`
       };
       res.json(transformedResult);
@@ -530,5 +550,34 @@ export const semanticSearchGraph = async (req: Request, res: Response) => {
     // Return the actual error from Python service if available
     const errorMessage = error.response?.data?.error || error.response?.data?.message || 'Failed to perform semantic search';
     res.status(error.response?.status || 500).json({ error: errorMessage });
+  }
+};
+
+// Quiz clarifications use their own AI endpoint: the chat one answers directly and pulls in graph facts that give answers away
+export const clarifyQuizQuestion = async (req: Request, res: Response) => {
+  const userId = (req.session as any)?.passport?.user;
+  if (!userId) {
+    return res.status(401).json({ error: 'User not authenticated' });
+  }
+  if (!process.env.QUIZ_CLARIFY_SERVICE_TOKEN) {
+    console.error('QUIZ_CLARIFY_SERVICE_TOKEN is not configured');
+    return res.status(503).json({ error: 'Quiz clarification service is not configured' });
+  }
+
+  const { question, studentQuestion, correctAnswer } = req.body || {};
+  if (!question || !studentQuestion?.trim() || !correctAnswer) {
+    return res.status(400).json({ error: 'question, studentQuestion and correctAnswer are required' });
+  }
+
+  try {
+    const response = await pythonServiceClient.post('/clarify-quiz-question', {
+      question,
+      student_question: studentQuestion,
+      correct_answer: correctAnswer,
+    });
+    res.json({ message: response.data.message });
+  } catch (error: any) {
+    console.error('Error clarifying quiz question:', error.response?.data || error.message);
+    res.status(error.response?.status || 500).json({ error: 'Failed to clarify quiz question' });
   }
 };

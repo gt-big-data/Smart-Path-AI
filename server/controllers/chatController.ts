@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import User, { IChat } from '../models/User';
+import User, { IUser, IChat } from '../models/User';
 import { v4 as uuidv4 } from 'uuid';
 import mongoose from 'mongoose';
 
@@ -335,5 +335,208 @@ export const renameChat = async (req: Request, res: Response): Promise<void> => 
   } catch (error) {
     console.error('Rename chat error:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// Create a new folder
+export const createFolder = async (req: Request, res: Response) => {
+  try {
+    const rawUserId = (req.session as any)?.passport?.user || req.session?.userId || (req.user as any)?._id;
+    
+    if (!rawUserId) {
+      return res.status(401).json({ message: 'Unauthorized: Session missing user ID' });
+    }
+
+    // Extract raw string if Passport serialized an object
+    const userId = typeof rawUserId === 'object' && rawUserId._id ? rawUserId._id : rawUserId;
+
+    const { name, parent_folder_id } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Folder name is required' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      console.error('[createFolder] User ID in session not found in DB:', userId);
+      return res.status(404).json({ message: 'User record not found in database' });
+    }
+
+    if (parent_folder_id && !user.folders.some((folder) => folder.folder_id === parent_folder_id)) {
+      return res.status(404).json({ message: 'Parent folder not found' });
+    }
+
+    const newFolder = {
+      folder_id: uuidv4(),
+      name: name.trim(),
+      date_created: new Date(),
+      parent_folder_id: parent_folder_id || null,
+    };
+    user.folders.push(newFolder);
+    await user.save();
+
+    console.log('[createFolder] Folder created successfully:', newFolder);
+    return res.status(201).json(newFolder);
+  } catch (error) {
+    console.error('[createFolder] Internal error:', error);
+    return res.status(500).json({ message: 'Error creating folder', error });
+  }
+};
+
+// Delete a folder and return its chats to the root list
+export const deleteFolder = async (req: Request, res: Response) => {
+  try {
+    const userId = (req.session as any)?.passport?.user || req.session?.userId || (req.user as any)?._id;
+    const { folder_id } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const folderIndex = user.folders.findIndex((folder) => folder.folder_id === folder_id);
+    if (folderIndex === -1) {
+      return res.status(404).json({ message: 'Folder not found' });
+    }
+
+    const parentFolderId = user.folders[folderIndex].parent_folder_id || null;
+    user.folders.splice(folderIndex, 1);
+    user.folders.forEach((folder) => {
+      if (folder.parent_folder_id === folder_id) {
+        folder.parent_folder_id = parentFolderId;
+      }
+    });
+    user.chats.forEach((chat) => {
+      if (chat.folder_id === folder_id) {
+        chat.folder_id = null;
+      }
+    });
+    user.markModified('folders');
+    user.markModified('chats');
+    await user.save();
+
+    return res.status(200).json({ message: 'Folder deleted successfully', folder_id });
+  } catch (error) {
+    console.error('Delete folder error:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// Move a chat to a folder (or remove from folder if folder_id is null)
+export const moveChatToFolder = async (req: Request, res: Response) => {
+  try {
+    const rawUserId = (req.session as any)?.passport?.user || req.session?.userId || (req.user as any)?._id || (req.user as IUser)?._id;
+    const userId = typeof rawUserId === 'object' && rawUserId?._id ? rawUserId._id : rawUserId;
+    
+    const { chat_id, folder_id } = req.body;
+
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const chat = user.chats.find((c) => c.chat_id === chat_id);
+    if (!chat) return res.status(404).json({ message: 'Chat not found' });
+
+    if (folder_id && !user.folders.some((folder) => folder.folder_id === folder_id)) {
+      return res.status(404).json({ message: 'Folder not found' });
+    }
+
+    chat.folder_id = folder_id || null;
+    await user.save();
+
+    res.status(200).json({ message: 'Chat moved successfully', chat });
+  } catch (error) {
+    res.status(500).json({ message: 'Error moving chat', error });
+  }
+};
+
+export const getUserFolders = async (req: Request, res: Response) => {
+  try {
+    const rawUserId = (req.session as any)?.passport?.user || req.session?.userId || (req.user as any)?._id;
+    const userId = typeof rawUserId === 'object' && rawUserId?._id ? rawUserId._id : rawUserId;
+
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const user = await User.findById(userId).select('folders');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    return res.status(200).json(user.folders || []);
+  } catch (error) {
+    console.error('Get folders error:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const moveFolder = async (req: Request, res: Response) => {
+  try {
+    const rawUserId = (req.session as any)?.passport?.user || req.session?.userId || (req.user as any)?._id;
+    const userId = typeof rawUserId === 'object' && rawUserId?._id ? rawUserId._id : rawUserId;
+    const { folder_id } = req.params;
+    const { parent_folder_id } = req.body;
+
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const folder = user.folders.find((item) => item.folder_id === folder_id);
+    if (!folder) return res.status(404).json({ message: 'Folder not found' });
+
+    if (parent_folder_id) {
+      if (parent_folder_id === folder_id) {
+        return res.status(400).json({ message: 'A folder cannot contain itself' });
+      }
+
+      const parent = user.folders.find((item) => item.folder_id === parent_folder_id);
+      if (!parent) return res.status(404).json({ message: 'Parent folder not found' });
+
+      let ancestorId: string | null | undefined = parent.parent_folder_id;
+      while (ancestorId) {
+        if (ancestorId === folder_id) {
+          return res.status(400).json({ message: 'A folder cannot be moved into its own descendant' });
+        }
+        ancestorId = user.folders.find((item) => item.folder_id === ancestorId)?.parent_folder_id;
+      }
+    }
+
+    folder.parent_folder_id = parent_folder_id || null;
+    user.markModified('folders');
+    await user.save();
+
+    return res.status(200).json(folder);
+  } catch (error) {
+    console.error('Move folder error:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const renameFolder = async (req: Request, res: Response) => {
+  try {
+    const rawUserId = (req.session as any)?.passport?.user || req.session?.userId || (req.user as any)?._id;
+    const userId = typeof rawUserId === 'object' && rawUserId?._id ? rawUserId._id : rawUserId;
+    const { folder_id } = req.params;
+    const { name } = req.body;
+
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+    if (!name || !name.trim()) return res.status(400).json({ message: 'Folder name is required' });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const folder = user.folders.find((item) => item.folder_id === folder_id);
+    if (!folder) return res.status(404).json({ message: 'Folder not found' });
+
+    folder.name = name.trim();
+    user.markModified('folders');
+    await user.save();
+
+    return res.status(200).json(folder);
+  } catch (error) {
+    console.error('Rename folder error:', error);
+    return res.status(500).json({ message: 'Internal server error' });
   }
 };

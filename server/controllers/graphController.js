@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.semanticSearchGraph = exports.searchGraph = exports.getNodeMetadata = exports.getUserProfile = exports.generateConversationResponse = exports.verifyAnswer = exports.generateQuestionsWithAnswers = exports.viewGraph = void 0;
+exports.clarifyQuizQuestion = exports.semanticSearchGraph = exports.searchGraph = exports.getNodeMetadata = exports.getUserProfile = exports.generateConversationResponse = exports.verifyAnswer = exports.generateQuestionsWithAnswers = exports.viewGraph = void 0;
 const openai_1 = __importDefault(require("openai"));
 const ConceptProgress_1 = __importDefault(require("../models/ConceptProgress"));
 const axiosConfig_1 = require("../utils/axiosConfig");
@@ -130,6 +130,7 @@ const generateQuestionsWithAnswers = (req, res) => __awaiter(void 0, void 0, voi
                 question: q.text || '',
                 answer: q.correct_answer || '',
                 conceptId: conceptId,
+                conceptName: q.concept_name || '',
                 // Optional metadata for future UI use
                 id: q.id,
                 explanation: q.explanation,
@@ -156,6 +157,20 @@ const normalizeAnswer = (value = '') => value
     .toLowerCase()
     .replace(/[^\w\s]/g, '')
     .replace(/\s+/g, ' ');
+// Multiple-choice and true/false questions have exactly one right answer, so grade them exactly
+// instead of by LLM judgment. Returns null for open-ended questions.
+const exactChoiceVerdict = (userAnswer, correctAnswer) => {
+    var _a;
+    const correct = correctAnswer.trim().toUpperCase();
+    const user = userAnswer.trim().toUpperCase();
+    if (/^[A-D]$/.test(correct))
+        return ((_a = user.match(/^([A-D])(?:[).:\s]|$)/)) === null || _a === void 0 ? void 0 : _a[1]) === correct;
+    const trueFalse = (value) => (value === 'T' || value === 'TRUE' ? 'TRUE' : value === 'F' || value === 'FALSE' ? 'FALSE' : null);
+    if (trueFalse(correct))
+        return trueFalse(user) === trueFalse(correct);
+    return null;
+};
+exports.exactChoiceVerdict = exactChoiceVerdict;
 const evaluateAnswerFallback = (userAnswer, correctAnswer) => {
     const normalizedUser = normalizeAnswer(userAnswer);
     const normalizedCorrect = normalizeAnswer(correctAnswer);
@@ -202,6 +217,7 @@ const verifyAnswer = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 followUpQuestion: ''
             });
         }
+        const exact = exactChoiceVerdict(userAnswer, correctAnswer || '');
         // Construct the prompt for GPT
         const systemPrompt = `You are an educational assistant that evaluates student answers based on conceptual understanding rather than exact wording.
 Your role is to:
@@ -223,6 +239,9 @@ Return valid JSON only.`;
 Question: "${question}"
 Student's Answer: "${userAnswer}"
 Reference Correct Answer: "${correctAnswer || ''}"
+${exact === null ? '' : `
+This is a multiple-choice or true/false question, and the student's answer is ${exact ? 'CORRECT' : 'INCORRECT'}. Your feedback must match that.
+`}
 
 Provide feedback in this JSON format:
 {
@@ -254,14 +273,14 @@ Provide feedback in this JSON format:
                 .replace(/\s*```$/, '')
                 .trim();
             const result = JSON.parse(cleaned);
-            const isCorrect = result.score >= 70;
+            const isCorrect = exact !== null && exact !== void 0 ? exact : result.score >= 70;
             // Update confidence score
             yield updateConfidenceScoreSafe(userId, conceptId, isCorrect, isRetry || false);
             // Transform the result to match the expected frontend format while preserving the new evaluation approach
             const transformedResult = {
                 isCorrect, // Consider answers with 70% or higher understanding as correct
                 feedback: result.feedback,
-                followUpQuestion: result.score >= 70
+                followUpQuestion: isCorrect
                     ? result.thinkingPrompt
                     : `Hint: ${result.conceptualHint}`
             };
@@ -480,3 +499,32 @@ const semanticSearchGraph = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.semanticSearchGraph = semanticSearchGraph;
+// Quiz clarifications use their own AI endpoint: the chat one answers directly and pulls in graph facts that give answers away
+const clarifyQuizQuestion = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    const userId = (_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user;
+    if (!userId) {
+        return res.status(401).json({ error: 'User not authenticated' });
+    }
+    if (!process.env.QUIZ_CLARIFY_SERVICE_TOKEN) {
+        console.error('QUIZ_CLARIFY_SERVICE_TOKEN is not configured');
+        return res.status(503).json({ error: 'Quiz clarification service is not configured' });
+    }
+    const { question, studentQuestion, correctAnswer } = req.body || {};
+    if (!question || !(studentQuestion === null || studentQuestion === void 0 ? void 0 : studentQuestion.trim()) || !correctAnswer) {
+        return res.status(400).json({ error: 'question, studentQuestion and correctAnswer are required' });
+    }
+    try {
+        const response = yield axiosConfig_1.pythonServiceClient.post('/clarify-quiz-question', {
+            question,
+            student_question: studentQuestion,
+            correct_answer: correctAnswer,
+        });
+        res.json({ message: response.data.message });
+    }
+    catch (error) {
+        console.error('Error clarifying quiz question:', ((_c = error.response) === null || _c === void 0 ? void 0 : _c.data) || error.message);
+        res.status(((_d = error.response) === null || _d === void 0 ? void 0 : _d.status) || 500).json({ error: 'Failed to clarify quiz question' });
+    }
+});
+exports.clarifyQuizQuestion = clarifyQuizQuestion;

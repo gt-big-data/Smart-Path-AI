@@ -13,7 +13,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const passport_1 = __importDefault(require("passport"));
+const googleLogin_1 = require("./googleLogin");
 const authController_1 = require("../controllers/authController");
 const axios_1 = __importDefault(require("axios"));
 const router = (0, express_1.Router)();
@@ -31,17 +31,8 @@ router.get('/flask/hi', (req, res) => __awaiter(void 0, void 0, void 0, function
         res.status(500).send('Error calling Flask server');
     }
 }));
-// Google OAuth endpoints, etc...
-router.get('/google', passport_1.default.authenticate('google', {
-    //failureRedirect: 'http://localhost:5173/login', // or wherever you want users to land on failure
-    scope: ['profile', 'email'], // what data you want from the user
-    prompt: 'select_account', // optional: always prompt user to pick account
-}));
-// 2. Google OAuth callback
-//    Google redirects here after the user grants permission
-router.get('/google/callback', passport_1.default.authenticate('google', { failureMessage: true }), (req, res) => {
-    res.redirect(process.env.CLIENT_URL || 'http://localhost:5173');
-});
+router.get('/google', googleLogin_1.beginGoogleLogin);
+router.get('/google/callback', googleLogin_1.completeGoogleLogin);
 router.get('/me', (req, res) => {
     if (req.isAuthenticated && req.isAuthenticated()) {
         res.json({ user: req.user });
