@@ -34,6 +34,7 @@ import GraphVisualization from "../components/GraphVisualization";
 import { API_BASE_URL } from "../config/api";
 import { clearQuiz, readQuiz } from "../lib/quizState";
 import { centerNodeName } from "../lib/graphTree";
+import PracticeExamPanel from "../components/PracticeExamPanel";
 
 interface Message {
   id: string;
@@ -66,6 +67,7 @@ interface ConceptProgress {
 
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [examPanels, setExamPanels] = useState<Record<string, boolean>>({});
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [currentChatId, setCurrentChatId] = useState("");
@@ -2280,7 +2282,12 @@ function App() {
                   View Progress
                 </button>
 
-
+                <button
+                  className="px-4 py-2 rounded-lg border border-teal-600 text-teal-700 hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  disabled={!currentChat?.graph_id || isProcessingFile}
+                  title={!currentChat?.graph_id ? 'Upload course notes first' : 'Generate or take a practice exam'}
+                  onClick={() => setExamPanels(previous => ({...previous, [currentChatId]: true}))}
+                >Practice Exam</button>
 
                 {currentChat?.graph_id && (
                   <button
@@ -2457,6 +2464,12 @@ function App() {
           </div>
         </Panel>
       </PanelGroup>
+      {Object.keys(examPanels).map(chatId => {
+        const chat = chats.find(item => item.id === chatId);
+        return chat ? <PracticeExamPanel key={chatId} chatId={chatId} title={chat.title}
+          open={!!examPanels[chatId] && currentChatId === chatId}
+          onClose={() => setExamPanels(previous => ({...previous, [chatId]: false}))}/> : null;
+      })}
     </div>
   );
 }

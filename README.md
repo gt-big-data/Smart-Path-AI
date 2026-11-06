@@ -87,7 +87,7 @@ Express loads `server/.env`, then falls back to the repo-root `.env`.
 | `CLIENT_URL` | Express | Default post-OAuth frontend origin (default `http://localhost:5173`) |
 | `AUTH_ALLOWED_ORIGINS` | Express | Exact comma-separated Google login return origins; defaults to `CLIENT_URL` |
 | `CORS_ORIGINS` | Express | Comma-separated allowed origins |
-| `OPENAI_API_KEY` | Express | Node-side `POST /api/verify-answer` (`gpt-4o-mini`) |
+| `OPENAI_API_KEY` | Express | Node-side `POST /api/verify-answer` (`gpt-6-luna`) |
 | `QUIZ_CLARIFY_SERVICE_TOKEN` | Express + AI server | Same random value on both services; required for quiz clarifications |
 | `PYTHON_SERVICE_URL` | Express | AI server. Local: `http://127.0.0.1:8000` |
 | `PORT` | Express | Listen port (default 4000) |
