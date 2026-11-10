@@ -1,9 +1,11 @@
-import { API_BASE_URL } from '../config/api';
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { API_BASE_URL } from '../config/api';
 
 interface AuthContextType {
   isAuthenticated: boolean;
   userName: string | null;
+  /** Unique per account (unlike the display name); used to tag per-user caches */
+  userEmail: string | null;
   isLoading: boolean;
   signup: (email: string, password: string, name: string) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
@@ -19,11 +21,11 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  // Start loading so ProtectedRoute waits for the first check instead of redirecting to /login
+  const [isLoading, setIsLoading] = useState(true);
 
   const checkAuth = async () => {
-    if (isLoading) return;
-    
     setIsLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/auth/check-auth`, {
@@ -34,14 +36,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (response.ok && data.authenticated) {
         setIsAuthenticated(true);
         setUserName(data.user.displayName || data.user.name || data.user.email);
+        setUserEmail(data.user.email || null);
       } else {
         setIsAuthenticated(false);
         setUserName(null);
+        setUserEmail(null);
       }
     } catch (err) {
       console.error('Check auth error:', err);
       setIsAuthenticated(false);
       setUserName(null);
+      setUserEmail(null);
     } finally {
       setIsLoading(false);
     }
@@ -74,10 +79,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const nameFromServer = data.user.displayName || data.user.email;
       setIsAuthenticated(true);
       setUserName(nameFromServer);
+      setUserEmail(data.user?.email || email);
     } catch (err) {
       console.error('Signup error:', err);
       setIsAuthenticated(false);
       setUserName(null);
+      setUserEmail(null);
       throw err;
     }
   };
@@ -99,19 +106,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const nameFromServer = data.user?.displayName || data.user?.name || data.user?.email || 'Unknown User';
       setIsAuthenticated(true);
       setUserName(nameFromServer);
+      setUserEmail(data.user?.email || email);
     } catch (err) {
       console.error('Login error:', err);
       setIsAuthenticated(false);
       setUserName(null);
+      setUserEmail(null);
       throw err; // Re-throw the error to be caught by the component
     }
   };
 
   const loginWithGoogle = () => {
-    window.location.href = `${API_BASE_URL}/auth/google`;
+    const loginUrl = new URL(`${API_BASE_URL}/auth/google`, window.location.origin);
+    loginUrl.searchParams.set('returnTo', window.location.origin);
+    window.location.href = loginUrl.toString();
   };
 
   const logout = async () => {
+    // Per-tab caches (the Progress page's) must not carry over to whoever signs in next
+    try {
+      sessionStorage.clear();
+    } catch {
+      // storage blocked; nothing to clear
+    }
     try {
       const response = await fetch(`${API_BASE_URL}/auth/logout`, {
         method: 'POST',
@@ -124,11 +141,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       
       setIsAuthenticated(false);
       setUserName(null);
+      setUserEmail(null);
     } catch (err) {
       console.error('Logout error:', err);
       // Still clear the local state even if the server request fails
       setIsAuthenticated(false);
       setUserName(null);
+      setUserEmail(null);
       throw err;
     }
   };
@@ -136,6 +155,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const value = {
     isAuthenticated,
     userName,
+    userEmail,
     isLoading,
     signup,
     login,

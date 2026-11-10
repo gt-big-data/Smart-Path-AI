@@ -16,6 +16,8 @@ exports.processAllQuizHistory = exports.getQuizHistoryById = exports.getAllQuizH
 const QuizHistory_1 = __importDefault(require("../models/QuizHistory"));
 const ConceptProgress_1 = __importDefault(require("../models/ConceptProgress"));
 // Save a new QuizHistory record when a quiz is completed
+// Older clients send placeholder names like "Question 1 Concept"; only keep real topic names
+const isRealConceptName = (name) => typeof name === 'string' && !!name.trim() && !/^Question \d+ Concept$/.test(name.trim());
 const saveQuizHistory = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     console.log('[Quiz History] POST /api/quiz-history endpoint called');
@@ -61,22 +63,11 @@ const saveQuizHistory = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
         console.log('[Quiz History] Creating progress records from quiz answers...');
         let progressCreated = 0;
         for (let i = 0; i < questions.length; i++) {
-            const question = questions[i];
             const concept = concepts[i];
             if (!concept || !concept.conceptID) {
                 console.warn(`[Quiz History] Skipping question ${i + 1} - no conceptID`);
                 continue;
             }
-            // Check if answer is correct (normalize both answers for comparison)
-            const userAnswer = String(question.userAnswer).trim().toUpperCase();
-            const correctAnswer = String(question.correctAnswer).trim().toUpperCase();
-            // Treat skipped questions as incorrect
-            const isSkipped = userAnswer === 'SKIPPED' || userAnswer === 'SKIP';
-            const isCorrect = !isSkipped && (userAnswer === correctAnswer ||
-                (correctAnswer === 'T' && userAnswer === 'TRUE') ||
-                (correctAnswer === 'F' && userAnswer === 'FALSE') ||
-                (correctAnswer === 'TRUE' && userAnswer === 'T') ||
-                (correctAnswer === 'FALSE' && userAnswer === 'F'));
             try {
                 // Find or create progress record
                 let progress = yield ConceptProgress_1.default.findOne({
@@ -91,19 +82,14 @@ const saveQuizHistory = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
                         lastAttempted: new Date()
                     });
                 }
-                // Update confidence score
-                if (isCorrect) {
-                    progress.confidenceScore += 0.1;
-                }
-                else {
-                    progress.confidenceScore -= 0.1;
-                }
-                // Clamp between 0 and 1
-                progress.confidenceScore = Math.max(0, Math.min(1, progress.confidenceScore));
+                // The score was already updated once per answer by /api/verify-answer, which also grades
+                // open-ended answers correctly. Re-scoring here counted every answer twice.
+                if (isRealConceptName(concept.name))
+                    progress.conceptName = String(concept.name).trim();
                 progress.lastAttempted = new Date();
                 yield progress.save();
                 progressCreated++;
-                console.log(`[Quiz History] ✅ Created/updated progress for concept ${concept.conceptID}: score=${progress.confidenceScore.toFixed(2)}, correct=${isCorrect}`);
+                console.log(`[Quiz History] ✅ Saved progress for concept ${concept.conceptID} (${progress.conceptName || 'no name'}): score=${progress.confidenceScore.toFixed(2)}`);
             }
             catch (error) {
                 console.error(`[Quiz History] ❌ Error creating progress for concept ${concept.conceptID}:`, error);

@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, TrendingDown, ChevronLeft } from 'lucide-react';
 import { API_BASE_URL } from '../config/api';
+import { useAuth } from '../context/AuthContext';
 
 interface ProgressItem {
   concept_id: string;
@@ -16,6 +17,30 @@ interface ProfileData {
   full_progress: ProgressItem[];
   topics_to_review: ProgressItem[];
 }
+
+// The last loaded progress is shown instantly when the page reopens, then refreshed in the background.
+// sessionStorage clears when the tab closes and on sign-out (AuthContext.logout); the email check
+// keeps another account in the same tab from seeing it.
+const PROGRESS_CACHE_KEY = 'progressPageCache:v2';
+type ProgressCache = { userEmail: string; profileData: ProfileData; chatTitles: [string, string][] };
+
+const readProgressCache = (userEmail: string | null): ProgressCache | null => {
+  if (!userEmail) return null;
+  try {
+    const cache = JSON.parse(sessionStorage.getItem(PROGRESS_CACHE_KEY) || 'null');
+    return cache?.userEmail === userEmail ? cache : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeProgressCache = (cache: ProgressCache) => {
+  try {
+    sessionStorage.setItem(PROGRESS_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // storage full or blocked; the page still works, just without the instant reopen
+  }
+};
 
 const AccordionSection: React.FC<{
   title: string;
@@ -57,16 +82,18 @@ const AccordionSection: React.FC<{
 };
 
 const ProgressPage: React.FC = () => {
-  const [profileData, setProfileData] = useState<ProfileData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const { userEmail } = useAuth();
+  const cached = useRef(readProgressCache(userEmail)).current;
+  const [profileData, setProfileData] = useState<ProfileData | null>(cached?.profileData ?? null);
+  const [loading, setLoading] = useState<boolean>(!cached);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const [chatTitleMap, setChatTitleMap] = useState<Map<string, string>>(new Map());
+  const [chatTitleMap, setChatTitleMap] = useState<Map<string, string>>(new Map(cached?.chatTitles ?? []));
 
   useEffect(() => {
     const fetchProfileData = async () => {
       try {
-        setLoading(true);
+        if (!cached) setLoading(true);
 
         // Fetch user progress from Mongo
         let progressList: any[] = [];
@@ -225,6 +252,8 @@ const ProgressPage: React.FC = () => {
 
         // Build a quick map from possible ids to the node's display name
         const nodeNameById = new Map<string, string>();
+        // Only nodes with a real `name`; nodeNameById also holds first-words-of-text labels for unnamed nodes
+        const explicitNameById = new Map<string, string>();
         const conceptToGraphId = new Map<string, string>();
         const nodes = Array.isArray(graphData.graph?.nodes) ? graphData.graph.nodes : [];
 
@@ -261,8 +290,10 @@ const ProgressPage: React.FC = () => {
             .map(String);
           const display = getNodeLabel(node) || String(node.id);
           const sourceGraphId = node.__graph_id;
+          const explicitName = typeof props.name === 'string' && props.name.trim() ? props.name.trim() : '';
           for (const c of candidates) {
             nodeNameById.set(String(c), display);
+            if (explicitName) explicitNameById.set(String(c), explicitName);
             if (sourceGraphId) {
               conceptToGraphId.set(String(c), String(sourceGraphId));
             }
@@ -285,7 +316,9 @@ const ProgressPage: React.FC = () => {
         const normalized: Array<any> = progressList.map((p: any) => {
           const conceptId = String(p.conceptId || p.conceptID || p.topicId || p.topic_id || p.id);
           // Try map lookup first. If missing, attempt to find node by id and compute a label.
-          let name = nodeNameById.get(conceptId) || p.name || p.topicName;
+          // Prefer the graph's current name (it may have been edited), then the name saved with the score
+          // when the quiz was submitted (survives graph changes), then a first-words label from the node text.
+          let name = explicitNameById.get(conceptId) || p.conceptName || nodeNameById.get(conceptId) || p.name || p.topicName;
           if (!name) {
             const found = nodes.find((n: any) => {
               const props = n.properties || {};
@@ -329,7 +362,11 @@ const ProgressPage: React.FC = () => {
         });
 
         // If any items still show the raw id (no friendly name), try fetching node metadata for those ids
-        const stillMissing = normalized.filter((n: any) => n.topic_name === n.concept_id).map((n: any) => n.concept_id);
+        // Unresolved names are already "Unknown Topic (...)" by this point, so check for that too;
+        // matching only the raw id meant this metadata lookup never ran.
+        const stillMissing = normalized
+          .filter((n: any) => n.topic_name === n.concept_id || n.topic_name.startsWith('Unknown Topic'))
+          .map((n: any) => n.concept_id);
         console.log(`[ProgressPage] Still missing names for ${stillMissing.length} concepts:`, stillMissing);
         
         if (stillMissing.length > 0 && graphIds.length > 0) {
@@ -482,6 +519,10 @@ const ProgressPage: React.FC = () => {
         }
         
         setProfileData({ full_progress, topics_to_review });
+        setError(null);
+        if (userEmail) {
+          writeProgressCache({ userEmail, profileData: { full_progress, topics_to_review }, chatTitles: [...localChatTitleMap] });
+        }
       } catch (err: any) {
         console.error('Error fetching profile data:', err);
         if (err.response) {
@@ -507,7 +548,7 @@ const ProgressPage: React.FC = () => {
     };
 
     fetchProfileData();
-  }, []); // Empty dependency array - fetch on mount only
+  }, [cached, userEmail]); // Runs once on mount; cached never changes and userEmail only on a new login
 
   const getScoreColor = (score: number) => {
     if (score < 0.4) return 'text-red-500';
@@ -544,7 +585,8 @@ const ProgressPage: React.FC = () => {
       );
     }
   
-    if (error) {
+    // With saved progress on screen, a failed background refresh keeps the data (see the notice below)
+    if (error && !profileData) {
       return (
         <div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50 text-center">
           <div>
@@ -576,7 +618,9 @@ const ProgressPage: React.FC = () => {
               Back
             </button>
           </header>
-  
+
+          {error && <p role="status" className="mb-6 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">Couldn't refresh your progress, so this is the last saved copy. {error}</p>}
+
           <main className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Top Topics to Review */}
             <section className="lg:col-span-1 bg-white/80 backdrop-blur-sm p-6 rounded-xl border border-slate-200/60 shadow-sm">

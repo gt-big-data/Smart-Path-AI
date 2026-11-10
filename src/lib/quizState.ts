@@ -3,6 +3,8 @@ export type Question = {
   question: string;
   answer: string;
   conceptId: string;
+  /** Topic the question tests; saved with progress so the Progress page can always label it */
+  conceptName?: string;
   explanation?: string;
   format?: string;
 };

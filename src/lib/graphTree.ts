@@ -140,7 +140,10 @@ export function buildGraphTree(graph: RawGraph): GraphTree {
   };
 
   // Grows the tree from the node at order[from]: BFS over real edges until nothing new
-  // is reached, then one hop over RELATED_TO edges, then real edges again, and so on.
+  // is reached, then a single RELATED_TO hop, then real edges again from that node, and so on.
+  // One hop at a time lets each cluster join through one RELATED_TO edge and keep its own
+  // real-edge shape, instead of every member hanging off the center (the backend links the
+  // center to each unreached node with RELATED_TO).
   const grow = (from: number) => {
     let next = from;
     for (;;) {
@@ -151,15 +154,20 @@ export function buildGraphTree(graph: RawGraph): GraphTree {
         }
       }
 
-      const reachedEnd = order.length;
-      for (let i = from; i < reachedEnd; i++) {
-        const id = order[i];
-        for (const [neighbor, link] of neighbors.get(id)!) {
-          if (link.related && !nodes.has(neighbor)) attach(neighbor, id, 'related', link.edgeIndex);
-        }
-      }
-      if (order.length === reachedEnd) return;
+      const hop = findRelatedHop(from);
+      if (!hop) return;
+      attach(hop.neighbor, hop.id, 'related', hop.edgeIndex);
     }
+  };
+
+  const findRelatedHop = (from: number) => {
+    for (let i = from; i < order.length; i++) {
+      const id = order[i];
+      for (const [neighbor, link] of neighbors.get(id)!) {
+        if (link.related && !nodes.has(neighbor)) return { id, neighbor, edgeIndex: link.edgeIndex };
+      }
+    }
+    return null;
   };
 
   attach(centerId, null, null, null);
@@ -196,6 +204,16 @@ function pickCenter(
   const pool = flagged.length > 0 ? flagged : topics.length > 0 ? topics : ids;
 
   return pool.reduce((best, id) => (degree.get(id)! > degree.get(best)! ? id : best));
+}
+
+/** The center node's name, tidied for use as a chat title. null if the graph has no named center. */
+export function centerNodeName(graph: RawGraph, maxLength = 60): string | null {
+  const { centerId } = buildGraphTree(graph);
+  const center = graph.nodes.find(node => String(node.id) === centerId);
+  const raw = center?.properties?.name ?? center?.properties?.text;
+  const name = typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
+  if (!name) return null;
+  return name.length > maxLength ? `${name.slice(0, maxLength - 1).trimEnd()}…` : name;
 }
 
 /** Node ids from the center to nodeId, both included. [] if nodeId is not in the tree. */

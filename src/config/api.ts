@@ -1,3 +1,4 @@
+// Callers append paths like `/api/...`, so a trailing slash here would produce `//api/...`, which Express 404s.
 export const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL ||
   (import.meta.env.DEV

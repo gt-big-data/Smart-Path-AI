@@ -9,6 +9,7 @@ import ReactFlow, {
   MiniMap,
   NodeMouseHandler,
   NodeProps,
+  ReactFlowInstance,
   useNodesState,
   useEdgesState,
 } from 'reactflow';
@@ -16,13 +17,18 @@ import 'reactflow/dist/style.css';
 import { Search, X } from 'lucide-react';
 import PathBar from './graph/PathBar';
 import { computeNodeSizes } from '../lib/nodesizing';
-import { buildGraphTree } from '../lib/graphTree';
+import { buildGraphTree, GraphTree } from '../lib/graphTree';
+import { useCollapse } from '../lib/collapse';
+import { radialLayout, toTopLeft, NodeSize, Point, RadialTreeNode } from '../lib/radialLayout';
 import { getPathHighlight } from '../lib/pathHighlight';
+import { buildSearchResultItems } from '../lib/searchResults';
+import { applyGraphStyles, BaseGraph, ConfidenceKeys, DEFAULT_NODE_BORDER, NodeEdit, PATH_COLOR, resolveConfidenceScores } from '../lib/graphStyles';
 import { API_BASE_URL } from '../config/api';
 import { GraphNode, NodeEditState, NODE_EDIT_POPUP_WIDTH, NODE_EDIT_POPUP_HEIGHT, VIEWPORT_PADDING } from './graph/GraphNode';
 
 interface GraphData {
   status: string;
+  graph_id?: string;
   subject?: string;
   graph: {
     nodes: any[];
@@ -37,7 +43,51 @@ interface ConceptProgress {
 }
 
 // Path bar preview with hardcoded steps; wired up in P2b
+// The current PathBar is a P2b preview with hardcoded steps and no handlers.
+// Keep it hidden until it is wired to the loaded graph and active path.
 const SHOW_PATH_BAR = false;
+
+// Must match the fallback size nodes are rendered at below
+const DEFAULT_NODE_SIZE: NodeSize = { width: 200, height: 70 };
+
+// Rings from the center that the first view zooms to; the rest of the graph is a pan away
+const INITIAL_FOCUS_DEPTH = 2;
+
+// Zoom a clicked search result is shown at, at least, so its label is readable
+const SEARCH_RESULT_MIN_ZOOM = 0.8;
+
+/**
+ * Top-left positions for React Flow: the center in the middle and one ring per depth
+ * (src/lib/radialLayout.ts). Nodes the tree doesn't reach go in a row under the outer ring.
+ */
+function layoutRadially(nodes: Node[], tree: GraphTree, sizes: Map<string, NodeSize>): Map<string, Point> {
+  const ids = new Set(nodes.map(node => node.id));
+  const sizeOf = (id: string) => sizes.get(id) ?? DEFAULT_NODE_SIZE;
+
+  // The tree is built from the raw graph; drop nodes that weren't rendered
+  const radialTree = new Map<string, RadialTreeNode>();
+  tree.nodes.forEach((treeNode, id) => {
+    if (ids.has(id)) radialTree.set(id, { id, children: treeNode.children.filter(child => ids.has(child)) });
+  });
+
+  const positions = new Map<string, Point>();
+  if (tree.centerId && radialTree.has(tree.centerId)) {
+    const { positions: centers } = radialLayout(tree.centerId, radialTree, sizes, { defaultSize: DEFAULT_NODE_SIZE });
+    centers.forEach((center, id) => positions.set(id, toTopLeft(center, sizeOf(id))));
+  }
+
+  const unplaced = nodes.filter(node => !positions.has(node.id));
+  if (unplaced.length > 0) {
+    let bottom = 0;
+    positions.forEach((pos, id) => { bottom = Math.max(bottom, pos.y + sizeOf(id).height); });
+    let x = 0;
+    unplaced.forEach(node => {
+      positions.set(node.id, { x, y: bottom + 200 });
+      x += sizeOf(node.id).width + 40;
+    });
+  }
+  return positions;
+}
 
 const SUBJECT_MAP: { [key: string]: string } = {
   'math': 'math',
@@ -489,15 +539,32 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [activePathTargetId, setActivePathTargetId] = useState<string | null>(null);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [minimapLocked, setMinimapLocked] = useState(false);
-  const [currentSubject, setCurrentSubject] = useState<string>('default');
-  const [nodeTypesInGraph, setNodeTypesInGraph] = useState<Set<string>>(new Set());
+
+  // Custom label/color edits by node id. Kept apart from the nodes so a restyle doesn't drop them,
+  // and tagged with the graph they were made on so a newly loaded graph doesn't inherit them.
+  const [nodeEditsState, setNodeEditsState] = useState<{ graph: BaseGraph | null; byId: Record<string, NodeEdit> }>(
+    { graph: null, byId: {} }
+  );
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<string[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
   const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword');
+  const searchContext = useMemo(() => ({
+    graph: data?.graph, graphId: data?.graph_id, query: searchQuery, mode: searchMode,
+  }), [data?.graph, data?.graph_id, searchQuery, searchMode]);
+  const [searchResponse, setSearchResponse] = useState<{
+    context: typeof searchContext; nodeIds: string[];
+  } | null>(null);
+  const [pendingSearchNavigation, setPendingSearchNavigation] = useState<typeof searchContext | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  // Hide previous hits immediately, including the debounce before a new request starts.
+  const hasCurrentSearchResponse = searchResponse?.context === searchContext;
+  const searchResults = useMemo(
+    () => searchResponse?.context === searchContext ? searchResponse.nodeIds : [],
+    [searchContext, searchResponse]
+  );
 
   // Node edit popup state
   const [nodeEditState, setNodeEditState] = useState<NodeEditState | null>(null);
@@ -575,13 +642,9 @@ useEffect(() => {
   }, [nodeEditState]);
 
   const handleNodeEditSave = (nodeId: string, label: string, color: string) => {
-    setNodes(prev => prev.map(node => {
-      if (node.id !== nodeId) return node;
-      return {
-        ...node,
-        data: { ...node.data, customLabel: label, color },
-        style: { ...node.style, background: color },
-      };
+    setNodeEditsState(prev => ({
+      graph: baseGraph,
+      byId: { ...(prev.graph === baseGraph ? prev.byId : {}), [nodeId]: { label, color } },
     }));
   };
 
@@ -644,67 +707,57 @@ useEffect(() => {
     return color;
   };
 
-  const handleSearch = useCallback(async (query: string) => {
-    if (!query.trim() || !data?.graph) {
-      setSearchResults([]);
-      return;
-    }
-
-    const graphId = (data as any).graph_id;
-    if (!graphId) return;
-
-    setIsSearching(true);
-    try {
-      const endpoint = searchMode === 'semantic' ? 'semantic-search-graph' : 'search-graph';
-      const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
-      const response = await fetch(url, { credentials: 'include' });
-      const result = await response.json();
-      if (result.status === 'success') {
-        setSearchResults(result.node_ids || []);
-      } else {
-        setSearchResults([]);
-      }
-    } catch (error) {
-      console.error('[Graph Search] Error:', error);
-      setSearchResults([]);
-    } finally {
-      setIsSearching(false);
-    }
-  }, [data, searchMode]);
-
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (searchQuery) handleSearch(searchQuery);
-      else setSearchResults([]);
+    const { graph, graphId, query, mode } = searchContext;
+    setIsSearching(false);
+    if (!query.trim() || !graph || !graphId) return;
+
+    const controller = new AbortController();
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const endpoint = mode === 'semantic' ? 'semantic-search-graph' : 'search-graph';
+        const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${encodeURIComponent(graphId)}&query=${encodeURIComponent(query)}`;
+        const response = await fetch(url, { credentials: 'include', signal: controller.signal });
+        const result = await response.json();
+        if (!cancelled) {
+          setSearchResponse({ context: searchContext, nodeIds: result.status === 'success' ? result.node_ids || [] : [] });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('[Graph Search] Error:', error);
+          setSearchResponse({ context: searchContext, nodeIds: [] });
+        }
+      } finally {
+        if (!cancelled) setIsSearching(false);
+      }
     }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery, handleSearch]);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [searchContext]);
 
-  const processGraphData = useCallback((graphData: GraphData) => {
-    if (!graphData) return;
+  // Graph structure: labels, colors, sizes and positions. Depends on the graph data only,
+  // so quiz answers, edits and search never re-run the layout. Styling is layered on below.
+  const baseGraph = useMemo((): BaseGraph | null => {
+    if (!data?.graph) return null;
 
-    const subject = graphData.subject || 'default';
-    setCurrentSubject(subject);
-
-    const confidenceMap = new Map<string, number>();
-    const confidenceByName = new Map<string, number>();
-
-    conceptProgress.forEach(progress => {
-      confidenceMap.set(progress.conceptId, progress.confidenceScore);
-      const namePart = progress.conceptId.split('_').pop() || progress.conceptId;
-      confidenceByName.set(namePart.toLowerCase(), progress.confidenceScore);
-    });
+    const subject = data.subject || 'default';
 
     // One row per id: duplicate ids break React keys and inflate the graph.
     const seenNodeIds = new Set<string>();
-    const nodesInput = graphData.graph.nodes.filter((n) => {
+    const nodesInput = data.graph.nodes.filter((n) => {
       const id = String(n.id);
       if (seenNodeIds.has(id)) return false;
       seenNodeIds.add(id);
       return true;
     });
 
-    const processedEdges: Edge[] = graphData.graph.relationships.map((rel, i) => ({
+    // Edge ids end in the index into relationships[], which graphTree's parentEdgeIndex refers to
+    const processedEdges: Edge[] = data.graph.relationships.map((rel, i) => ({
       id: `${rel.source}-${rel.target}-${String(rel.type)}-${i}`,
       source: rel.source,
       target: rel.target,
@@ -712,7 +765,7 @@ useEffect(() => {
       type: 'smoothstep',
       style: { stroke: '#888', strokeWidth: 2 },
       labelStyle: { fill: '#888', fontSize: 10 },
-      animated: true,
+      animated: false,
       data: {
         graphEdgeIndex: i,
       },
@@ -728,16 +781,13 @@ useEffect(() => {
       e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target)
     );
 
+    // Sizing ignores confidence (confidenceWeight defaults to 0), so it doesn't need scores here
     const { sizes, connectionCount } = computeNodeSizes(
       nodeIds,
       safeEdges,
-      confidenceMap,
+      new Map(),
       { scale: 'log' }
     );
-
-    const allWidths = [...sizes.values()].map(s => s.width).sort((a, b) => a - b);
-    const medianWidth = allWidths[Math.floor(allWidths.length / 2)] ?? 200;
-    const layoutSpacing = Math.max(360, medianWidth + 100);
 
     const connectedNodeIds = new Set<string>();
     safeEdges.forEach(edge => {
@@ -748,25 +798,22 @@ useEffect(() => {
     const isFallbackLabel = (label: string, nodeType: string): boolean => {
       const normalizedLabel = label.toLowerCase().trim();
       return label === nodeType ||
-        label === 'Node' ||
-        normalizedLabel === 'other' ||
-        normalizedLabel === 'unknown' ||
-        normalizedLabel === 'undefined' ||
-        normalizedLabel === 'null' ||
-        normalizedLabel === '';
+             label === 'Node' ||
+             normalizedLabel === 'other' ||
+             normalizedLabel === 'unknown' ||
+             normalizedLabel === 'undefined' ||
+             normalizedLabel === 'null' ||
+             normalizedLabel === '';
     };
 
-    const nodeTypeColorMap = new Map<string, string>();
+    const confidenceKeys: ConfidenceKeys[] = [];
+    const nodeTypes: string[] = [];
 
     const processedNodes: Node[] = nodesInput
       .map((node) => {
         const nodeType = node.labels[0];
         const nodeColor = getNodeColor(nodeType, subject);
         const nodeLabel = getNodeLabel(node);
-
-        if (!nodeTypeColorMap.has(nodeType)) {
-          nodeTypeColorMap.set(nodeType, nodeColor);
-        }
 
         const hasFallbackLabel = isFallbackLabel(nodeLabel, nodeType);
         const hasConnections = connectedNodeIds.has(node.id);
@@ -775,39 +822,22 @@ useEffect(() => {
           return null;
         }
 
-        let confidenceScore = confidenceMap.get(node.id) ?? null;
+        if (!nodeTypes.includes(nodeType)) nodeTypes.push(nodeType);
 
-        if (confidenceScore === null) {
-          const possibleIds = [
+        confidenceKeys.push({
+          nodeId: node.id,
+          altIds: [
             node.properties.conceptId,
             node.properties.topicId,
             node.properties.topicID,
             node.properties.topic_id,
             node.properties.concept_id,
             node.properties.id,
-          ].filter(Boolean);
+          ].filter(Boolean).map(String),
+          name: node.properties.name || undefined,
+        });
 
-          for (const possibleId of possibleIds) {
-            confidenceScore = confidenceMap.get(String(possibleId)) ?? null;
-            if (confidenceScore !== null) break;
-          }
-        }
-
-        if (confidenceScore === null && node.properties.name) {
-          const nodeName = node.properties.name.toLowerCase();
-          confidenceScore = confidenceByName.get(nodeName) ?? null;
-        }
-
-        if (confidenceScore === null) {
-          for (const [conceptId, score] of confidenceMap.entries()) {
-            if (conceptId.includes(node.id) || node.id.includes(conceptId)) {
-              confidenceScore = score;
-              break;
-            }
-          }
-        }
-
-        const size = sizes.get(node.id) ?? { width: 200, height: 70 };
+        const size = sizes.get(node.id) ?? DEFAULT_NODE_SIZE;
         return {
           id: node.id,
           type: 'default',
@@ -816,7 +846,6 @@ useEffect(() => {
             description: node.properties.description || node.properties.text,
             type: nodeType,
             subject: subject,
-            confidenceScore: confidenceScore,
             connections: connectionCount.get(node.id) ?? 0,  // expose for tooltip
             color: nodeColor,
           },
@@ -824,7 +853,7 @@ useEffect(() => {
           style: {
             background: nodeColor,
             color: '#ffffff',
-            border: '1px solid rgba(255,255,255,0.2)',
+            border: DEFAULT_NODE_BORDER,
             width: `${size.width}px`,
             height: `${size.height}px`,
             padding: 0,
@@ -842,191 +871,153 @@ useEffect(() => {
       validNodeIds.has(edge.source) && validNodeIds.has(edge.target)
     );
 
-    const nodePositions = forceDirectedLayout(processedNodes, validEdges, layoutSpacing);
-    processedNodes.forEach((node, index) => {
-      node.position = nodePositions[index];
-    });
-
-    setNodes(processedNodes);
-    setEdges(validEdges);
-
-    const typesInGraph = new Set<string>();
+    const nodePositions = layoutRadially(processedNodes, graphTree, sizes);
     processedNodes.forEach(node => {
-      if (node.data?.type) typesInGraph.add(node.data.type);
+      node.position = nodePositions.get(node.id) ?? { x: 0, y: 0 };
     });
-    setNodeTypesInGraph(typesInGraph);
-  }, [setNodes, setEdges, conceptProgress]);
 
+    return { subject, nodes: processedNodes, edges: validEdges, confidenceKeys, nodeTypes };
+  }, [data, graphTree]);
+
+  // The center and its nearest rings, for the first view of each graph
+  const initialFocusNodes = useMemo(() => {
+    if (!baseGraph) return [];
+    const rendered = new Set(baseGraph.nodes.map(node => node.id));
+    return graphTree.order
+      .filter(id => rendered.has(id) && (graphTree.nodes.get(id)?.depth ?? Infinity) <= INITIAL_FOCUS_DEPTH)
+      .map(id => ({ id }));
+  }, [baseGraph, graphTree]);
+
+  // Styling layers, each its own piece of state, combined in one place
+  const confidenceScores = useMemo(
+    () => resolveConfidenceScores(baseGraph?.confidenceKeys ?? [], conceptProgress),
+    [baseGraph, conceptProgress]
+  );
+  const nodeEdits = useMemo(
+    () => (nodeEditsState.graph === baseGraph ? nodeEditsState.byId : {}),
+    [nodeEditsState, baseGraph]
+  );
+  // The search API may return numeric ids; node ids are strings
+  const searchHits = useMemo(() => new Set(searchResults.map(String)), [searchResults]);
+  const collapse = useCollapse(graphTree, baseGraph?.nodes);
+
+  const styledGraph = useMemo(
+    () => baseGraph && applyGraphStyles(baseGraph, { confidenceScores, nodeEdits, searchHits, activePath, collapse: collapse.layer }),
+    [baseGraph, confidenceScores, nodeEdits, searchHits, activePath, collapse.layer]
+  );
+
+  // Push the styled graph into React Flow. A new base graph replaces everything; a style-only
+  // change keeps what React Flow tracks itself (dragged positions, measured sizes, selection).
+  const syncedBaseRef = useRef<BaseGraph | null>(null);
   useEffect(() => {
-    if (data?.graph) {
-      processGraphData(data);
+    if (!styledGraph) return;
+
+    if (syncedBaseRef.current !== baseGraph) {
+      syncedBaseRef.current = baseGraph;
+      setNodes(styledGraph.nodes);
+      setEdges(styledGraph.edges);
+      return;
     }
-  }, [data, processGraphData]);
 
-  const visibleNodes = useMemo(() => {
-    const searchResultIds = new Set(searchResults.map(String));
-    const hasActivePath =
-      activePath !== null && activePath.nodeIds.length > 0;
-
-    return nodes.map(node => {
-      const pathStep = activePath?.nodeSteps.get(node.id);
-      const onPath = pathStep !== undefined;
-      const searchMatch = searchResultIds.has(node.id);
-
-      const pathShadow = onPath
-        ? '0 0 16px rgba(212, 88, 28, 0.58)'
-        : '';
-
-      const searchShadow = searchMatch
-        ? '0 0 0 3px #fbbf24, 0 0 15px rgba(251, 191, 36, 0.6)'
-        : '';
-
-      return {
-        ...node,
-        data: {
-          ...node.data,
-          pathStep,
-        },
-        style: {
-          ...node.style,
-          opacity:
-            hasActivePath && !onPath
-              ? searchMatch
-                ? 0.55
-                : 0.18
-              : 1,
-          border: onPath
-            ? '3px solid #d4581c'
-            : searchMatch && !hasActivePath
-              ? '3px solid #fbbf24'
-              : '1px solid rgba(255,255,255,0.2)',
-          boxShadow:
-            [searchShadow, pathShadow]
-              .filter(Boolean)
-              .join(', ') || 'none',
-          borderRadius: '24px',
-          transition:
-            'opacity 160ms ease, border-color 160ms ease, box-shadow 160ms ease',
-        },
-      };
+    setNodes(prev => {
+      const prevById = new Map(prev.map(node => [node.id, node]));
+      return styledGraph.nodes.map(node => {
+        const current = prevById.get(node.id);
+        // A node that gets hidden is deselected too, so Backspace can't delete it unseen
+        return current ? { ...current, data: node.data, style: node.style, hidden: node.hidden, selected: current.selected && !node.hidden } : node;
+      });
     });
-  }, [activePath, nodes, searchResults]);
+    setEdges(prev => {
+      const prevById = new Map(prev.map(edge => [edge.id, edge]));
+      return styledGraph.edges.map(edge => {
+        const current = prevById.get(edge.id);
+        return current ? { ...edge, selected: current.selected && !edge.hidden } : edge;
+      });
+    });
+  }, [baseGraph, styledGraph, setNodes, setEdges]);
 
+  // Normal relationship labels stay hidden until their edge is hovered. Path edges
+  // keep the label and animation supplied by applyGraphStyles.
   const visibleEdges = useMemo(() => {
-    const hasActivePath =
-      activePath !== null && activePath.nodeIds.length > 0;
+    const baseEdgesById = new Map(
+      (baseGraph?.edges ?? []).map(edge => [edge.id, edge])
+    );
 
     return edges.map(edge => {
-      const edgeIndex = edge.data?.graphEdgeIndex;
+      const hovered = edge.id === hoveredEdgeId;
+      if (!hovered || edge.animated) return edge;
 
-      const onPath =
-        hasActivePath &&
-        typeof edgeIndex === 'number' &&
-        activePath.edgeIndices.has(edgeIndex);
-
+      const baseEdge = baseEdgesById.get(edge.id);
       return {
         ...edge,
-        animated: onPath,
-        label: onPath ? edge.label : undefined,
-        style: {
-          ...edge.style,
-          stroke: onPath ? '#d4581c' : '#888',
-          strokeWidth: onPath ? 4 : 1.5,
-          opacity: hasActivePath
-            ? onPath
-              ? 1
-              : 0.14
-            : 1,
-          transition:
-            'opacity 160ms ease, stroke 160ms ease, stroke-width 160ms ease',
-        },
+        label: baseEdge?.label,
         labelStyle: {
           ...edge.labelStyle,
-          fill: onPath ? '#d4581c' : 'transparent',
-          fontWeight: onPath ? 700 : 400,
+          fill: '#374151',
         },
-        zIndex: onPath ? 1 : 0,
+        zIndex: Math.max(Number(edge.zIndex ?? 0), 1),
       };
     });
-  }, [activePath, edges]);
+  }, [baseGraph, edges, hoveredEdgeId]);
 
-  const forceDirectedLayout = (nodes: Node[], edges: Edge[], spacing: number = 360) => {
-    const positions: { x: number; y: number }[] = [];
-    const width = Math.max(1000, nodes.length * 200);
-    const height = Math.max(800, nodes.length * 150);
+  // Search hits as list rows, in the order the API ranked them
+  const searchResultItems = useMemo(
+    () => buildSearchResultItems(searchResults.map(String), styledGraph?.nodes ?? [], graphTree),
+    [searchResults, styledGraph, graphTree]
+  );
 
-    const cols = Math.ceil(Math.sqrt(nodes.length));
-    nodes.forEach((_, index) => {
-      const row = Math.floor(index / cols);
-      const col = index % cols;
-      positions.push({
-        x: col * spacing + (Math.random() * 50 - 25),
-        y: row * spacing + (Math.random() * 50 - 25),
+  // Zoom to the center's nearest rings once per graph, after its nodes reach React Flow
+  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
+
+  // Open a search result: show its path and pan to it, keeping the current zoom unless it's too far out to read.
+  // TODO(C1): call expandTo(nodeId) first so a result inside a collapsed branch is shown.
+  const handleSearchResultClick = useCallback((nodeId: string) => {
+    if (nodeId === graphTree.centerId) clearActivePath();
+    else setActivePathTargetId(nodeId);
+
+    if (!flowInstance) return;
+    requestAnimationFrame(() => {
+      const node = flowInstance.getNode(nodeId);
+      if (!node) return;
+      const position = node.positionAbsolute ?? node.position;
+      const width = node.width ?? DEFAULT_NODE_SIZE.width;
+      const height = node.height ?? DEFAULT_NODE_SIZE.height;
+      flowInstance.setCenter(position.x + width / 2, position.y + height / 2, {
+        zoom: Math.max(flowInstance.getZoom(), SEARCH_RESULT_MIN_ZOOM),
+        duration: 600,
       });
     });
+  }, [clearActivePath, flowInstance, graphTree.centerId]);
 
-    const iterations = 50;
-    for (let i = 0; i < iterations; i++) {
-      for (let j = 0; j < nodes.length; j++) {
-        for (let k = j + 1; k < nodes.length; k++) {
-          const dx = positions[k].x - positions[j].x;
-          const dy = positions[k].y - positions[j].y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          if (distance < spacing) {
-            const force = (spacing - distance) / distance;
-            const moveX = dx * force * 0.1;
-            const moveY = dy * force * 0.1;
-            positions[k].x += moveX;
-            positions[k].y += moveY;
-            positions[j].x -= moveX;
-            positions[j].y -= moveY;
-          }
-        }
-      }
-
-      edges.forEach(edge => {
-        const sourceIndex = nodes.findIndex(n => n.id === edge.source);
-        const targetIndex = nodes.findIndex(n => n.id === edge.target);
-        if (sourceIndex >= 0 && targetIndex >= 0) {
-          const dx = positions[targetIndex].x - positions[sourceIndex].x;
-          const dy = positions[targetIndex].y - positions[sourceIndex].y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          if (distance > spacing) {
-            const force = (distance - spacing) / distance;
-            const moveX = dx * force * 0.05;
-            const moveY = dy * force * 0.05;
-            positions[sourceIndex].x += moveX;
-            positions[sourceIndex].y += moveY;
-            positions[targetIndex].x -= moveX;
-            positions[targetIndex].y -= moveY;
-          }
-        }
-      });
+  useEffect(() => {
+    if (!pendingSearchNavigation) return;
+    if (pendingSearchNavigation !== searchContext) {
+      setPendingSearchNavigation(null);
+      return;
     }
-
-    const minX = Math.min(...positions.map(p => p.x));
-    const maxX = Math.max(...positions.map(p => p.x));
-    const minY = Math.min(...positions.map(p => p.y));
-    const maxY = Math.max(...positions.map(p => p.y));
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-
-    positions.forEach(pos => {
-      pos.x = pos.x - centerX + width / 2;
-      pos.y = pos.y - centerY + height / 2;
+    if (!hasCurrentSearchResponse) return;
+    setPendingSearchNavigation(null);
+    if (searchResultItems.length > 0) handleSearchResultClick(searchResultItems[0].id);
+  }, [pendingSearchNavigation, searchContext, hasCurrentSearchResponse, searchResultItems, handleSearchResultClick]);
+  const fittedBaseRef = useRef<BaseGraph | null>(null);
+  useEffect(() => {
+    if (!flowInstance || !baseGraph || fittedBaseRef.current === baseGraph || initialFocusNodes.length === 0) return;
+    fittedBaseRef.current = baseGraph;
+    const frame = requestAnimationFrame(() => {
+      flowInstance.fitView({ nodes: initialFocusNodes, padding: 0.2, minZoom: 0.1, maxZoom: 1, duration: 600 });
     });
+    return () => cancelAnimationFrame(frame);
+  }, [flowInstance, baseGraph, initialFocusNodes]);
 
-    return positions;
-  };
 
   // Show loading/empty state
   if (!data?.graph) {
     return <GraphLoadingScreen isLoading={isLoading} />;
   }
 
-  const legendEntries = Array.from(nodeTypesInGraph).map(type => ({
+  const legendEntries = (baseGraph?.nodeTypes ?? []).map(type => ({
     type,
-    color: getNodeColor(type, currentSubject)
+    color: getNodeColor(type, baseGraph?.subject)
   })).sort((a, b) => a.type.localeCompare(b.type));
 
   return (
@@ -1083,6 +1074,12 @@ useEffect(() => {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || !searchQuery.trim()) return;
+              e.preventDefault();
+              if (!hasCurrentSearchResponse) setPendingSearchNavigation(searchContext);
+              else if (searchResultItems.length > 0) handleSearchResultClick(searchResultItems[0].id);
+            }}
             placeholder="Search topics, concepts, definitions..."
             style={{
               flex: 1,
@@ -1156,17 +1153,80 @@ useEffect(() => {
             />
           </div>
         )}
-        {searchResults.length > 0 && (
+        {searchResultItems.length > 0 && (
           <div style={{
             marginTop: '8px',
-            padding: '8px 12px',
             background: 'white',
             borderRadius: '8px',
             boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
             fontSize: '12px',
             color: '#6b7280',
+            overflow: 'hidden',
           }}>
-            Found {searchResults.length} matching node{searchResults.length !== 1 ? 's' : ''}
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6' }}>
+              Found {searchResultItems.length} matching node{searchResultItems.length !== 1 ? 's' : ''}
+            </div>
+            <ul style={{ listStyle: 'none', margin: 0, padding: '4px 0', maxHeight: '240px', overflowY: 'auto' }}>
+              {searchResultItems.map(item => {
+                const isActive = item.id === activePathTargetId;
+                return (
+                  <li key={item.id}>
+                    <button
+                      onClick={() => handleSearchResultClick(item.id)}
+                      title={item.trail.length > 0 ? [...item.trail, item.label].join(' › ') : item.label}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        width: '100%',
+                        padding: '6px 12px',
+                        border: 'none',
+                        background: isActive ? 'rgba(212, 88, 28, 0.08)' : 'transparent',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        font: 'inherit',
+                      }}
+                      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#f9fafb'; }}
+                      onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span style={{
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        background: item.color,
+                        flexShrink: 0,
+                      }} />
+                      <span style={{ minWidth: 0, flex: 1 }}>
+                        <span style={{
+                          display: 'block',
+                          fontSize: '13px',
+                          color: isActive ? PATH_COLOR : '#1f2937',
+                          fontWeight: isActive ? 600 : 500,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {item.label}
+                        </span>
+                        {item.trail.length > 0 && (
+                          <span style={{
+                            display: 'block',
+                            fontSize: '11px',
+                            color: '#9ca3af',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {item.trail.join(' › ')}
+                          </span>
+                        )}
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#9ca3af', flexShrink: 0 }}>{item.type}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         )}
       </div>
@@ -1220,21 +1280,28 @@ useEffect(() => {
       )}
 
       <ReactFlow
-        nodes={visibleNodes}
+        nodes={nodes}
         edges={visibleEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={handleNodeClick}
         onPaneClick={clearActivePath}
+        onEdgeMouseEnter={(_, edge) => {
+          setHoveredEdgeId(edge.id);
+        }}
+        onEdgeMouseLeave={(_, edge) => {
+          setHoveredEdgeId(currentId =>
+            currentId === edge.id ? null : currentId
+          );
+        }}
         nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.5, minZoom: 0.1, maxZoom: 1, duration: 800 }}
+        onInit={setFlowInstance}
         minZoom={0.1}
         maxZoom={4}
         defaultViewport={{ x: 0, y: 0, zoom: 0.2 }}
         defaultEdgeOptions={{
           type: 'smoothstep',
-          animated: true,
+          animated: false,
           style: { strokeWidth: 2 },
           labelStyle: { fontSize: 12, fill: '#888' },
         }}

@@ -219,6 +219,26 @@ if (fixtures.length > 0) {
     it('runs in under 200 ms', () => {
       expect(medianMs(() => radialLayout(tree.centerId!, tree.nodes, sizes))).toBeLessThan(200);
     });
+
+    if (file === 'large.json') {
+      it('keeps the tuned 80px clearance between rings', () => {
+        const { ringRadii, depths } = radialLayout(tree.centerId!, tree.nodes, sizes);
+        const widestFootprintByDepth = new Array<number>(ringRadii.length).fill(0);
+
+        for (const [id, depth] of depths) {
+          const size = sizes.get(id)!;
+          const footprint = Math.hypot(size.width + NODE_GAP, size.height + NODE_GAP);
+          widestFootprintByDepth[depth] = Math.max(widestFootprintByDepth[depth], footprint);
+        }
+
+        for (let depth = 1; depth < ringRadii.length; depth++) {
+          const clearSpace = ringRadii[depth]
+            - ringRadii[depth - 1]
+            - (widestFootprintByDepth[depth - 1] + widestFootprintByDepth[depth]) / 2;
+          expect(clearSpace).toBeGreaterThanOrEqual(80 - 1e-6);
+        }
+      });
+    }
   });
 } else {
   it.skip('radialLayout fixture tests (waiting on X1 fixtures in src/lib/__fixtures__)', () => {});
