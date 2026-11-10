@@ -7,8 +7,13 @@ const express_1 = require("express");
 const multer_1 = __importDefault(require("multer"));
 const practiceExamController_1 = require("../controllers/practiceExamController");
 const router = (0, express_1.Router)();
-const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 2 } });
+// Busboy emits LIMIT_FILE_SIZE when it reaches the limit, including exact-size
+// files. Allow one extra byte here; storeSample enforces the inclusive 10 MB cap.
+const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 + 1, files: 1, fields: 2 } });
 router.use(practiceExamController_1.requirePracticeExamUser);
+router.post('/samples', upload.single('practice_exam'), (0, practiceExamController_1.route)(practiceExamController_1.uploadSample));
+router.get('/samples', (0, practiceExamController_1.route)(practiceExamController_1.listSamples));
+router.get('/samples/:sampleId/file', (0, practiceExamController_1.route)(practiceExamController_1.getSampleFile));
 router.post('/', upload.single('practice_exam'), (0, practiceExamController_1.route)(practiceExamController_1.generate));
 router.get('/', (0, practiceExamController_1.route)(practiceExamController_1.list));
 router.get('/:examId', (0, practiceExamController_1.route)(practiceExamController_1.get));

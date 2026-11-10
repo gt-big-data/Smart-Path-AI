@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { X, FileText, Loader2 } from "lucide-react";
 import { Answer, Attempt, Exam, examApi, errorText, selectedChoices } from "./practiceExamApi";
 import MathText from "./MathText";
+import PracticeExamSamples from "./PracticeExamSamples";
 
 const button =
   "rounded-lg border border-teal-600 px-4 py-2 text-sm font-medium text-teal-800 hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -25,7 +26,6 @@ export default function PracticeExamPanel({
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [attempt, setAttempt] = useState<Attempt>();
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [file, setFile] = useState<File>();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
@@ -278,58 +278,9 @@ export default function PracticeExamPanel({
           )}
           {!exam ? (
             <>
-              <section className="rounded-xl border bg-teal-50/50 p-5 space-y-3">
-                <h3 className="font-semibold">Generate from a sample exam</h3>
-                <p className="text-sm">
-                  Your chat’s course material supplies the content. Upload only
-                  a sample exam PDF (up to 10 MB). Generation may take several
-                  minutes.
-                </p>
-                <label className="block text-sm font-medium">
-                  Sample exam PDF
-                  <input
-                    className="mt-2 block w-full"
-                    type="file"
-                    accept=".pdf,application/pdf"
-                    disabled={!!busy}
-                    onChange={(e) => {
-                      setFile(e.target.files?.[0]);
-                      setError("");
-                    }}
-                  />
-                </label>
-                <button
-                  className={primary}
-                  disabled={!file || !!busy}
-                  onClick={() =>
-                    void act(
-                      "Generating your exam. This can take several minutes…",
-                      async () => {
-                        if (!file || !file.name.toLowerCase().endsWith(".pdf"))
-                          throw new Error("Choose a PDF file.");
-                        if (file.size > 10 * 1024 * 1024)
-                          throw new Error(
-                            "The sample PDF must be at most 10 MB.",
-                          );
-                        const form = new FormData();
-                        form.append("chat_id", chatId);
-                        form.append("practice_exam", file);
-                        try {
-                          const { data } = await examApi.post("/", form);
-                          setExam(data);
-                          setAttempts([]);
-                          setFile(undefined);
-                        } catch (e) {
-                          await loadExams().catch(() => {});
-                          throw e;
-                        }
-                      },
-                    )
-                  }
-                >
-                  Generate exam
-                </button>
-              </section>
+              <PracticeExamSamples key={chatId} chatId={chatId} busy={!!busy} act={act}
+                onGenerated={value => { setExam(value); setAttempts([]); }}
+                refreshExams={() => loadExams()} />
               <div className="flex justify-between items-center">
                 <h3 className="font-semibold">Saved exams ({total})</h3>
                 <button
@@ -411,6 +362,11 @@ export default function PracticeExamPanel({
               </button>
               <div>
                 <h3 className="text-2xl font-semibold">{exam.title}</h3>
+                {exam.sample_pdf_id && <a className="text-sm text-teal-800 underline"
+                  href={`${examApi.defaults.baseURL}/samples/${exam.sample_pdf_id}/file`}
+                  target="_blank" rel="noopener noreferrer">
+                  View sample PDF: {exam.sample_filename || "Original sample"}
+                </a>}
                 <p className="text-sm text-slate-500">
                   {exam.total_points} points
                   {exam.exam.time_limit_minutes

@@ -16,6 +16,8 @@ export interface Exam {
   title: string;
   created_at: string;
   total_points: number;
+  sample_pdf_id?: string;
+  sample_filename?: string;
   exam: {
     instructions?: string;
     time_limit_minutes?: number;
@@ -25,6 +27,13 @@ export interface Exam {
       questions: { id: string; label: string; stem: string; parts: Part[]; error?: string }[];
     }[];
   };
+}
+export interface SamplePdf {
+  id: string;
+  chat_id: string;
+  filename: string;
+  size_bytes: number;
+  created_at: string;
 }
 export interface Answer {
   part_id: string;

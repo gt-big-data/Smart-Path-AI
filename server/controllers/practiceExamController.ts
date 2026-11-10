@@ -2,9 +2,11 @@ import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { Types } from 'mongoose';
 import axios from 'axios';
 import FormData from 'form-data';
+import { createHash } from 'crypto';
 import User from '../models/User';
 import PracticeExam from '../models/PracticeExam';
 import Attempt from '../models/PracticeExamAttempt';
+import SamplePdf from '../models/PracticeExamSample';
 import { pythonServiceClient } from '../utils/axiosConfig';
 import { publicExam, validateExam, validateAnswers, validateGrading } from '../services/practiceExamContract';
 
@@ -40,7 +42,83 @@ async function ownedExam(req: Request) {
 function summary(record: any) {
   return { id: String(record._id), chat_id: record.chat_id, graph_id: record.graph_id,
     schema_version: record.schema_version, title: record.title, total_points: record.total_points,
-    sample_filename: record.sample_filename, created_at: record.createdAt };
+    sample_filename: record.sample_filename, sample_pdf_id: record.sample_pdf_id,
+    created_at: record.createdAt };
+}
+function sampleSummary(record: any) {
+  return { id: String(record._id), chat_id: record.chat_id, filename: record.filename,
+    size_bytes: record.size_bytes, created_at: record.createdAt };
+}
+function pagination(req: Request) {
+  const limit = Number(req.query.limit || 20), offset = Number(req.query.offset || 0);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0) {
+    throw new ApiError(400, 'limit must be 1–100 and offset a nonnegative integer');
+  }
+  return { limit, offset };
+}
+async function storeSample(owner: string, chatId: string, file?: Express.Multer.File) {
+  if (!file || !file.originalname.toLowerCase().endsWith('.pdf')) {
+    throw new ApiError(400, 'practice_exam PDF is required');
+  }
+  if (file.buffer.length > 10 * 1024 * 1024) throw new ApiError(413, 'Sample PDF must be at most 10 MB');
+  if (!file.buffer.subarray(0, 1024).includes(Buffer.from('%PDF-'))) {
+    throw new ApiError(400, 'Uploaded file is not a PDF');
+  }
+  const filter = { user_id: owner, chat_id: chatId,
+    sha256: createHash('sha256').update(file.buffer).digest('hex') };
+  const filename = file.originalname.replace(/[\\/\x00-\x1f\x7f]/g, '_').slice(0, 255);
+  let created = false;
+  try {
+    const result = await SamplePdf.updateOne(filter, { $setOnInsert: {
+      ...filter, filename, size_bytes: file.buffer.length, pdf: file.buffer,
+      createdAt: new Date(), updatedAt: new Date(),
+    } }, { upsert: true, runValidators: true, timestamps: false });
+    created = result.upsertedCount > 0;
+  } catch (error: any) {
+    // Simultaneous retries can race the unique content index; reuse the winner.
+    if (error?.code !== 11000) throw error;
+  }
+  const record = await SamplePdf.findOne(filter);
+  if (!record) throw new ApiError(500, 'Could not save the sample PDF');
+  return { record, created };
+}
+async function ownedSample(owner: string, sampleId: unknown, chatId?: string) {
+  if (typeof sampleId !== 'string' || !Types.ObjectId.isValid(sampleId)) {
+    throw new ApiError(404, 'Sample PDF not found');
+  }
+  const record = await SamplePdf.findOne({ _id: sampleId, user_id: owner,
+    ...(chatId ? { chat_id: chatId } : {}) }).select('+pdf');
+  if (!record) throw new ApiError(404, 'Sample PDF not found');
+  await ownedChat(owner, record.chat_id);
+  return record;
+}
+export async function uploadSample(req: Request, res: Response) {
+  const owner = userId(req), chatId = req.body.chat_id;
+  if (typeof chatId !== 'string' || !chatId.trim()) throw new ApiError(400, 'chat_id is required');
+  await ownedChat(owner, chatId);
+  const { record, created } = await storeSample(owner, chatId, req.file);
+  return res.status(created ? 201 : 200).json({ sample: sampleSummary(record) });
+}
+export async function listSamples(req: Request, res: Response) {
+  const owner = userId(req), chatId = req.query.chat_id;
+  if (typeof chatId !== 'string') throw new ApiError(400, 'chat_id is required');
+  await ownedChat(owner, chatId);
+  const { limit, offset } = pagination(req);
+  const filter = { user_id: owner, chat_id: chatId };
+  const [records, total] = await Promise.all([
+    SamplePdf.find(filter).sort({ createdAt: -1, _id: -1 }).skip(offset).limit(limit),
+    SamplePdf.countDocuments(filter),
+  ]);
+  return res.json({ samples: records.map(sampleSummary), total, limit, offset });
+}
+export async function getSampleFile(req: Request, res: Response) {
+  const sample = await ownedSample(userId(req), req.params.sampleId);
+  res.attachment(sample.filename);
+  res.setHeader('Content-Disposition', String(res.getHeader('Content-Disposition')).replace(/^attachment/, 'inline'));
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  return res.send(Buffer.from(sample.pdf!));
 }
 function attemptView(record: any) {
   return { id: String(record._id), exam_id: String(record.exam_id), status: record.status,
@@ -76,23 +154,35 @@ export async function generate(req: Request, res: Response) {
   const chatId = req.body.chat_id;
   if (typeof chatId !== 'string' || !chatId.trim()) throw new ApiError(400, 'chat_id is required');
   const chat = await ownedChat(owner, chatId);
+  if (req.file && req.body.sample_pdf_id !== undefined) {
+    throw new ApiError(400, 'Choose either an uploaded PDF or a saved sample_pdf_id');
+  }
+  let sample, pdf: Buffer;
+  if (req.file) {
+    sample = (await storeSample(owner, chatId, req.file)).record;
+    pdf = req.file.buffer;
+  } else {
+    if (req.body.sample_pdf_id === undefined) throw new ApiError(400, 'practice_exam PDF or sample_pdf_id is required');
+    sample = await ownedSample(owner, req.body.sample_pdf_id, chatId);
+    pdf = Buffer.from(sample.pdf!);
+  }
   if (!chat.graph_id) throw new ApiError(409, 'Upload notes in this chat before generating an exam');
-  if (!req.file || !req.file.originalname.toLowerCase().endsWith('.pdf')) throw new ApiError(400, 'practice_exam PDF is required');
-  if (!req.file.buffer.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new ApiError(400, 'Uploaded file is not a PDF');
   const graphId = chat.graph_id;
   const form = new FormData();
   form.append('graph_id', graphId);
-  form.append('practice_exam', req.file.buffer, { filename: req.file.originalname, contentType: 'application/pdf' });
+  form.append('practice_exam', pdf, { filename: sample.filename, contentType: 'application/pdf' });
   const response = await pythonServiceClient.post('/practice-exam/generate', form, {
     headers: { ...form.getHeaders(), ...serviceHeaders() }, timeout: 600000, maxBodyLength: 11 * 1024 * 1024,
   });
   try { validateExam(response.data?.exam); }
-  catch { throw new ApiError(502, 'AI service returned an invalid exam; nothing was saved'); }
-  if (!response.data?.format || response.data.schema_version !== 2) throw new ApiError(502, 'AI service returned an invalid blueprint');
+  catch { throw new ApiError(502, 'AI service returned an invalid exam. Your sample PDF is saved; try generating again.'); }
+  if (!response.data?.format || response.data.schema_version !== 2) {
+    throw new ApiError(502, 'AI service returned an invalid blueprint. Your sample PDF is saved; try generating again.');
+  }
   await ownedChat(owner, chatId);
   const record = await PracticeExam.create({ user_id: owner, chat_id: chatId, graph_id: graphId,
     title: response.data.exam.title, total_points: response.data.exam.total_points,
-    sample_filename: req.file.originalname, schema_version: 2,
+    sample_filename: sample.filename, sample_pdf_id: String(sample._id), schema_version: 2,
     exam: response.data.exam, blueprint: response.data.format });
   return res.status(201).json({ ...summary(record), exam: publicExam(record.exam) });
 }

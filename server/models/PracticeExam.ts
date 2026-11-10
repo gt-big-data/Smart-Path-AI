@@ -3,6 +3,7 @@ import { ExamDefinition } from '../services/practiceExamContract';
 export interface IPracticeExam {
   user_id: string; chat_id: string; graph_id: string; schema_version: number;
   title: string; total_points: number; sample_filename: string;
+  sample_pdf_id?: string;
   exam: ExamDefinition; blueprint: unknown; createdAt: Date; updatedAt: Date;
 }
 const schema = new Schema<IPracticeExam>({
@@ -10,6 +11,7 @@ const schema = new Schema<IPracticeExam>({
   graph_id: { type: String, required: true }, schema_version: { type: Number, default: 2 },
   title: { type: String, required: true }, total_points: { type: Number, required: true },
   sample_filename: { type: String, required: true },
+  sample_pdf_id: { type: String },
   // Private snapshot. Controllers must explicitly select it and project public fields.
   exam: { type: Schema.Types.Mixed, required: true, select: false },
   blueprint: { type: Schema.Types.Mixed, required: true, select: false },

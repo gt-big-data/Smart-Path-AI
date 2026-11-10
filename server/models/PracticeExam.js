@@ -6,6 +6,7 @@ const schema = new mongoose_1.Schema({
     graph_id: { type: String, required: true }, schema_version: { type: Number, default: 2 },
     title: { type: String, required: true }, total_points: { type: Number, required: true },
     sample_filename: { type: String, required: true },
+    sample_pdf_id: { type: String },
     // Private snapshot. Controllers must explicitly select it and project public fields.
     exam: { type: mongoose_1.Schema.Types.Mixed, required: true, select: false },
     blueprint: { type: mongoose_1.Schema.Types.Mixed, required: true, select: false },

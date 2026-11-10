@@ -13,6 +13,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.route = exports.requirePracticeExamUser = void 0;
+exports.uploadSample = uploadSample;
+exports.listSamples = listSamples;
+exports.getSampleFile = getSampleFile;
 exports.practiceExamError = practiceExamError;
 exports.generate = generate;
 exports.list = list;
@@ -25,9 +28,11 @@ exports.submit = submit;
 const mongoose_1 = require("mongoose");
 const axios_1 = __importDefault(require("axios"));
 const form_data_1 = __importDefault(require("form-data"));
+const crypto_1 = require("crypto");
 const User_1 = __importDefault(require("../models/User"));
 const PracticeExam_1 = __importDefault(require("../models/PracticeExam"));
 const PracticeExamAttempt_1 = __importDefault(require("../models/PracticeExamAttempt"));
+const PracticeExamSample_1 = __importDefault(require("../models/PracticeExamSample"));
 const axiosConfig_1 = require("../utils/axiosConfig");
 const practiceExamContract_1 = require("../services/practiceExamContract");
 const GRADING_LEASE_MS = 10 * 60 * 1000;
@@ -75,7 +80,96 @@ function ownedExam(req) {
 function summary(record) {
     return { id: String(record._id), chat_id: record.chat_id, graph_id: record.graph_id,
         schema_version: record.schema_version, title: record.title, total_points: record.total_points,
-        sample_filename: record.sample_filename, created_at: record.createdAt };
+        sample_filename: record.sample_filename, sample_pdf_id: record.sample_pdf_id,
+        created_at: record.createdAt };
+}
+function sampleSummary(record) {
+    return { id: String(record._id), chat_id: record.chat_id, filename: record.filename,
+        size_bytes: record.size_bytes, created_at: record.createdAt };
+}
+function pagination(req) {
+    const limit = Number(req.query.limit || 20), offset = Number(req.query.offset || 0);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0) {
+        throw new ApiError(400, 'limit must be 1–100 and offset a nonnegative integer');
+    }
+    return { limit, offset };
+}
+function storeSample(owner, chatId, file) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!file || !file.originalname.toLowerCase().endsWith('.pdf')) {
+            throw new ApiError(400, 'practice_exam PDF is required');
+        }
+        if (file.buffer.length > 10 * 1024 * 1024)
+            throw new ApiError(413, 'Sample PDF must be at most 10 MB');
+        if (!file.buffer.subarray(0, 1024).includes(Buffer.from('%PDF-'))) {
+            throw new ApiError(400, 'Uploaded file is not a PDF');
+        }
+        const filter = { user_id: owner, chat_id: chatId,
+            sha256: (0, crypto_1.createHash)('sha256').update(file.buffer).digest('hex') };
+        const filename = file.originalname.replace(/[\\/\x00-\x1f\x7f]/g, '_').slice(0, 255);
+        let created = false;
+        try {
+            const result = yield PracticeExamSample_1.default.updateOne(filter, { $setOnInsert: Object.assign(Object.assign({}, filter), { filename, size_bytes: file.buffer.length, pdf: file.buffer, createdAt: new Date(), updatedAt: new Date() }) }, { upsert: true, runValidators: true, timestamps: false });
+            created = result.upsertedCount > 0;
+        }
+        catch (error) {
+            // Simultaneous retries can race the unique content index; reuse the winner.
+            if ((error === null || error === void 0 ? void 0 : error.code) !== 11000)
+                throw error;
+        }
+        const record = yield PracticeExamSample_1.default.findOne(filter);
+        if (!record)
+            throw new ApiError(500, 'Could not save the sample PDF');
+        return { record, created };
+    });
+}
+function ownedSample(owner, sampleId, chatId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (typeof sampleId !== 'string' || !mongoose_1.Types.ObjectId.isValid(sampleId)) {
+            throw new ApiError(404, 'Sample PDF not found');
+        }
+        const record = yield PracticeExamSample_1.default.findOne(Object.assign({ _id: sampleId, user_id: owner }, (chatId ? { chat_id: chatId } : {}))).select('+pdf');
+        if (!record)
+            throw new ApiError(404, 'Sample PDF not found');
+        yield ownedChat(owner, record.chat_id);
+        return record;
+    });
+}
+function uploadSample(req, res) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const owner = userId(req), chatId = req.body.chat_id;
+        if (typeof chatId !== 'string' || !chatId.trim())
+            throw new ApiError(400, 'chat_id is required');
+        yield ownedChat(owner, chatId);
+        const { record, created } = yield storeSample(owner, chatId, req.file);
+        return res.status(created ? 201 : 200).json({ sample: sampleSummary(record) });
+    });
+}
+function listSamples(req, res) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const owner = userId(req), chatId = req.query.chat_id;
+        if (typeof chatId !== 'string')
+            throw new ApiError(400, 'chat_id is required');
+        yield ownedChat(owner, chatId);
+        const { limit, offset } = pagination(req);
+        const filter = { user_id: owner, chat_id: chatId };
+        const [records, total] = yield Promise.all([
+            PracticeExamSample_1.default.find(filter).sort({ createdAt: -1, _id: -1 }).skip(offset).limit(limit),
+            PracticeExamSample_1.default.countDocuments(filter),
+        ]);
+        return res.json({ samples: records.map(sampleSummary), total, limit, offset });
+    });
+}
+function getSampleFile(req, res) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const sample = yield ownedSample(userId(req), req.params.sampleId);
+        res.attachment(sample.filename);
+        res.setHeader('Content-Disposition', String(res.getHeader('Content-Disposition')).replace(/^attachment/, 'inline'));
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        return res.send(Buffer.from(sample.pdf));
+    });
 }
 function attemptView(record) {
     return { id: String(record._id), exam_id: String(record.exam_id), status: record.status,
@@ -127,16 +221,26 @@ function generate(req, res) {
         if (typeof chatId !== 'string' || !chatId.trim())
             throw new ApiError(400, 'chat_id is required');
         const chat = yield ownedChat(owner, chatId);
+        if (req.file && req.body.sample_pdf_id !== undefined) {
+            throw new ApiError(400, 'Choose either an uploaded PDF or a saved sample_pdf_id');
+        }
+        let sample, pdf;
+        if (req.file) {
+            sample = (yield storeSample(owner, chatId, req.file)).record;
+            pdf = req.file.buffer;
+        }
+        else {
+            if (req.body.sample_pdf_id === undefined)
+                throw new ApiError(400, 'practice_exam PDF or sample_pdf_id is required');
+            sample = yield ownedSample(owner, req.body.sample_pdf_id, chatId);
+            pdf = Buffer.from(sample.pdf);
+        }
         if (!chat.graph_id)
             throw new ApiError(409, 'Upload notes in this chat before generating an exam');
-        if (!req.file || !req.file.originalname.toLowerCase().endsWith('.pdf'))
-            throw new ApiError(400, 'practice_exam PDF is required');
-        if (!req.file.buffer.subarray(0, 1024).includes(Buffer.from('%PDF-')))
-            throw new ApiError(400, 'Uploaded file is not a PDF');
         const graphId = chat.graph_id;
         const form = new form_data_1.default();
         form.append('graph_id', graphId);
-        form.append('practice_exam', req.file.buffer, { filename: req.file.originalname, contentType: 'application/pdf' });
+        form.append('practice_exam', pdf, { filename: sample.filename, contentType: 'application/pdf' });
         const response = yield axiosConfig_1.pythonServiceClient.post('/practice-exam/generate', form, {
             headers: Object.assign(Object.assign({}, form.getHeaders()), serviceHeaders()), timeout: 600000, maxBodyLength: 11 * 1024 * 1024,
         });
@@ -144,14 +248,15 @@ function generate(req, res) {
             (0, practiceExamContract_1.validateExam)((_a = response.data) === null || _a === void 0 ? void 0 : _a.exam);
         }
         catch (_c) {
-            throw new ApiError(502, 'AI service returned an invalid exam; nothing was saved');
+            throw new ApiError(502, 'AI service returned an invalid exam. Your sample PDF is saved; try generating again.');
         }
-        if (!((_b = response.data) === null || _b === void 0 ? void 0 : _b.format) || response.data.schema_version !== 2)
-            throw new ApiError(502, 'AI service returned an invalid blueprint');
+        if (!((_b = response.data) === null || _b === void 0 ? void 0 : _b.format) || response.data.schema_version !== 2) {
+            throw new ApiError(502, 'AI service returned an invalid blueprint. Your sample PDF is saved; try generating again.');
+        }
         yield ownedChat(owner, chatId);
         const record = yield PracticeExam_1.default.create({ user_id: owner, chat_id: chatId, graph_id: graphId,
             title: response.data.exam.title, total_points: response.data.exam.total_points,
-            sample_filename: req.file.originalname, schema_version: 2,
+            sample_filename: sample.filename, sample_pdf_id: String(sample._id), schema_version: 2,
             exam: response.data.exam, blueprint: response.data.format });
         return res.status(201).json(Object.assign(Object.assign({}, summary(record)), { exam: (0, practiceExamContract_1.publicExam)(record.exam) }));
     });

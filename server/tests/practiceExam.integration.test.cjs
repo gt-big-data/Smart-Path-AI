@@ -7,6 +7,7 @@ const express = require('express');
 const User = require('../models/User').default;
 const Exam = require('../models/PracticeExam').default;
 const Attempt = require('../models/PracticeExamAttempt').default;
+const Sample = require('../models/PracticeExamSample').default;
 const client = require('../utils/axiosConfig').pythonServiceClient;
 const router = require('../routes/practiceExamRoutes').default;
 const { randomUUID } = require('node:crypto');
@@ -31,12 +32,15 @@ const definition = {
 };
 let server, base, owner, outsider, ownsDatabase = false;
 let grades = 0, failGrade = false, holdGrade = false, releaseGrade;
+let failGenerate = false, invalidGenerate = false, expectedGraph = 'graph-local';
 const originalPost = client.post;
 client.post = async (path, data) => {
   if (path.endsWith('/generate')) {
     const body = data.getBuffer().toString();
-    assert.match(body, /graph-local/); assert.doesNotMatch(body, /name="notes"/);
-    return { data: { schema_version: 2, format: { title: 'Blueprint' }, exam: structuredClone(definition) } };
+    assert.ok(body.includes(expectedGraph)); assert.doesNotMatch(body, /name="notes"/);
+    assert.match(body, /%PDF-1.4\ntest sample/);
+    if (failGenerate) throw new Error('Simulated generation failure');
+    return { data: { schema_version: 2, format: { title: 'Blueprint' }, exam: invalidGenerate ? {} : structuredClone(definition) } };
   }
   grades++;
   assert.equal(data.exam.total_points, 5);
@@ -54,14 +58,18 @@ before(async () => {
     throw new Error('Refusing to use or delete an existing database; choose a fresh test suffix');
   }
   ownsDatabase = true;
-  await Promise.all([User, Exam, Attempt].map(async model => {
+  await Promise.all([User, Exam, Attempt, Sample].map(async model => {
     await model.createCollection(); await model.createIndexes();
   }));
   owner = String((await User.create({ email: 'owner@local.test', chats: [
     { chat_id: 'chat-local', title: 'Chemistry', graph_id: 'graph-local', messages: [] },
     { chat_id: 'chat-empty', title: 'Empty', graph_id: '', messages: [] },
+    { chat_id: 'chat-pdfs', title: 'Saved PDFs', graph_id: 'graph-local', messages: [] },
+    { chat_id: 'chat-other', title: 'Other course', graph_id: 'graph-local', messages: [] },
   ] }))._id);
-  outsider = String((await User.create({ email: 'outsider@local.test', chats: [] }))._id);
+  outsider = String((await User.create({ email: 'outsider@local.test', chats: [
+    { chat_id: 'chat-pdfs', title: 'Another user', graph_id: 'graph-local', messages: [] },
+  ] }))._id);
   const app = express();
   app.use(express.json());
   // Test-only authentication harness; never installed in the application.
@@ -148,4 +156,121 @@ test('owned exam lifecycle, private keys, draft conflicts, idempotent submission
   assert.equal((await request(`/${examId}/attempts`)).data.attempts.length, 2);
   assert.equal(await mongoose.connection.collection('quizhistories').countDocuments(), 0);
   assert.equal(await mongoose.connection.collection('conceptprogresses').countDocuments(), 0);
+});
+
+test('sample PDFs persist independently, remain private and generate fresh exams without reuploading', async () => {
+  assert.equal((await request('/samples?chat_id=chat-pdfs', { who: null })).status, 401);
+  assert.equal((await request('/samples', { method: 'POST', body: upload('chat-pdfs'), multipart: true, who: null })).status, 401);
+  const saved = await request('/samples', { method: 'POST', body: upload('chat-pdfs'), multipart: true });
+  assert.equal(saved.status, 201);
+  const sample = saved.data.sample;
+  assert.equal(sample.filename, 'sample.pdf');
+  assert.equal(sample.size_bytes, Buffer.byteLength('%PDF-1.4\ntest sample'));
+  assert.ok(!Number.isNaN(Date.parse(sample.created_at)));
+  assert.equal('pdf' in sample, false); assert.equal('sha256' in sample, false);
+  const hidden = await Sample.findById(sample.id);
+  assert.equal(hidden.pdf, undefined); assert.equal(hidden.sha256, undefined);
+  const duplicate = await request('/samples', { method: 'POST', body: upload('chat-pdfs'), multipart: true });
+  assert.equal(duplicate.status, 200);
+  assert.deepEqual(duplicate.data.sample, sample);
+  const listed = await request('/samples?chat_id=chat-pdfs&limit=1&offset=0');
+  assert.equal(listed.data.total, 1);
+  assert.deepEqual(listed.data.samples, [sample]);
+  assert.deepEqual((await request('/samples?chat_id=chat-pdfs&offset=1')).data.samples, []);
+  assert.equal((await request('/samples?chat_id=chat-pdfs&limit=101')).status, 400);
+  assert.equal((await request('/samples?chat_id=chat-pdfs&offset=-1')).status, 400);
+  assert.equal((await request('/samples?chat_id=chat-pdfs', { who: outsider })).data.total, 0);
+  assert.equal((await request('/samples?chat_id=chat-other')).data.total, 0);
+
+  const fileUrl = `${base}/samples/${sample.id}/file`;
+  assert.equal((await fetch(fileUrl)).status, 401);
+  assert.equal((await fetch(fileUrl, { headers: { 'x-test-user': outsider } })).status, 404);
+  const file = await fetch(fileUrl, { headers: { 'x-test-user': owner } });
+  assert.equal(file.status, 200);
+  assert.equal(file.headers.get('content-type'), 'application/pdf');
+  assert.match(file.headers.get('content-disposition'), /^inline;/);
+  assert.equal(file.headers.get('cache-control'), 'private, no-store');
+  assert.equal(await file.text(), '%PDF-1.4\ntest sample');
+
+  const generate = () => request('', { method: 'POST', body: { chat_id: 'chat-pdfs', sample_pdf_id: sample.id } });
+  const first = await generate(), second = await generate();
+  assert.equal(first.status, 201); assert.equal(second.status, 201);
+  assert.notEqual(first.data.id, second.data.id);
+  assert.equal(first.data.sample_pdf_id, sample.id);
+  assert.equal(first.data.sample_filename, 'sample.pdf');
+  assert.equal('answer' in first.data.exam.sections[0].questions[0].parts[0], false);
+  assert.equal(await Sample.countDocuments({ user_id: owner, chat_id: 'chat-pdfs' }), 1);
+  assert.equal((await request('', { method: 'POST', who: outsider,
+    body: { chat_id: 'chat-pdfs', sample_pdf_id: sample.id } })).status, 404);
+  assert.equal((await request('', { method: 'POST',
+    body: { chat_id: 'chat-other', sample_pdf_id: sample.id } })).status, 404);
+  assert.equal((await request('', { method: 'POST', body: { chat_id: 'chat-pdfs', sample_pdf_id: 'invalid' } })).status, 404);
+  assert.equal((await request('', { method: 'POST', body: { chat_id: 'chat-pdfs' } })).status, 400);
+  const ambiguous = upload('chat-pdfs'); ambiguous.append('sample_pdf_id', sample.id);
+  assert.equal((await request('', { method: 'POST', body: ambiguous, multipart: true })).status, 400);
+
+  // Saved PDFs always use the chat's CURRENT graph when creating a new exam.
+  expectedGraph = 'graph-updated';
+  await User.updateOne({ _id: owner, 'chats.chat_id': 'chat-pdfs' }, { $set: { 'chats.$.graph_id': expectedGraph } });
+  assert.equal((await generate()).data.graph_id, expectedGraph);
+  expectedGraph = 'graph-local';
+  await User.updateOne({ _id: owner, 'chats.chat_id': 'chat-pdfs' }, { $set: { 'chats.$.graph_id': expectedGraph } });
+
+  failGenerate = true;
+  assert.equal((await generate()).status, 500);
+  failGenerate = false;
+  invalidGenerate = true;
+  assert.equal((await generate()).status, 502);
+  invalidGenerate = false;
+  assert.equal((await generate()).status, 201);
+  assert.equal((await request('/samples?chat_id=chat-pdfs')).data.total, 1);
+
+  // Content deduplication is scoped to the user and chat, never global.
+  const other = await request('/samples', { method: 'POST', body: upload('chat-pdfs'), multipart: true, who: outsider });
+  assert.equal(other.status, 201); assert.notEqual(other.data.sample.id, sample.id);
+  const races = await Promise.all(Array.from({ length: 4 }, () =>
+    request('/samples', { method: 'POST', body: upload('chat-other'), multipart: true })));
+  assert.equal(new Set(races.map(r => r.data.sample.id)).size, 1);
+  assert.equal(races.filter(r => r.status === 201).length, 1);
+  assert.equal(await Sample.countDocuments({ user_id: owner, chat_id: 'chat-other' }), 1);
+});
+
+test('invalid and oversized sample uploads are rejected; generation failures retain uploaded PDFs', async () => {
+  const count = await Sample.countDocuments();
+  for (const [bytes, filename] of [['not a PDF', 'bad.pdf'], ['%PDF-1.4\ntest sample', 'bad.txt']]) {
+    const form = new FormData(); form.append('chat_id', 'chat-pdfs');
+    form.append('practice_exam', new Blob([bytes]), filename);
+    assert.equal((await request('/samples', { method: 'POST', body: form, multipart: true })).status, 400);
+  }
+  const oversized = new FormData(); oversized.append('chat_id', 'chat-pdfs');
+  oversized.append('practice_exam', new Blob([Buffer.alloc(10 * 1024 * 1024 + 1)]), 'huge.pdf');
+  assert.equal((await request('/samples', { method: 'POST', body: oversized, multipart: true })).status, 413);
+  assert.equal(await Sample.countDocuments(), count);
+  failGenerate = true;
+  const form = upload('chat-pdfs');
+  form.set('practice_exam', new Blob(['%PDF-1.4\ntest sample new upload']), 'retry.pdf');
+  assert.equal((await request('', { method: 'POST', body: form, multipart: true })).status, 500);
+  failGenerate = false;
+  const saved = (await request('/samples?chat_id=chat-pdfs')).data.samples.find(s => s.filename === 'retry.pdf');
+  assert.ok(saved);
+  assert.equal((await request('', { method: 'POST', body: { chat_id: 'chat-pdfs', sample_pdf_id: saved.id } })).status, 201);
+  // Saving a sample itself does not require an existing study graph.
+  assert.equal((await request('/samples', { method: 'POST', body: upload('chat-empty'), multipart: true })).status, 200);
+});
+
+test('a PDF at the 10 MB limit is stored and served intact; inaccessible chats cannot expose files', async () => {
+  const bytes = Buffer.alloc(10 * 1024 * 1024, 32);
+  bytes.write('%PDF-1.4\n');
+  const form = new FormData(); form.append('chat_id', 'chat-other');
+  form.append('practice_exam', new Blob([bytes]), 'maximum.pdf');
+  const saved = await request('/samples', { method: 'POST', body: form, multipart: true });
+  assert.equal(saved.status, 201);
+  assert.equal(saved.data.sample.size_bytes, bytes.length);
+  const fileUrl = `${base}/samples/${saved.data.sample.id}/file`;
+  const file = await fetch(fileUrl, { headers: { 'x-test-user': owner } });
+  assert.equal(file.status, 200);
+  assert.deepEqual(Buffer.from(await file.arrayBuffer()), bytes);
+  await User.updateOne({ _id: owner }, { $pull: { chats: { chat_id: 'chat-other' } } });
+  assert.equal((await fetch(fileUrl, { headers: { 'x-test-user': owner } })).status, 404);
+  assert.equal((await request('/samples?chat_id=chat-other')).status, 404);
 });

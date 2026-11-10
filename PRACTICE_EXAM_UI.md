@@ -1,7 +1,6 @@
 # Practice exam UI handoff (API version 2)
 
-The backend is implemented; this branch intentionally contains no React/Vite changes.
-Practice exams belong to an existing study chat and use its current Neo4j graph.
+Practice exams and saved sample PDFs belong to an existing study chat. Generation uses its current study graph.
 Users upload **only the sample exam PDF**, not their notes again.
 
 ## User flow
@@ -12,7 +11,9 @@ the quiz question loop. Pause the active quiz or require the user to finish it b
 opening an exam attempt; quiz answers and exam answers are different workflows.
 
 1. On opening the panel, load exams for `currentChat.id`.
-2. Upload a sample PDF and generate an exam. This is a long request, not a background job.
+2. Upload and save a sample PDF, or select a previously saved PDF. Generate a new exam
+   from that selection. “Generate exam” also saves a newly selected file first. Generation
+   is a long request, not a background job. The saved PDF survives generation failures.
 3. Render `sections`, `questions`, and `parts` in their returned array order. Display section
    instructions, original question labels, each shared `stem`, and then each part prompt.
 4. Create an attempt, or resume a saved draft from the attempts list.
@@ -33,7 +34,10 @@ exam API from the browser or expose its service token.
 
 | Method | Path relative to `/api/practice-exams` | Input | Response |
 |---|---|---|---|
-| POST | `/` | Multipart `chat_id`, `practice_exam` PDF | `201`: exam metadata + public `exam` |
+| POST | `/samples` | Multipart `chat_id`, `practice_exam` PDF | `201` new / `200` duplicate `{sample}` |
+| GET | `/samples?chat_id=...&limit=20&offset=0` | Owned chat ID; limit 1–100 | `{samples, total, limit, offset}` |
+| GET | `/samples/:sampleId/file` | — | Original PDF, inline; session authentication required |
+| POST | `/` | JSON `{chat_id, sample_pdf_id}` or legacy multipart `chat_id`, `practice_exam` | `201`: exam metadata + public `exam` |
 | GET | `/?chat_id=...&limit=20&offset=0` | Owned chat ID; limit 1–100 | `{exams, total, limit, offset}` |
 | GET | `/:examId` | — | Metadata + public `exam` |
 | POST | `/:examId/attempts` | `{request_id}` | `201` new / `200` existing `{attempt}` |
@@ -48,6 +52,28 @@ if that creation request is retried. A new deliberate retake gets a new ID. IDs 
 
 ### Generate
 
+Save once, then generate repeatedly without another browser upload:
+
+```ts
+const form = new FormData();
+form.append('chat_id', currentChat.id);
+form.append('practice_exam', samplePdf);
+const { data: { sample } } = await examApi.post('/samples', form);
+const { data: savedExam } = await examApi.post('/', {
+  chat_id: currentChat.id, sample_pdf_id: sample.id,
+});
+```
+
+Sample metadata is `{id, chat_id, filename, size_bytes, created_at}`. List/upload
+responses never include PDF bytes or content hashes. The panel displays saved PDFs
+with file size and upload date, supports pagination, and opens the original through
+the authenticated file route. Each generate call creates a fresh exam using the
+chat's current study graph. It does not reuse a previous generated exam or answer key.
+The sample must belong to the same user AND chat as the generation request.
+
+The legacy multipart generation request also saves its source PDF before calling
+the AI service. Supply exactly one source: a file or `sample_pdf_id`.
+
 ```ts
 const form = new FormData();
 form.append('chat_id', currentChat.id);
@@ -60,7 +86,7 @@ const { data: savedExam } = await axios.post(
 ```
 
 Metadata fields are `id`, `chat_id`, `graph_id`, `schema_version`, `title`, `total_points`,
-`sample_filename`, `created_at`. `graph_id` is the immutable graph used at generation, even
+`sample_filename`, optional `sample_pdf_id`, `created_at`. `graph_id` is the immutable graph used at generation, even
 if a subsequent notes upload changes the chat's active graph.
 
 The public exam shape is:
@@ -204,8 +230,22 @@ The existing default points to the deployed AI service.
 
 For isolated development, override `MONGO_URI` and all three `NEO4J_*` connection settings
 with disposable local databases. Do not use the main `.env` database addresses for tests.
-No existing data migration is required. Mongoose creates `practiceexams` and
-`practiceexamattempts` and their indexes when used; existing models and data are unchanged.
+No existing data migration is required. Mongoose creates `practiceexams`,
+`practiceexamattempts` and `practiceexamsamples` and their indexes when used.
+
+Sample PDFs are persisted as private MongoDB binary documents, capped at 10 MB each
+(below MongoDB's 16 MB document limit), so no additional storage service or secret is
+required. A unique SHA-256 index per user/chat prevents duplicate uploads, including
+concurrent retries. Duplicate content retains its first filename and upload date.
+Sample queries omit binary data by default; only file retrieval and generation select it.
+Saving a PDF does not require a study graph or AI service. Generation still requires notes.
+The file route checks both ownership and continued access to the parent chat and returns
+`Cache-Control: private, no-store`. PDFs from deleted/inaccessible chats cannot be fetched
+or reused. No public file URLs are created.
+
+Older generated exams remain usable. Their original uploaded PDFs were never retained,
+so those source PDFs must be uploaded once to appear in the new saved-PDF list.
+The AI service continues parsing PDFs temporarily; Express owns durable storage.
 
 The AI repository's `PRACTICE_EXAM.md` documents its internal endpoints and Docker setup.
 
@@ -229,8 +269,37 @@ docker stop smartpath-exam-test-mongo
 
 The test rejects remote/main database addresses, refuses an already-existing database, creates its own test records, and drops
 only its newly created whitelisted test database on completion. It stubs AI responses but exercises real
-Mongo persistence and Express HTTP routes, including ownership, hidden keys, revision
-conflicts, duplicate-submit protection and grading failure recovery.
+Mongo persistence and Express HTTP routes, including PDF byte retention, deduplication,
+concurrent uploads, user/chat ownership, file retrieval, saved-PDF regeneration, upload
+limits and retention on generation failure, as well as hidden keys, revision conflicts,
+duplicate-submit protection and grading failure recovery.
+
+The browser regression checks the real saved-PDF component with intercepted API responses.
+It covers saving without generation, selecting a PDF after page reload, generation without
+another upload, recovery from generation failure, and client-side size validation.
+For optional browser testing, install Playwright outside the repository:
+
+```bash
+npm install --prefix /private/tmp/smartpath-pdf-ui --no-save --package-lock=false playwright
+PLAYWRIGHT_BROWSERS_PATH=/private/tmp/smartpath-pdf-ui/browsers \
+  /private/tmp/smartpath-pdf-ui/node_modules/.bin/playwright install chromium
+```
+
+Run Vite in one terminal (no Express or AI services needed for this component test):
+
+```bash
+VITE_API_BASE_URL=http://localhost:4000 npm run dev:client -- --host 127.0.0.1 --port 5174 --strictPort
+```
+
+Then run the test in another:
+
+```bash
+NODE_PATH=/private/tmp/smartpath-pdf-ui/node_modules \
+PLAYWRIGHT_BROWSERS_PATH=/private/tmp/smartpath-pdf-ui/browsers \
+  node --test server/tests/practiceExamSamples.browser.cjs
+```
+
+Optionally set `PRACTICE_EXAM_BROWSER_SCREENSHOT` to a screenshot output path.
 
 Unverified questions retain their generated content with an error warning. Show their parts with
 disabled controls, exclude them from answer counts and totals, and never submit or grade their IDs.
