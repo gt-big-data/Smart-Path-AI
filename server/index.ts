@@ -24,6 +24,7 @@ import graphRoutes from './routes/graphRoutes';
 import chatRoutes from './routes/chatRoutes';
 import progressRoutes from './routes/progressRoutes';
 import quizHistoryRoutes from './routes/quizHistoryRoutes';
+import practiceExamRoutes from './routes/practiceExamRoutes';
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
 import axios from 'axios';
@@ -139,6 +140,9 @@ app.use('/api', progressRoutes);
 
 // Quiz History Routes
 app.use('/api/quiz-history', quizHistoryRoutes);
+
+// Saved graph-backed practice exams; does not update quiz progress.
+app.use('/api/practice-exams', practiceExamRoutes);
 
 app.get('/', (req, res) => {
     res.send('API is running');

@@ -8,5 +8,6 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include" : ["**/*"]
+  "include" : ["**/*"],
+  "exclude": ["__tests__"]
 }

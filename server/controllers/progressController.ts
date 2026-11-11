@@ -2,6 +2,7 @@
 import { Request, Response, NextFunction } from 'express';
 import ConceptProgress from '../models/ConceptProgress';
 import User from '../models/User';
+import { calculateDecayedConfidence } from '../utils/confidenceDecay';
 
 const updateConfidenceScore = async (userId: string, chatId: string, conceptId: string, isCorrect: boolean, isRetry: boolean) => {
   let progress = await ConceptProgress.findOne({ user: userId, chatId, conceptId });
@@ -15,6 +16,10 @@ const updateConfidenceScore = async (userId: string, chatId: string, conceptId: 
     });
   }
 
+  const now = new Date();
+  progress.confidenceScore = calculateDecayedConfidence(
+    progress.confidenceScore, progress.lastAttempted, now.getTime(),
+  );
   if (isCorrect) {
     progress.confidenceScore += isRetry ? 0.05 : 0.1;
   } else {
@@ -23,7 +28,7 @@ const updateConfidenceScore = async (userId: string, chatId: string, conceptId: 
 
   // Clamp the score between 0 and 1
   progress.confidenceScore = Math.max(0, Math.min(1, progress.confidenceScore));
-  progress.lastAttempted = new Date();
+  progress.lastAttempted = now;
 
   await progress.save();
   return progress;
@@ -82,7 +87,12 @@ export const getConceptProgress = async (req: Request, res: Response, next: Next
           console.log('[getConceptProgress] No progress records found');
         }
         
-        res.status(200).json(progress);
+        const now = Date.now();
+        const decayedProgress = progress.map(record => ({
+            ...record.toObject(),
+            confidenceScore: calculateDecayedConfidence(record.confidenceScore, record.lastAttempted, now),
+        }));
+        res.status(200).json(decayedProgress);
     } catch (error) {
         console.error('[getConceptProgress] Error fetching concept progress:', error);
         next(error);

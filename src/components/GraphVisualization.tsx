@@ -18,14 +18,17 @@ import { Search, X } from 'lucide-react';
 import PathBar from './graph/PathBar';
 import { computeNodeSizes } from '../lib/nodesizing';
 import { buildGraphTree, GraphTree } from '../lib/graphTree';
+import { useCollapse } from '../lib/collapse';
 import { radialLayout, toTopLeft, NodeSize, Point, RadialTreeNode } from '../lib/radialLayout';
 import { getPathHighlight } from '../lib/pathHighlight';
-import { applyGraphStyles, BaseGraph, ConfidenceKeys, DEFAULT_NODE_BORDER, NodeEdit, resolveConfidenceScores } from '../lib/graphStyles';
+import { buildSearchResultItems } from '../lib/searchResults';
+import { applyGraphStyles, BaseGraph, ConfidenceKeys, DEFAULT_NODE_BORDER, NodeEdit, PATH_COLOR, resolveConfidenceScores } from '../lib/graphStyles';
 import { API_BASE_URL } from '../config/api';
 import { GraphNode, NodeEditState, NODE_EDIT_POPUP_WIDTH, NODE_EDIT_POPUP_HEIGHT, VIEWPORT_PADDING } from './graph/GraphNode';
 
 interface GraphData {
   status: string;
+  graph_id?: string;
   subject?: string;
   graph: {
     nodes: any[];
@@ -49,6 +52,9 @@ const DEFAULT_NODE_SIZE: NodeSize = { width: 200, height: 70 };
 
 // Rings from the center that the first view zooms to; the rest of the graph is a pan away
 const INITIAL_FOCUS_DEPTH = 2;
+
+// Zoom a clicked search result is shown at, at least, so its label is readable
+const SEARCH_RESULT_MIN_ZOOM = 0.8;
 
 /**
  * Top-left positions for React Flow: the center in the middle and one ring per depth
@@ -544,9 +550,21 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<string[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
   const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword');
+  const searchContext = useMemo(() => ({
+    graph: data?.graph, graphId: data?.graph_id, query: searchQuery, mode: searchMode,
+  }), [data?.graph, data?.graph_id, searchQuery, searchMode]);
+  const [searchResponse, setSearchResponse] = useState<{
+    context: typeof searchContext; nodeIds: string[];
+  } | null>(null);
+  const [pendingSearchNavigation, setPendingSearchNavigation] = useState<typeof searchContext | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  // Hide previous hits immediately, including the debounce before a new request starts.
+  const hasCurrentSearchResponse = searchResponse?.context === searchContext;
+  const searchResults = useMemo(
+    () => searchResponse?.context === searchContext ? searchResponse.nodeIds : [],
+    [searchContext, searchResponse]
+  );
 
   // Node edit popup state
   const [nodeEditState, setNodeEditState] = useState<NodeEditState | null>(null);
@@ -689,41 +707,38 @@ useEffect(() => {
     return color;
   };
 
-  const handleSearch = useCallback(async (query: string) => {
-    if (!query.trim() || !data?.graph) {
-      setSearchResults([]);
-      return;
-    }
-
-    const graphId = (data as any).graph_id;
-    if (!graphId) return;
-
-    setIsSearching(true);
-    try {
-      const endpoint = searchMode === 'semantic' ? 'semantic-search-graph' : 'search-graph';
-      const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${graphId}&query=${encodeURIComponent(query)}`;
-      const response = await fetch(url, { credentials: 'include' });
-      const result = await response.json();
-      if (result.status === 'success') {
-        setSearchResults(result.node_ids || []);
-      } else {
-        setSearchResults([]);
-      }
-    } catch (error) {
-      console.error('[Graph Search] Error:', error);
-      setSearchResults([]);
-    } finally {
-      setIsSearching(false);
-    }
-  }, [data, searchMode]);
-
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (searchQuery) handleSearch(searchQuery);
-      else setSearchResults([]);
+    const { graph, graphId, query, mode } = searchContext;
+    setIsSearching(false);
+    if (!query.trim() || !graph || !graphId) return;
+
+    const controller = new AbortController();
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const endpoint = mode === 'semantic' ? 'semantic-search-graph' : 'search-graph';
+        const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${encodeURIComponent(graphId)}&query=${encodeURIComponent(query)}`;
+        const response = await fetch(url, { credentials: 'include', signal: controller.signal });
+        const result = await response.json();
+        if (!cancelled) {
+          setSearchResponse({ context: searchContext, nodeIds: result.status === 'success' ? result.node_ids || [] : [] });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('[Graph Search] Error:', error);
+          setSearchResponse({ context: searchContext, nodeIds: [] });
+        }
+      } finally {
+        if (!cancelled) setIsSearching(false);
+      }
     }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery, handleSearch]);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [searchContext]);
 
   // Graph structure: labels, colors, sizes and positions. Depends on the graph data only,
   // so quiz answers, edits and search never re-run the layout. Styling is layered on below.
@@ -884,10 +899,11 @@ useEffect(() => {
   );
   // The search API may return numeric ids; node ids are strings
   const searchHits = useMemo(() => new Set(searchResults.map(String)), [searchResults]);
+  const collapse = useCollapse(graphTree, baseGraph?.nodes);
 
   const styledGraph = useMemo(
-    () => baseGraph && applyGraphStyles(baseGraph, { confidenceScores, nodeEdits, searchHits, activePath }),
-    [baseGraph, confidenceScores, nodeEdits, searchHits, activePath]
+    () => baseGraph && applyGraphStyles(baseGraph, { confidenceScores, nodeEdits, searchHits, activePath, collapse: collapse.layer }),
+    [baseGraph, confidenceScores, nodeEdits, searchHits, activePath, collapse.layer]
   );
 
   // Push the styled graph into React Flow. A new base graph replaces everything; a style-only
@@ -907,14 +923,15 @@ useEffect(() => {
       const prevById = new Map(prev.map(node => [node.id, node]));
       return styledGraph.nodes.map(node => {
         const current = prevById.get(node.id);
-        return current ? { ...current, data: node.data, style: node.style, hidden: node.hidden } : node;
+        // A node that gets hidden is deselected too, so Backspace can't delete it unseen
+        return current ? { ...current, data: node.data, style: node.style, hidden: node.hidden, selected: current.selected && !node.hidden } : node;
       });
     });
     setEdges(prev => {
       const prevById = new Map(prev.map(edge => [edge.id, edge]));
       return styledGraph.edges.map(edge => {
         const current = prevById.get(edge.id);
-        return current ? { ...edge, selected: current.selected } : edge;
+        return current ? { ...edge, selected: current.selected && !edge.hidden } : edge;
       });
     });
   }, [baseGraph, styledGraph, setNodes, setEdges]);
@@ -943,8 +960,45 @@ useEffect(() => {
     });
   }, [baseGraph, edges, hoveredEdgeId]);
 
+  // Search hits as list rows, in the order the API ranked them
+  const searchResultItems = useMemo(
+    () => buildSearchResultItems(searchResults.map(String), styledGraph?.nodes ?? [], graphTree),
+    [searchResults, styledGraph, graphTree]
+  );
+
   // Zoom to the center's nearest rings once per graph, after its nodes reach React Flow
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
+
+  // Open a search result: show its path and pan to it, keeping the current zoom unless it's too far out to read.
+  // TODO(C1): call expandTo(nodeId) first so a result inside a collapsed branch is shown.
+  const handleSearchResultClick = useCallback((nodeId: string) => {
+    if (nodeId === graphTree.centerId) clearActivePath();
+    else setActivePathTargetId(nodeId);
+
+    if (!flowInstance) return;
+    requestAnimationFrame(() => {
+      const node = flowInstance.getNode(nodeId);
+      if (!node) return;
+      const position = node.positionAbsolute ?? node.position;
+      const width = node.width ?? DEFAULT_NODE_SIZE.width;
+      const height = node.height ?? DEFAULT_NODE_SIZE.height;
+      flowInstance.setCenter(position.x + width / 2, position.y + height / 2, {
+        zoom: Math.max(flowInstance.getZoom(), SEARCH_RESULT_MIN_ZOOM),
+        duration: 600,
+      });
+    });
+  }, [clearActivePath, flowInstance, graphTree.centerId]);
+
+  useEffect(() => {
+    if (!pendingSearchNavigation) return;
+    if (pendingSearchNavigation !== searchContext) {
+      setPendingSearchNavigation(null);
+      return;
+    }
+    if (!hasCurrentSearchResponse) return;
+    setPendingSearchNavigation(null);
+    if (searchResultItems.length > 0) handleSearchResultClick(searchResultItems[0].id);
+  }, [pendingSearchNavigation, searchContext, hasCurrentSearchResponse, searchResultItems, handleSearchResultClick]);
   const fittedBaseRef = useRef<BaseGraph | null>(null);
   useEffect(() => {
     if (!flowInstance || !baseGraph || fittedBaseRef.current === baseGraph || initialFocusNodes.length === 0) return;
@@ -1020,6 +1074,12 @@ useEffect(() => {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || !searchQuery.trim()) return;
+              e.preventDefault();
+              if (!hasCurrentSearchResponse) setPendingSearchNavigation(searchContext);
+              else if (searchResultItems.length > 0) handleSearchResultClick(searchResultItems[0].id);
+            }}
             placeholder="Search topics, concepts, definitions..."
             style={{
               flex: 1,
@@ -1093,17 +1153,80 @@ useEffect(() => {
             />
           </div>
         )}
-        {searchResults.length > 0 && (
+        {searchResultItems.length > 0 && (
           <div style={{
             marginTop: '8px',
-            padding: '8px 12px',
             background: 'white',
             borderRadius: '8px',
             boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
             fontSize: '12px',
             color: '#6b7280',
+            overflow: 'hidden',
           }}>
-            Found {searchResults.length} matching node{searchResults.length !== 1 ? 's' : ''}
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6' }}>
+              Found {searchResultItems.length} matching node{searchResultItems.length !== 1 ? 's' : ''}
+            </div>
+            <ul style={{ listStyle: 'none', margin: 0, padding: '4px 0', maxHeight: '240px', overflowY: 'auto' }}>
+              {searchResultItems.map(item => {
+                const isActive = item.id === activePathTargetId;
+                return (
+                  <li key={item.id}>
+                    <button
+                      onClick={() => handleSearchResultClick(item.id)}
+                      title={item.trail.length > 0 ? [...item.trail, item.label].join(' › ') : item.label}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        width: '100%',
+                        padding: '6px 12px',
+                        border: 'none',
+                        background: isActive ? 'rgba(212, 88, 28, 0.08)' : 'transparent',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        font: 'inherit',
+                      }}
+                      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#f9fafb'; }}
+                      onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span style={{
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        background: item.color,
+                        flexShrink: 0,
+                      }} />
+                      <span style={{ minWidth: 0, flex: 1 }}>
+                        <span style={{
+                          display: 'block',
+                          fontSize: '13px',
+                          color: isActive ? PATH_COLOR : '#1f2937',
+                          fontWeight: isActive ? 600 : 500,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {item.label}
+                        </span>
+                        {item.trail.length > 0 && (
+                          <span style={{
+                            display: 'block',
+                            fontSize: '11px',
+                            color: '#9ca3af',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {item.trail.join(' › ')}
+                          </span>
+                        )}
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#9ca3af', flexShrink: 0 }}>{item.type}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         )}
       </div>

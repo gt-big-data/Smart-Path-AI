@@ -4,10 +4,12 @@ import OpenAI from 'openai';
 import ConceptProgress from '../models/ConceptProgress';
 import User from '../models/User';
 import { pythonServiceClient } from '../utils/axiosConfig';
+import { calculateDecayedConfidence } from '../utils/confidenceDecay';
 
 // Initialize OpenAI with explicit API key
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',  // Provide empty string as fallback
+  baseURL: process.env.OPENAI_API_BASE_URL || 'https://api.openai.com/v1/',
 });
 
 // Verify API key is loaded
@@ -44,9 +46,16 @@ const updateConfidenceScore = async (
     { ...filter, submissionIds: { $ne: submissionId } },
     [{
       $set: {
-        confidenceScore: {
-          $max: [0, { $min: [1, { $add: [{ $ifNull: ['$confidenceScore', 0.5] }, delta] }] }],
-        },
+        confidenceScore: { $max: [0, { $min: [1, { $add: [
+          { $max: [0, { $min: [1, { $subtract: [
+            { $ifNull: ['$confidenceScore', 0.5] },
+            { $multiply: [{ $divide: [
+              { $max: [0, { $subtract: [new Date(), { $ifNull: ['$lastAttempted', new Date()] }] }] },
+              2592000000,
+            ] }, 0.05] },
+          ] }] }] },
+          delta,
+        ] }] }] },
         submissionIds: {
           $setUnion: [{ $ifNull: ['$submissionIds', []] }, [submissionId]],
         },
@@ -328,9 +337,9 @@ Provide feedback in this JSON format:
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
         ],
-        model: "gpt-4o-mini",
-        temperature: 0.3,
-        max_tokens: 500,
+        model: "gpt-6-luna",
+        reasoning_effort: "low",
+        max_completion_tokens: 2000,
         response_format: { type: "json_object" },
       });
 
