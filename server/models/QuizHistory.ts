@@ -15,6 +15,7 @@ interface IQuestion {
 
 interface IQuizHistory extends Document {
   userID: string;
+  chatID: string;
   concepts: IConcept[];
   questions: IQuestion[];
   createdAt: Date;
@@ -36,6 +37,7 @@ const questionSchema = new Schema<IQuestion>({
 
 const QuizHistorySchema = new Schema<IQuizHistory>({
   userID: { type: String, required: true },
+  chatID: { type: String, required: true },
   concepts: [conceptSchema],
   questions: [questionSchema],
   createdAt: { type: Date, default: Date.now },

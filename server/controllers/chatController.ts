@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import User, { IUser, IChat } from '../models/User';
+import ConceptProgress from '../models/ConceptProgress';
+import QuizHistory from '../models/QuizHistory';
 import { v4 as uuidv4 } from 'uuid';
 import mongoose from 'mongoose';
 
@@ -276,6 +278,9 @@ export const deleteChat = async (req: Request, res: Response): Promise<void> => 
     }
 
     console.log(`Found chat at index ${chatIndex}, deleting...`);
+
+    await ConceptProgress.deleteMany({ user: userId, chatId: chat_id });
+    await QuizHistory.deleteMany({ userID: String(userId), chatID: chat_id });
 
     // Remove the chat from the array
     user.chats.splice(chatIndex, 1);

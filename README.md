@@ -158,8 +158,8 @@ Mounted in `server/index.ts`:
 ## Mongo models
 
 - **User** — email, optional password, Google id, embedded `chats[]` (`chat_id`, `title`, `graph_id`, `messages[]`)
-- **ConceptProgress** — `(user, conceptId)` unique, `confidenceScore` 0–1
-- **QuizHistory** — questions + answers per user
+- **ConceptProgress** — `(user, chatId, conceptId)` unique, `confidenceScore` 0–1; MongoDB is the source of truth
+- **QuizHistory** — questions + answers per user and chat
 
 ## Known local-dev gotchas
 

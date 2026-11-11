@@ -15,9 +15,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.processAllQuizHistory = exports.getQuizHistoryById = exports.getAllQuizHistories = exports.getUserQuizHistories = exports.saveQuizHistory = void 0;
 const QuizHistory_1 = __importDefault(require("../models/QuizHistory"));
 const ConceptProgress_1 = __importDefault(require("../models/ConceptProgress"));
-// Save a new QuizHistory record when a quiz is completed
+const User_1 = __importDefault(require("../models/User"));
 // Older clients send placeholder names like "Question 1 Concept"; only keep real topic names
 const isRealConceptName = (name) => typeof name === 'string' && !!name.trim() && !/^Question \d+ Concept$/.test(name.trim());
+// Save a new QuizHistory record when a quiz is completed
 const saveQuizHistory = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     console.log('[Quiz History] POST /api/quiz-history endpoint called');
@@ -28,7 +29,10 @@ const saveQuizHistory = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
         console.log('[Quiz History] No user ID found in session - returning 401');
         return res.status(401).json({ message: 'Unauthorized' });
     }
-    const { concepts, questions } = req.body;
+    const { chat_id: chatId, concepts, questions } = req.body;
+    if (typeof chatId !== 'string' || !chatId.trim()) {
+        return res.status(400).json({ message: 'chat_id is required' });
+    }
     // Validate required fields
     if (!concepts || !Array.isArray(concepts)) {
         return res.status(400).json({ message: 'Concepts array is required' });
@@ -49,9 +53,14 @@ const saveQuizHistory = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
         }
     }
     try {
+        const chatOwner = yield User_1.default.exists({ _id: userId, 'chats.chat_id': chatId });
+        if (!chatOwner) {
+            return res.status(404).json({ message: 'Chat not found' });
+        }
         console.log('[Quiz History] Creating new QuizHistory document...');
         const quizHistory = new QuizHistory_1.default({
             userID: userId,
+            chatID: chatId,
             concepts: concepts,
             questions: questions
         });
@@ -59,47 +68,21 @@ const saveQuizHistory = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
         const savedQuizHistory = yield quizHistory.save();
         console.log(`[Quiz History] ✅ Successfully saved quiz history for user ${userId} with ${questions.length} questions`);
         console.log('[Quiz History] Saved document ID:', savedQuizHistory._id);
-        // Create/update progress records from quiz history
-        console.log('[Quiz History] Creating progress records from quiz answers...');
-        let progressCreated = 0;
-        for (let i = 0; i < questions.length; i++) {
-            const concept = concepts[i];
-            if (!concept || !concept.conceptID) {
-                console.warn(`[Quiz History] Skipping question ${i + 1} - no conceptID`);
+        // Confidence is applied by answer verification; history is archival only.
+        for (const concept of concepts) {
+            if (!(concept === null || concept === void 0 ? void 0 : concept.conceptID) || !isRealConceptName(concept.name))
                 continue;
-            }
             try {
-                // Find or create progress record
-                let progress = yield ConceptProgress_1.default.findOne({
-                    user: userId,
-                    conceptId: concept.conceptID
-                });
-                if (!progress) {
-                    progress = new ConceptProgress_1.default({
-                        user: userId,
-                        conceptId: concept.conceptID,
-                        confidenceScore: 0.5,
-                        lastAttempted: new Date()
-                    });
-                }
-                // The score was already updated once per answer by /api/verify-answer, which also grades
-                // open-ended answers correctly. Re-scoring here counted every answer twice.
-                if (isRealConceptName(concept.name))
-                    progress.conceptName = String(concept.name).trim();
-                progress.lastAttempted = new Date();
-                yield progress.save();
-                progressCreated++;
-                console.log(`[Quiz History] ✅ Saved progress for concept ${concept.conceptID} (${progress.conceptName || 'no name'}): score=${progress.confidenceScore.toFixed(2)}`);
+                yield ConceptProgress_1.default.updateOne({ user: userId, chatId, conceptId: concept.conceptID }, { $set: { conceptName: String(concept.name).trim() } });
             }
             catch (error) {
-                console.error(`[Quiz History] ❌ Error creating progress for concept ${concept.conceptID}:`, error);
+                console.error(`[Quiz History] ❌ Error labeling progress for concept ${concept.conceptID}:`, error);
             }
         }
-        console.log(`[Quiz History] ✅ Created/updated ${progressCreated} progress records`);
         res.status(201).json({
             message: 'Quiz history saved successfully',
             quizHistory: savedQuizHistory,
-            progressRecordsCreated: progressCreated
+            progressRecordsCreated: 0
         });
     }
     catch (error) {
@@ -190,86 +173,22 @@ const getQuizHistoryById = (req, res, next) => __awaiter(void 0, void 0, void 0,
     }
 });
 exports.getQuizHistoryById = getQuizHistoryById;
-// Process all existing quiz history records to create progress records
+// Kept for API compatibility; quiz history must never replay confidence updates.
 const processAllQuizHistory = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
-    console.log('[Quiz History] ===== PROCESS-ALL ENDPOINT CALLED =====');
     const userId = (_b = (_a = req.session) === null || _a === void 0 ? void 0 : _a.passport) === null || _b === void 0 ? void 0 : _b.user;
-    console.log('[Quiz History] User ID from session:', userId);
     if (!userId) {
-        console.log('[Quiz History] No user ID found - returning 401');
         return res.status(401).json({ message: 'Unauthorized' });
     }
     try {
-        console.log(`[Quiz History] 🔄 Processing all quiz history for user ${userId}...`);
-        const quizHistories = yield QuizHistory_1.default.find({ userID: userId });
-        console.log(`[Quiz History] Found ${quizHistories.length} quiz history records to process`);
-        let totalProgressCreated = 0;
-        let totalProgressUpdated = 0;
-        for (const quizHistory of quizHistories) {
-            const { concepts, questions } = quizHistory;
-            for (let i = 0; i < questions.length; i++) {
-                const question = questions[i];
-                const concept = concepts[i];
-                if (!concept || !concept.conceptID) {
-                    continue;
-                }
-                // Check if answer is correct
-                const userAnswer = String(question.userAnswer).trim().toUpperCase();
-                const correctAnswer = String(question.correctAnswer).trim().toUpperCase();
-                // Treat skipped questions as incorrect
-                const isSkipped = userAnswer === 'SKIPPED' || userAnswer === 'SKIP';
-                const isCorrect = !isSkipped && (userAnswer === correctAnswer ||
-                    (correctAnswer === 'T' && userAnswer === 'TRUE') ||
-                    (correctAnswer === 'F' && userAnswer === 'FALSE') ||
-                    (correctAnswer === 'TRUE' && userAnswer === 'T') ||
-                    (correctAnswer === 'FALSE' && userAnswer === 'F'));
-                try {
-                    let progress = yield ConceptProgress_1.default.findOne({
-                        user: userId,
-                        conceptId: concept.conceptID
-                    });
-                    const isNew = !progress;
-                    if (!progress) {
-                        progress = new ConceptProgress_1.default({
-                            user: userId,
-                            conceptId: concept.conceptID,
-                            confidenceScore: 0.5,
-                            lastAttempted: question.timestamp || new Date()
-                        });
-                        totalProgressCreated++;
-                    }
-                    else {
-                        totalProgressUpdated++;
-                    }
-                    // Update confidence score
-                    if (isCorrect) {
-                        progress.confidenceScore += 0.1;
-                    }
-                    else {
-                        progress.confidenceScore -= 0.1;
-                    }
-                    progress.confidenceScore = Math.max(0, Math.min(1, progress.confidenceScore));
-                    if (question.timestamp) {
-                        progress.lastAttempted = question.timestamp;
-                    }
-                    yield progress.save();
-                }
-                catch (error) {
-                    console.error(`[Quiz History] Error processing concept ${concept.conceptID}:`, error);
-                }
-            }
-        }
-        console.log(`[Quiz History] ✅ Processed ${quizHistories.length} quiz histories: ${totalProgressCreated} created, ${totalProgressUpdated} updated`);
         res.status(200).json({
-            message: 'All quiz history processed successfully',
-            quizHistoriesProcessed: quizHistories.length,
-            progressRecordsCreated: totalProgressCreated,
-            progressRecordsUpdated: totalProgressUpdated
+            message: 'Quiz history is archival and is not replayed into confidence scores',
+            quizHistoriesProcessed: 0,
+            progressRecordsCreated: 0,
+            progressRecordsUpdated: 0
         });
     }
     catch (error) {
-        console.error('[Quiz History] Error processing quiz history:', error);
         next(error);
     }
 });

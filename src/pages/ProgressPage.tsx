@@ -10,6 +10,7 @@ interface ProgressItem {
   topic_name: string;
   confidence_score: number;
   last_practiced: string;
+  chat_id?: string;
   graph_id?: string;
 }
 
@@ -126,6 +127,7 @@ const ProgressPage: React.FC = () => {
             const chatsRes = await axios.get(`${API_BASE_URL}/chat/${userId}/chats`, { withCredentials: true });
             const chats = Array.isArray(chatsRes.data) ? chatsRes.data : [];
             chats.forEach((chat: any) => {
+              if (chat.chat_id) localChatTitleMap.set(chat.chat_id, chat.title || 'Untitled Chat');
               if (chat.graph_id) localChatTitleMap.set(chat.graph_id, chat.title || 'Untitled Chat');
             });
           }
@@ -357,6 +359,7 @@ const ProgressPage: React.FC = () => {
             topic_name: name,
             confidence_score: typeof p.confidenceScore === 'number' ? p.confidenceScore : (p.confidence_score ?? 0),
             last_practiced: p.lastAttempted || p.last_practiced || p.updatedAt || new Date().toISOString(),
+            chat_id: p.chatId || p.chat_id,
             graph_id: conceptToGraphId.get(conceptId),
           };
         });
@@ -631,7 +634,7 @@ const ProgressPage: React.FC = () => {
               {profileData?.topics_to_review && profileData.topics_to_review.length > 0 ? (
                 <ul className="space-y-4">
                   {profileData.topics_to_review.map((item) => (
-                    <li key={item.concept_id} className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                    <li key={`${item.chat_id || item.graph_id}-${item.concept_id}`} className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
                       <div className="flex justify-between items-center">
                         <span className="font-medium text-gray-700" title={item.topic_name}>
                           {friendlyTopicLabel(item.topic_name)}
@@ -659,20 +662,20 @@ const ProgressPage: React.FC = () => {
                 <div className="space-y-3">
                   {Array.from(
                     profileData.full_progress.reduce((acc, item) => {
-                      const graphId = item.graph_id || 'unknown';
-                      if (!acc.has(graphId)) acc.set(graphId, []);
-                      acc.get(graphId)!.push(item);
+                      const chatId = item.chat_id || item.graph_id || 'unknown';
+                      if (!acc.has(chatId)) acc.set(chatId, []);
+                      acc.get(chatId)!.push(item);
                       return acc;
                     }, new Map<string, typeof profileData.full_progress>())
-                  ).map(([graphId, items]) => {
-                    const chatTitle = chatTitleMap.get(graphId) || 'Untitled Chat';
+                  ).map(([chatId, items]) => {
+                    const chatTitle = chatTitleMap.get(chatId) || 'Untitled Chat';
                     const lastPracticed = items.reduce((latest, item) =>
                       new Date(item.last_practiced) > new Date(latest) ? item.last_practiced : latest,
                       items[0].last_practiced
                     );
                     return (
                       <AccordionSection
-                        key={graphId}
+                        key={chatId}
                         title={chatTitle}
                         nodeCount={items.length}
                         lastPracticed={lastPracticed}
