@@ -20,6 +20,7 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
 interface GraphNodeProps extends NodeProps {
   style?: React.CSSProperties;
   onEditRequest?: (edit: NodeEditState) => void;
+  onToggleCollapse?: (nodeId: string) => void;
 }
 
 const nodeStyles = {
@@ -151,10 +152,19 @@ const pencilButtonStyle: React.CSSProperties = {
   zIndex: 11,
 };
 
-const pathStepStyle: React.CSSProperties = {
+// Holds the path step number and the collapse badge side by side in the top-right corner,
+// so the badge keeps the corner and the step number sits just left of it
+const cornerStyle: React.CSSProperties = {
   position: 'absolute',
   right: '-10px',
   top: '-12px',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '4px',
+  zIndex: 12,
+};
+
+const pathStepStyle: React.CSSProperties = {
   width: '28px',
   height: '28px',
   borderRadius: '50%',
@@ -168,13 +178,39 @@ const pathStepStyle: React.CSSProperties = {
   fontSize: '13px',
   fontWeight: 700,
   lineHeight: 1,
-  zIndex: 12,
   pointerEvents: 'none',
 };
 
+const COLLAPSE_TEAL = '#0c7f78';
+
+const collapseBadgeStyle = (collapsed: boolean, hovered: boolean): React.CSSProperties => ({
+  height: '28px',
+  minWidth: '28px',
+  padding: '0 8px',
+  borderRadius: '14px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  boxSizing: 'border-box',
+  background: collapsed ? COLLAPSE_TEAL : '#ffffff',
+  border: `2px solid ${collapsed ? '#ffffff' : COLLAPSE_TEAL}`,
+  boxShadow: hovered
+    ? '0 3px 10px rgba(15, 23, 42, 0.28)'
+    : collapsed ? '0 2px 8px rgba(12, 127, 120, 0.45)' : '0 2px 6px rgba(15, 23, 42, 0.18)',
+  color: collapsed ? '#ffffff' : COLLAPSE_TEAL,
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: collapsed ? '13px' : '17px',
+  fontWeight: 700,
+  lineHeight: 1,
+  cursor: 'pointer',
+  transform: hovered ? 'scale(1.08)' : 'none',
+  transition: 'transform 120ms ease, box-shadow 120ms ease',
+});
+
 export const GraphNode = memo((props: GraphNodeProps) => {
-  const { data, style = {}, id, onEditRequest } = props;
+  const { data, style = {}, id, onEditRequest, onToggleCollapse } = props;
   const [showTooltip, setShowTooltip] = useState(false);
+  const [badgeHovered, setBadgeHovered] = useState(false);
 
   const truncateText = (text: string) => {
     if (!text) return '';
@@ -211,6 +247,21 @@ export const GraphNode = memo((props: GraphNodeProps) => {
     });
   };
 
+  const isCollapsed = data.hiddenCount > 0;
+
+  const handleCollapseClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    // Keep this click from reaching React Flow's onNodeClick (path highlight and selection)
+    e.stopPropagation();
+    onToggleCollapse?.(id);
+  };
+
+  const handleCollapseKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    // React Flow selects the node on Enter or Space; the button's own click does the toggling
+    if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+  };
+
+  const collapseLabel = isCollapsed ? `Expand branch (${data.hiddenCount} hidden)` : 'Collapse branch';
+
   return (
     <>
       <Handle 
@@ -230,14 +281,33 @@ export const GraphNode = memo((props: GraphNodeProps) => {
       >
         {renderConfidenceCircles(data.confidenceScore)}
         {data.customLabel || truncateText(data.label)}
-        {data.pathStep != null && (
-          <span
-            style={pathStepStyle}
-            aria-label={`Path step ${data.pathStep}`}
-          >
-            {data.pathStep}
-          </span>
-        )}
+        <div style={cornerStyle}>
+          {data.pathStep != null && (
+            <span
+              style={pathStepStyle}
+              aria-label={`Path step ${data.pathStep}`}
+            >
+              {data.pathStep}
+            </span>
+          )}
+          {data.collapsible && (
+            <button
+              type="button"
+              className="nodrag nopan"
+              style={collapseBadgeStyle(isCollapsed, badgeHovered)}
+              onClick={handleCollapseClick}
+              onKeyDown={handleCollapseKeyDown}
+              // Mouse only: a touch tap would leave the hover look stuck on
+              onPointerEnter={(e) => setBadgeHovered(e.pointerType === 'mouse')}
+              onPointerLeave={() => setBadgeHovered(false)}
+              title={collapseLabel}
+              aria-label={collapseLabel}
+              aria-expanded={!isCollapsed}
+            >
+              {isCollapsed ? `+${data.hiddenCount}` : '−'}
+            </button>
+          )}
+        </div>
         <button
           type="button"
           className="nodrag nopan"
