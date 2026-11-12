@@ -4,6 +4,7 @@ import { ArrowLeft, CheckCircle2, Circle, ChevronLeft, ChevronRight, HelpCircle,
 import axios from 'axios';
 import { API_BASE_URL } from '../config/api';
 import { quizKey, readQuiz, type ClarifyMessage, type Question, type QuizState, type Result } from '../lib/quizState';
+import { invalidateProgressCache } from '../lib/progressCache';
 
 // The AI server isn't consistent about the concept id field name
 type RawPair = { question?: string; answer?: string; conceptId?: string; concept_id?: string; topicId?: string; topic_id?: string; id?: string; conceptName?: string; explanation?: string; format?: string };
@@ -128,6 +129,7 @@ function QuizRunner() {
       }
     }
     save({ ...next, completed: true });
+    invalidateProgressCache(chatId);
   };
 
   const retryFinish = async () => {
