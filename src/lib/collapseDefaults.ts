@@ -12,18 +12,18 @@ import type { useCollapse } from './collapse';
  * - "Collapse to center" leaves the center and its direct neighbors; "Expand all" opens everything.
  */
 
-export const OPEN_COLLAPSED_ABOVE = 50;
-export const OPEN_COLLAPSED_LEVELS = 2;
+const OPEN_COLLAPSED_ABOVE = 50;
+const OPEN_COLLAPSED_LEVELS = 2;
 
 const storageKey = (graphId: string) => `smartpath:collapsed:${graphId}`;
 
 /** Nodes at this depth. Collapsing them leaves the center and `depth` rings visible. */
-export function idsAtDepth(tree: GraphTree, depth: number): string[] {
+function idsAtDepth(tree: GraphTree, depth: number): string[] {
   return tree.order.filter(id => tree.nodes.get(id)!.depth === depth);
 }
 
 /** The collapsed ids saved for a graph, or null if nothing was saved (or storage is unavailable) */
-export function loadCollapsed(graphId: string): string[] | null {
+function loadCollapsed(graphId: string): string[] | null {
   try {
     const raw = localStorage.getItem(storageKey(graphId));
     if (raw === null) return null;
@@ -34,7 +34,7 @@ export function loadCollapsed(graphId: string): string[] | null {
   }
 }
 
-export function saveCollapsed(graphId: string, collapsedIds: Iterable<string>): void {
+function saveCollapsed(graphId: string, collapsedIds: Iterable<string>): void {
   try {
     localStorage.setItem(storageKey(graphId), JSON.stringify([...collapsedIds]));
   } catch {
@@ -43,7 +43,7 @@ export function saveCollapsed(graphId: string, collapsedIds: Iterable<string>): 
 }
 
 /** What a graph opens with: its saved state if there is one, otherwise the D0 default */
-export function initialCollapsed(tree: GraphTree, drawnCount: number, saved: string[] | null): string[] {
+function initialCollapsed(tree: GraphTree, drawnCount: number, saved: string[] | null): string[] {
   if (saved) return saved;
   return drawnCount > OPEN_COLLAPSED_ABOVE ? idsAtDepth(tree, OPEN_COLLAPSED_LEVELS) : [];
 }
