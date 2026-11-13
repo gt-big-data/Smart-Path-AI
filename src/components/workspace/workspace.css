@@ -1,0 +1,785 @@
+/* Workspace layout. Feature behavior remains in the page components. */
+
+:root {
+	/* Width reserved for the hover action buttons (folder + delete) at the right of a sidebar row */
+	--row-actions-space: 52px;
+}
+
+/* ── Chat row: icon on left, title+timestamp column on right ── */
+.chat-open {
+	min-width: 0;
+	flex: 1;
+	height: 36px;
+	border: 0;
+	color: inherit;
+	background: none;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 0 9px;
+	text-align: left;
+}
+.chat-open svg {
+	flex: 0 0 auto;
+}
+.chat-row {
+	min-height: 50px;
+}
+.chat-row-copy {
+	min-width: 0;
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	gap: 2px;
+}
+.chat-row-copy strong {
+	display: block;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 12px;
+	font-weight: 500;
+	color: inherit;
+}
+.chat-row-copy small {
+	display: block;
+	color: #777f83;
+	font-size: 10px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.chat-row.active .chat-row-copy small {
+	color: #aeb8b6;
+}
+.chat-row.active {
+	background: #3a3e47;
+	color: #ffffff;
+}
+
+/* The workspace page locks body scrolling and sets pointer cursors on its controls; these depend on descendants, so they stay here */
+body:has(.smartpath-workspace) {
+	overflow: hidden;
+}
+.smartpath-workspace button:not(:disabled),
+.smartpath-workspace select,
+.smartpath-workspace input[type="checkbox"] {
+	cursor: pointer;
+}
+.smartpath-workspace input,
+.smartpath-workspace select {
+	cursor: text;
+}
+.smartpath-workspace select {
+	cursor: pointer;
+}
+.smartpath-workspace button:disabled {
+	cursor: not-allowed;
+}
+.app-sidebar.sidebar-collapsed {
+	transform: translateX(-100%);
+	opacity: 0;
+	pointer-events: none;
+}
+
+.workspace-dock {
+	min-height: 0;
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	background: #d7dfdd;
+}
+.workspace-dock-content {
+	min-height: 0;
+	flex: 1;
+	display: flex;
+}
+.flexlayout-workspace {
+	position: relative;
+	display: block;
+	min-height: 0;
+	background: #cfd9d7;
+}
+.flexlayout-workspace > .flexlayout__layout {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	--color-background: #f7f9f8;
+	--color-tabset-background: #eef3f2;
+	--color-tabset-background-selected: #fbfcfc;
+	--color-tabset-header-background: #eef3f2;
+	--color-tab-selected: #0f655e;
+	--color-tab-unselected: #677673;
+	--color-border-background: #eef3f2;
+	--color-splitter: #cbd5d3;
+	--color-splitter-hover: #8fb4af;
+	--color-drag1: rgba(20, 125, 116, 0.15);
+	--color-drag2: #147d74;
+	font-family: inherit;
+}
+.flexlayout__tabset {
+	border: 0;
+	background: #fbfcfc;
+}
+.flexlayout__tabset_tabbar_outer {
+	min-height: 42px;
+	border-bottom: 1px solid #d5dfdd;
+	background: #eef3f2;
+}
+.flexlayout__tab_button {
+	min-height: 42px;
+	padding: 0 13px;
+	border-right: 1px solid #d9e2e0;
+	background: transparent;
+	color: #687774;
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.055em;
+	text-transform: uppercase;
+}
+.flexlayout__tab_button--selected {
+	background: #fbfcfc;
+	color: #0f655e;
+	box-shadow: inset 0 -2px #147d74;
+}
+.flexlayout__tab_button_trailing {
+	margin-left: 8px;
+}
+.flexlayout__splitter {
+	background: #cbd5d3;
+}
+.flexlayout__splitter:hover {
+	background: #8fb4af;
+}
+.flexlayout__outline_rect {
+	border: 2px solid #147d74;
+	background: rgba(20, 125, 116, 0.13);
+}
+.flexlayout__tab {
+	overflow: hidden;
+	background: #fbfcfc;
+}
+.flexlayout__tab > * {
+	width: 100%;
+	height: 100%;
+}
+
+/* Sidebar structure; feature handlers stay in Chat.tsx. */
+.app-sidebar {
+	height: 100vh;
+	width: 100%;
+	min-width: 0;
+	overflow: visible;
+	z-index: 20;
+	color: #eae8f1;
+	background: #25282d;
+	font-family: var(--font-brand);
+}
+.sidebar-head {
+	height: 70px;
+	flex: 0 0 70px;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+	display: flex;
+	align-items: center;
+	padding: 0 17px;
+}
+.brand {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	border: 0;
+	background: none;
+	color: white;
+	font-size: 18px;
+	font-weight: 700;
+	padding: 0;
+}
+.brand-mark {
+	width: 31px;
+	height: 31px;
+	display: grid;
+	place-items: center;
+	border-radius: 2px;
+	background: #147d74;
+	color: white;
+}
+.icon-button {
+	color: #a7a2b5;
+	background: none;
+	border: 0;
+	border-radius: 7px;
+	padding: 6px;
+}
+.icon-button:hover {
+	color: white;
+	background: rgba(255, 255, 255, 0.08);
+}
+.sidebar-toggle {
+	margin-left: auto;
+}
+.sidebar-search {
+	height: 36px;
+	margin: 14px 13px 0;
+	padding: 0 10px;
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	color: #8e899c;
+	border: 1px solid #4b4d54;
+	background: #303238;
+	border-radius: 3px;
+}
+.sidebar-search:focus-within {
+	border-color: #72bbb3;
+	background: #34363c;
+}
+.sidebar-search input {
+	min-width: 0;
+	flex: 1;
+	border: 0;
+	outline: 0;
+	color: #ece9f3;
+	background: transparent;
+	font-size: 11px;
+}
+.sidebar-search input::placeholder {
+	color: #8e899c;
+	opacity: 1;
+}
+.sidebar-search button {
+	border: 0;
+	background: none;
+	color: #aab2b1;
+	padding: 0;
+}
+.create-actions {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 7px;
+	padding: 16px 13px 12px;
+}
+.create-actions.collapsed {
+	grid-template-columns: 1fr;
+}
+.create-actions button {
+	height: 37px;
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	border-radius: 2px;
+	background: rgba(255, 255, 255, 0.05);
+	color: #f1eff2;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	font-size: 11px;
+	font-weight: 600;
+}
+.create-actions button svg {
+	color: #d0b368;
+}
+.create-actions button:first-child svg {
+	color: #72bbb3;
+}
+.create-actions button:hover {
+	background: rgba(255, 255, 255, 0.1);
+}
+.inline-create {
+	display: flex;
+	margin: 0 13px 10px;
+	height: 34px;
+	border: 1px solid #5b6269;
+	background: #25282d;
+	border-radius: 3px;
+	overflow: hidden;
+}
+.inline-create input {
+	min-width: 0;
+	flex: 1;
+	border: 0;
+	outline: 0;
+	padding: 0 9px;
+	color: #f1f3f3;
+	background: #25282d;
+	font-size: 12px;
+}
+.inline-create input::placeholder {
+	color: #9ca6a4;
+}
+.inline-create button {
+	width: 34px;
+	height: 34px;
+	border: 0;
+	background: #25282d;
+	padding: 0;
+	display: grid;
+	place-items: center;
+	color: #72bbb3;
+}
+.inline-create button:first-of-type {
+	color: #72bbb3;
+}
+.inline-create button:last-of-type {
+	color: #aab2b1;
+}
+.library {
+	padding: 0 8px;
+	overflow-y: auto;
+	flex: 0 1 auto;
+	min-height: 0;
+}
+.library-label {
+	padding: 12px 9px 8px;
+	display: flex;
+	justify-content: space-between;
+	color: #777386;
+	letter-spacing: 0.11em;
+	font-size: 9px;
+	font-weight: 700;
+}
+.library-label span:last-child {
+	letter-spacing: 0;
+}
+.library-row {
+	min-height: 38px;
+	position: relative;
+	display: flex;
+	align-items: center;
+	border-radius: 2px;
+	color: #b9b5c4;
+	font-size: 12px;
+}
+.library-row:hover {
+	background: rgba(255, 255, 255, 0.05);
+	color: white;
+}
+.folder-row {
+	padding: 0 5px;
+	gap: 7px;
+	font-weight: 700;
+	font-size: 13px;
+	color: #c3c0cd;
+	min-height: 38px;
+}
+.folder-row > .folder-name {
+	min-width: 0;
+	flex: 1;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.folder-row .folder-name form {
+	min-width: 0;
+	width: 100%;
+}
+.folder-row .folder-name input {
+	width: 100%;
+	color: #241f32;
+	background: white;
+	border: 1px solid #8f80e5;
+	border-radius: 4px;
+	outline: 0;
+	padding: 3px 5px;
+	font-size: 11px;
+}
+.folder-group {
+	position: relative;
+}
+/* Drag and drop library: the row under the pointer is highlighted as the drop target */
+.library-row[draggable="true"] {
+	cursor: grab;
+}
+.library-row[draggable="true"]:active {
+	cursor: grabbing;
+}
+.library-row.dragging {
+	opacity: 0.38;
+}
+.library-row.drop-active {
+	background: #28514d;
+	color: white;
+	outline: 1px solid #55b9ae;
+	outline-offset: -1px;
+}
+.library-row.create-folder-target {
+	background: #2a5550;
+}
+.drop-label {
+	position: absolute;
+	z-index: 4;
+	right: 30px;
+	padding: 2px 5px;
+	background: #0d635b;
+	color: white;
+	font-size: 8px;
+	font-weight: 600;
+	pointer-events: none;
+}
+.root-drop-zone {
+	min-height: 52px;
+	margin: 0 8px 12px;
+	border: 1px dashed transparent;
+	background: transparent;
+	border-radius: 2px;
+	overflow-y: auto;
+}
+.root-drop-zone.drop-active {
+	border: 1px dashed #55b9ae;
+	background: rgba(48, 140, 130, 0.18);
+}
+.root-drop-hint {
+	min-height: 38px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: #8fd3ca;
+	font-size: 11px;
+	font-weight: 600;
+	pointer-events: none;
+}
+.folder-row .row-actions {
+	margin-left: auto;
+}
+.library-row > .row-actions {
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.12s ease;
+}
+.library-row:hover > .row-actions,
+.library-row:focus-within > .row-actions {
+	opacity: 1;
+	pointer-events: auto;
+}
+/* Actions float over the row's right edge so unhovered names can use the full width */
+.library-row > .row-actions {
+	position: absolute;
+	top: 50%;
+	right: 5px;
+	transform: translateY(-50%);
+	margin: 0;
+}
+/* On hover or focus, the name gives up that width so the buttons stay visible */
+.library-row:hover > .chat-open,
+.library-row:focus-within > .chat-open,
+.library-row:hover > .folder-name,
+.library-row:focus-within > .folder-name {
+	padding-right: var(--row-actions-space);
+}
+.disclosure {
+	border: 0;
+	color: #7d788c;
+	padding: 3px;
+	background: none;
+	transition: 0.15s;
+}
+.disclosure.open {
+	transform: rotate(90deg);
+}
+.folder-contents {
+	margin-left: 21px;
+	border-left: 1px solid rgba(255, 255, 255, 0.09);
+	padding-left: 5px;
+}
+.app-sidebar .text-yellow-500,
+.app-sidebar .text-teal-400,
+.app-sidebar .text-red-400 {
+	color: #928da0 !important;
+}
+.app-sidebar .row-actions {
+	margin-left: auto;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+.app-sidebar .row-actions button {
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: #928da0;
+	border-radius: 3px;
+	display: grid;
+	place-items: center;
+	flex-shrink: 0;
+}
+.app-sidebar .row-actions .folder-action,
+.app-sidebar .row-actions .folder-action svg {
+	color: #d0b368 !important;
+}
+.app-sidebar .row-actions .delete-action,
+.app-sidebar .row-actions .delete-action svg {
+	color: #dd747a !important;
+}
+.app-sidebar .row-actions .folder-action:hover {
+	background: rgba(208, 179, 104, 0.22) !important;
+	color: #f0d98a !important;
+	border-radius: 3px;
+}
+.app-sidebar .row-actions .folder-action:hover svg {
+	color: #f0d98a !important;
+}
+.app-sidebar .row-actions .delete-action:hover {
+	background: rgba(221, 116, 122, 0.22) !important;
+	color: #f29aa0 !important;
+	border-radius: 3px;
+}
+.app-sidebar .row-actions .delete-action:hover svg {
+	color: #f29aa0 !important;
+}
+.app-sidebar .row-actions button[title="Delete folder"],
+.app-sidebar .row-actions button[title="Delete folder"] svg,
+.app-sidebar button[title="Delete chat"],
+.app-sidebar button[title="Delete chat"] svg {
+	color: #dd747a !important;
+}
+.app-sidebar .row-actions button[title="Delete folder"]:hover,
+.app-sidebar .row-actions button[title="Delete folder"]:hover svg,
+.app-sidebar button[title="Delete chat"]:hover,
+.app-sidebar button[title="Delete chat"]:hover svg {
+	color: #f29aa0 !important;
+	background: rgba(221, 116, 122, 0.16) !important;
+}
+.app-sidebar button[title="Move to folder"],
+.app-sidebar button[title="Move to folder"] svg {
+	color: #d0b368 !important;
+}
+.app-sidebar button[title="Move to folder"]:hover,
+.app-sidebar button[title="Move to folder"]:hover svg {
+	color: #f0d98a !important;
+	background: rgba(208, 179, 104, 0.16) !important;
+}
+.inline-folder-action {
+	margin: 3px 8px 7px 24px;
+	padding: 5px;
+	border: 1px solid rgba(255, 255, 255, 0.13);
+	background: #30343a;
+	display: flex;
+	gap: 4px;
+	align-items: flex-start;
+	border-radius: 3px;
+}
+.inline-folder-fields {
+	min-width: 0;
+	flex: 1;
+	display: grid;
+	gap: 4px;
+}
+.inline-folder-action .inline-folder-fields select,
+.inline-folder-action .inline-folder-fields input {
+	width: 100%;
+	flex: none;
+}
+.app-sidebar .inline-folder-fields select,
+.app-sidebar .inline-folder-fields input,
+.inline-folder-action select,
+.inline-folder-action input {
+	width: 100% !important;
+	min-width: 0;
+	height: 27px !important;
+	border: 1px solid #5b6269 !important;
+	border-radius: 2px !important;
+	outline: 0;
+	padding: 0 6px !important;
+	color: #eceff0 !important;
+	background: #25282d !important;
+	font-size: 10px !important;
+	box-shadow: none !important;
+	appearance: none;
+	-webkit-appearance: none;
+}
+.app-sidebar .inline-folder-fields input::placeholder {
+	color: #9ca6a4 !important;
+	opacity: 1;
+}
+.app-sidebar .inline-folder-fields select option {
+	color: #263330;
+	background: #fff;
+}
+.inline-folder-action > button {
+	flex: 0 0 26px;
+	width: 26px;
+	height: 27px;
+	padding: 0;
+	border: 1px solid #596167;
+	border-radius: 2px;
+	display: grid;
+	place-items: center;
+	color: #b9c5c3;
+	background: transparent;
+}
+.inline-folder-action > button:first-of-type {
+	border-color: #4b968e;
+	color: #72bbb3;
+}
+.inline-folder-action > button:last-of-type {
+	color: #aab2b1;
+	border-color: #596167;
+}
+.inline-folder-action > button:hover {
+	color: #fff !important;
+	background: rgba(255, 255, 255, 0.1) !important;
+}
+.inline-folder-action.new-folder-selected > button {
+	margin-top: 31px;
+}
+.inline-folder-action > button svg,
+.inline-create button svg {
+	width: 16px;
+	height: 16px;
+	stroke-width: 1.7;
+}
+.sidebar-navigation {
+	min-height: 119px;
+	flex: 0 0 119px;
+	border-top: 1px solid rgba(255, 255, 255, 0.08);
+	padding: 9px 9px 8px;
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-start;
+	gap: 0;
+}
+.sidebar-navigation button {
+	min-height: 34px;
+	border: 0;
+	border-radius: 2px;
+	padding: 0 9px;
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	color: #9994a7;
+	background: none;
+	font-size: 11px;
+	text-align: left;
+}
+.sidebar-navigation button:hover,
+.sidebar-navigation button:focus-visible,
+.sidebar-navigation button.active {
+	color: white;
+	background: rgba(255, 255, 255, 0.08);
+}
+.account-footer {
+	height: 67px;
+	flex: 0 0 67px;
+	border-top: 1px solid rgba(255, 255, 255, 0.08);
+	padding: 0 14px;
+	display: flex;
+	align-items: center;
+	gap: 9px;
+}
+.account-avatar {
+	width: 32px;
+	height: 32px;
+	display: grid;
+	place-items: center;
+	border-radius: 3px;
+	background: #4a9288;
+	color: white;
+	font-size: 10px;
+	font-weight: 700;
+}
+.account-footer div:nth-child(2) {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.account-footer strong {
+	font-size: 11px;
+}
+.account-footer span {
+	color: #858193;
+	font-size: 9px;
+}
+.account-footer button {
+	width: 30px;
+	height: 30px;
+	flex: 0 0 30px;
+	box-sizing: border-box;
+	margin-left: auto;
+	padding: 0;
+	display: grid;
+	place-items: center;
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	background: transparent;
+	color: #9bb1ad;
+}
+.account-footer button:hover {
+	color: #f1f3f3;
+	background: #303238;
+}
+/* Only the library scrolls; header, search, actions, navigation and account footer keep their height so the logout button stays inside the 100vh sidebar */
+.app-sidebar > * {
+	flex-shrink: 0;
+}
+.app-sidebar > .library {
+	flex: 0 1 auto;
+	min-height: 0;
+	flex-shrink: 1;
+}
+/* Unorganized drop area: fills the library height between the folder list and Home */
+.app-sidebar > .root-drop-zone {
+	flex: 1 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 4px 0;
+}
+/* Sidebar controls use the page font (buttons otherwise fall back to the system font) */
+.app-sidebar button,
+.app-sidebar input,
+.app-sidebar select {
+	font-family: inherit;
+}
+.app-sidebar .brand {
+	font-family: var(--font-heading);
+}
+.sidebar-resizer {
+	position: absolute;
+	right: -3px;
+	top: 0;
+	z-index: 20;
+	height: 100%;
+	width: 7px;
+	cursor: col-resize;
+	touch-action: none;
+}
+
+/* Chat bubbles for failed and successful actions: a colored glow marks their state */
+.chat-bubble-error {
+	border: 1px solid rgba(196, 71, 77, 0.45);
+	box-shadow: 0 0 0 2px rgba(196, 71, 77, 0.08), 0 0 14px rgba(196, 71, 77, 0.3);
+}
+.chat-bubble-success {
+	box-shadow: 0 0 0 2px rgba(34, 160, 96, 0.14), 0 0 14px rgba(34, 160, 96, 0.4);
+}
+
+/* Newly created chat or folder row: same pulse and sheen as the auth error alert, in the brand teal */
+@keyframes library-row-shine-pulse {
+	0% {
+		box-shadow: 0 0 0 0 rgba(20, 125, 116, 0.55);
+	}
+	45% {
+		box-shadow: 0 0 0 4px rgba(20, 125, 116, 0.2);
+	}
+	100% {
+		box-shadow: 0 0 0 0 rgba(20, 125, 116, 0);
+	}
+}
+@keyframes library-row-shine-sweep {
+	to {
+		transform: translateX(130%) skewX(-18deg);
+	}
+}
+.library-row.is-shining {
+	overflow: hidden;
+	animation: library-row-shine-pulse 0.55s ease-out;
+}
+.library-row.is-shining::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+	transform: translateX(-130%) skewX(-18deg);
+	animation: library-row-shine-sweep 0.75s ease-out;
+}
