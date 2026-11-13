@@ -34,6 +34,7 @@ import GraphVisualization from "../components/GraphVisualization";
 import { API_BASE_URL } from "../config/api";
 import { clearQuiz, readQuiz } from "../lib/quizState";
 import { centerNodeName } from "../lib/graphTree";
+import { PROGRESS_INVALIDATED_EVENT, invalidateProgressCache } from "../lib/progressCache";
 import PracticeExamPanel from "../components/PracticeExamPanel";
 
 interface Message {
@@ -526,6 +527,15 @@ function App() {
       setConceptProgress([]);
     }
   }, [currentChatId]);
+
+  useEffect(() => {
+    const handleProgressInvalidated = (event: Event) => {
+      const { chatId } = (event as CustomEvent<{ chatId: string }>).detail;
+      if (chatId === currentChatId) void fetchConceptProgress(chatId);
+    };
+    window.addEventListener(PROGRESS_INVALIDATED_EVENT, handleProgressInvalidated);
+    return () => window.removeEventListener(PROGRESS_INVALIDATED_EVENT, handleProgressInvalidated);
+  }, [currentChatId, fetchConceptProgress]);
 
   const generateAIResponse = async (
     userMessage: string,
@@ -1368,7 +1378,7 @@ function App() {
       console.log("✅ Delete response received:", response.data);
       console.log("Response status:", response.status);
       console.log("✅ Chat deleted successfully on server");
-      sessionStorage.removeItem("progressPageCache:v2");
+      invalidateProgressCache(chatId);
 
       deletingChatRef.current = null;
     } catch (error: any) {

@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { BookOpen, TrendingDown, ChevronLeft } from 'lucide-react';
 import { API_BASE_URL } from '../config/api';
 import { useAuth } from '../context/AuthContext';
+import { PROGRESS_CACHE_KEY, PROGRESS_INVALIDATED_EVENT } from '../lib/progressCache';
+import { hasResolvedProgressName } from '../lib/progressDisplay';
 
 interface ProgressItem {
   concept_id: string;
@@ -22,7 +24,6 @@ interface ProfileData {
 // The last loaded progress is shown instantly when the page reopens, then refreshed in the background.
 // sessionStorage clears when the tab closes and on sign-out (AuthContext.logout); the email check
 // keeps another account in the same tab from seeing it.
-const PROGRESS_CACHE_KEY = 'progressPageCache:v2';
 type ProgressCache = { userEmail: string; profileData: ProfileData; chatTitles: [string, string][] };
 
 const readProgressCache = (userEmail: string | null): ProgressCache | null => {
@@ -90,11 +91,31 @@ const ProgressPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const [chatTitleMap, setChatTitleMap] = useState<Map<string, string>>(new Map(cached?.chatTitles ?? []));
+  const [refreshVersion, setRefreshVersion] = useState(0);
 
   useEffect(() => {
+    const handleProgressInvalidated = () => {
+      setProfileData(null);
+      setLoading(true);
+      setError(null);
+      setRefreshVersion(version => version + 1);
+    };
+    window.addEventListener(PROGRESS_INVALIDATED_EVENT, handleProgressInvalidated);
+    return () => window.removeEventListener(PROGRESS_INVALIDATED_EVENT, handleProgressInvalidated);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const updateLoading = (value: boolean) => {
+      if (active) setLoading(value);
+    };
+    const updateError = (value: string | null) => {
+      if (active) setError(value);
+    };
+
     const fetchProfileData = async () => {
       try {
-        if (!cached) setLoading(true);
+        if (!cached) updateLoading(true);
 
         // Fetch user progress from Mongo
         let progressList: any[] = [];
@@ -112,8 +133,8 @@ const ProgressPage: React.FC = () => {
           console.error('[ProgressPage] Error fetching progress:', progressError);
           // Continue even if progress fails - we can still show graphs
           if (progressError.response?.status === 401) {
-            setError('Please log in to view your progress.');
-            setLoading(false);
+            updateError('Please log in to view your progress.');
+            updateLoading(false);
             return;
           }
         }
@@ -134,6 +155,7 @@ const ProgressPage: React.FC = () => {
         } catch (err) {
           console.warn('Could not fetch chat titles:', err);
         }
+        if (!active) return;
         setChatTitleMap(localChatTitleMap);
 
         // Fetch all graph IDs for the user
@@ -152,28 +174,28 @@ const ProgressPage: React.FC = () => {
           });
           
           if (graphIdsError.response?.status === 401) {
-            setError('Please log in to view your progress.');
-            setLoading(false);
+            updateError('Please log in to view your progress.');
+            updateLoading(false);
             return;
           }
           
           if (graphIdsError.response?.status === 404) {
-            setError('User not found. Please log in again.');
-            setLoading(false);
+            updateError('User not found. Please log in again.');
+            updateLoading(false);
             return;
           }
           
           if (graphIdsError.response?.status === 500) {
             const errorMsg = graphIdsError.response?.data?.error || graphIdsError.response?.data?.message || 'Server error';
-            setError(`Server error: ${errorMsg}. Please try again later.`);
-            setLoading(false);
+            updateError(`Server error: ${errorMsg}. Please try again later.`);
+            updateLoading(false);
             return;
           }
           
           // Network or other errors
           if (graphIdsError.code === 'ECONNREFUSED' || graphIdsError.code === 'ETIMEDOUT') {
-            setError('Unable to connect to the server. Please check if the server is running.');
-            setLoading(false);
+            updateError('Unable to connect to the server. Please check if the server is running.');
+            updateLoading(false);
             return;
           }
           
@@ -182,15 +204,15 @@ const ProgressPage: React.FC = () => {
                               graphIdsError.response?.data?.error || 
                               graphIdsError.message || 
                               'Failed to load your graph data. Please try again later.';
-          setError(errorMessage);
-          setLoading(false);
+          updateError(errorMessage);
+          updateLoading(false);
           return;
         }
 
         // If no graph IDs found, show message
         if (graphIds.length === 0) {
-          setError('No graphs found. Please upload a document in a chat to see your progress.');
-          setLoading(false);
+          updateError('No graphs found. Please upload a document in a chat to see your progress.');
+          updateLoading(false);
           return;
         }
 
@@ -224,11 +246,11 @@ const ProgressPage: React.FC = () => {
           });
           
           if (hasConnectionError) {
-            setError('Could not load graph data. The AI service may be unavailable. Please ensure the Python service is running on port 8000.');
+            updateError('Could not load graph data. The AI service may be unavailable. Please ensure the Python service is running on port 8000.');
           } else {
-            setError('Could not load graph data. Please try again later.');
+            updateError('Could not load graph data. Please try again later.');
           }
-          setLoading(false);
+          updateLoading(false);
           return;
         }
 
@@ -501,7 +523,9 @@ const ProgressPage: React.FC = () => {
 
         // Don't filter out orphaned concepts - show them with fallback names
         // They might be from deleted graphs or graphs that haven't loaded yet
-        const validConcepts = normalized; // Keep all concepts, even if we can't find the node name
+        const validConcepts = normalized.filter((item: ProgressItem) =>
+          hasResolvedProgressName(item.topic_name, item.concept_id)
+        );
         
         const orphanedCount = normalized.filter(i => i.topic_name.startsWith('Unknown Topic')).length;
         if (orphanedCount > 0) {
@@ -521,9 +545,10 @@ const ProgressPage: React.FC = () => {
           console.log('  - Sample full_progress items:', full_progress.slice(0, 3));
         }
         
+        if (!active) return;
         setProfileData({ full_progress, topics_to_review });
-        setError(null);
-        if (userEmail) {
+        updateError(null);
+        if (userEmail && active) {
           writeProgressCache({ userEmail, profileData: { full_progress, topics_to_review }, chatTitles: [...localChatTitleMap] });
         }
       } catch (err: any) {
@@ -534,24 +559,27 @@ const ProgressPage: React.FC = () => {
           
           // Check for specific error types
           if (err.response.status === 401) {
-            setError('Please log in to view your progress.');
+            updateError('Please log in to view your progress.');
           } else if (err.response.status === 503 || err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT') {
-            setError('The AI service is currently unavailable. Please try again later.');
+            updateError('The AI service is currently unavailable. Please try again later.');
           } else {
-            setError(errorMessage);
+            updateError(errorMessage);
           }
         } else if (err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT') {
-          setError('Unable to connect to the server. Please check if the server is running.');
+          updateError('Unable to connect to the server. Please check if the server is running.');
         } else {
-          setError(err.message || 'Failed to load profile data. Please try again.');
+          updateError(err.message || 'Failed to load profile data. Please try again.');
         }
       } finally {
-        setLoading(false);
+        updateLoading(false);
       }
     };
 
     fetchProfileData();
-  }, [cached, userEmail]); // Runs once on mount; cached never changes and userEmail only on a new login
+    return () => {
+      active = false;
+    };
+  }, [cached, userEmail, refreshVersion]); // Refresh on mount and whenever progress is invalidated
 
   const getScoreColor = (score: number) => {
     if (score < 0.4) return 'text-red-500';
