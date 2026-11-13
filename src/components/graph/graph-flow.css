@@ -1,0 +1,42 @@
+/*
+ * React Flow overrides for the knowledge graph. These target markup owned by the library,
+ * so they stay as plain CSS. Scoped under .graph-view, the root of the graph canvas.
+ */
+
+.graph-view .react-flow {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+.graph-view .react-flow__pane,
+.graph-view .react-flow__viewport {
+  background: transparent;
+}
+.graph-view .react-flow__attribution {
+  display: none;
+}
+.graph-view .react-flow__minimap {
+  top: 146px;
+  right: 14px;
+  bottom: auto;
+  left: auto;
+  width: 150px;
+  height: 100px;
+  border: 1px solid #c3cfcd;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+/* Nodes: the React Flow wrapper is the category ring, the face is the disc inside it */
+.graph-view .react-flow__node {
+  border-radius: 50%;
+  padding: 0;
+  cursor: grab;
+  transition: opacity 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+.graph-view .react-flow__node:active {
+  cursor: grabbing;
+}
+.graph-view .react-flow__node:hover {
+  filter: drop-shadow(0 0 10px rgba(20, 125, 116, 0.5));
+}

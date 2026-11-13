@@ -50,6 +50,8 @@ export interface GraphLayers {
   activePath: PathHighlight | null;
   /** Nodes hidden by collapsed branches, and how many each collapsed node hides (C1) */
   collapse: CollapseLayer;
+  /** Category color of the clicked node; drives the path glow and edge colors. Defaults to PATH_COLOR. */
+  pathColor?: string;
 }
 
 export const DEFAULT_NODE_BORDER = '1px solid rgba(255,255,255,0.2)';
@@ -61,7 +63,18 @@ export const SEARCH_HIT_RING = '0 0 0 3px #fbbf24';
 export const PATH_COLOR = '#d4581c';
 export const PATH_NODE_BORDER = `3px solid ${PATH_COLOR}`;
 export const PATH_NODE_SHADOW = '0 0 16px rgba(212, 88, 28, 0.58)';
-export const DEFAULT_EDGE_COLOR = '#888';
+export const DEFAULT_EDGE_COLOR = '#9ebbb7';
+
+/** Glow for a path node, in the highlighted node's category color */
+export const pathNodeShadow = (color: string) => `0 0 16px ${withAlpha(color, 0.58)}`;
+
+/** Converts a #rrggbb color to rgba() with the given alpha; other formats are returned unchanged */
+function withAlpha(color: string, alpha: number): string {
+  const match = /^#([0-9a-f]{6})$/i.exec(color);
+  if (!match) return color;
+  const value = parseInt(match[1], 16);
+  return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
+}
 
 /** Opacity of everything off the path while a path is shown. Search hits stay easier to see. */
 export const OFF_PATH_NODE_OPACITY = 0.18;
@@ -119,7 +132,7 @@ export function resolveConfidenceScores(
 
 /** Combine the base graph with every layer into the nodes and edges React Flow renders */
 export function applyGraphStyles(base: BaseGraph, layers: GraphLayers): { nodes: Node[]; edges: Edge[] } {
-  const { confidenceScores, nodeEdits, searchHits, activePath, collapse } = layers;
+  const { confidenceScores, nodeEdits, searchHits, activePath, collapse, pathColor = PATH_COLOR } = layers;
   const hasPath = activePath !== null && activePath.nodeIds.length > 0;
 
   const nodes = base.nodes.map((node) => {
@@ -142,7 +155,7 @@ export function applyGraphStyles(base: BaseGraph, layers: GraphLayers): { nodes:
       if (hasPath) shadows.push(SEARCH_HIT_RING);
       shadows.push(SEARCH_HIT_SHADOW);
     }
-    if (onPath) shadows.push(PATH_NODE_SHADOW);
+    if (onPath) shadows.push(pathNodeShadow(pathColor));
 
     return {
       ...node,
@@ -180,14 +193,14 @@ export function applyGraphStyles(base: BaseGraph, layers: GraphLayers): { nodes:
       label: onPath ? edge.label : undefined,
       style: {
         ...edge.style,
-        stroke: onPath ? PATH_COLOR : DEFAULT_EDGE_COLOR,
+        stroke: onPath ? pathColor : DEFAULT_EDGE_COLOR,
         strokeWidth: onPath ? 4 : 1.5,
         opacity: hasPath && !onPath ? OFF_PATH_EDGE_OPACITY : 1,
         transition: EDGE_TRANSITION,
       },
       labelStyle: {
         ...edge.labelStyle,
-        fill: onPath ? PATH_COLOR : 'transparent',
+        fill: onPath ? pathColor : 'transparent',
         fontWeight: onPath ? 700 : 400,
       },
       zIndex: onPath ? 1 : 0,

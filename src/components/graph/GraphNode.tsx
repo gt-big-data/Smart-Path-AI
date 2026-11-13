@@ -1,234 +1,56 @@
 import React, { memo, useState } from 'react';
-import { NodeProps, Handle, Position } from 'reactflow';
+import { Handle, NodeProps, Position } from 'reactflow';
 import { Pencil } from 'lucide-react';
-
-// Node edit popup state interface
-export interface NodeEditState {
-  nodeId: string;
-  label: string;
-  color: string;
-  x: number;
-  y: number;
-}
-
-export const NODE_EDIT_POPUP_WIDTH = 220;
-export const NODE_EDIT_POPUP_HEIGHT = 270;
-export const VIEWPORT_PADDING = 12;
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+import { clamp, NODE_EDIT_POPUP_HEIGHT, NODE_EDIT_POPUP_WIDTH, NodeEditState, VIEWPORT_PADDING } from './nodeEdit';
+import {
+  collapseBadgeClass,
+  dotBorderClass,
+  dotsClass,
+  faceClass,
+  rimEditClass,
+  rimPosition,
+  stepClass,
+  tooltipClass,
+} from './graphClasses';
 
 interface GraphNodeProps extends NodeProps {
-  style?: React.CSSProperties;
   onEditRequest?: (edit: NodeEditState) => void;
   onToggleCollapse?: (nodeId: string) => void;
 }
 
-const nodeStyles = {
-  padding: '12px 20px',
-  fontSize: '18px',
-  fontWeight: '500' as const,
-  textAlign: 'center' as const,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: 'white',
-  letterSpacing: '0.5px',
-  lineHeight: '1.3',
-  width: '100%',
-  height: '100%',
-  margin: 0,
-  boxSizing: 'border-box' as const,
-  borderRadius: '24px',
-};
+const LABEL_MAX_CHARS = 30;
+const DOT_COUNT = 3;
 
-const NodeTooltip = ({ content }: { content: string }) => {
-  if (!content) return null;
-  
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        bottom: '80px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        background: 'rgba(0, 0, 0, 0.85)',
-        color: 'white',
-        padding: '8px 12px',
-        borderRadius: '4px',
-        fontSize: '13px',
-        pointerEvents: 'none',
-        zIndex: 1000,
-        maxWidth: '250px',
-        whiteSpace: 'normal',
-        wordBreak: 'break-word',
-        textAlign: 'left',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-      }}
-    >
-      {content}
-    </div>
-  );
-};
+/** Filled confidence dots (0-3) for a 0-1 score, or null when the concept has no score yet */
+function filledDotsFor(score: number | null | undefined): number | null {
+  if (score === null || score === undefined) return null;
+  if (score > 0.7) return 3;
+  if (score > 0.4) return 2;
+  if (score > 0) return 1;
+  return 0;
+}
 
-// Function to render confidence circles based on score
-const renderConfidenceCircles = (confidenceScore: number | null) => {
-  if (confidenceScore === null || confidenceScore === undefined) {
-    return (
-      <div style={{
-        position: 'absolute',
-        top: '6px',
-        left: '6px',
-        display: 'flex',
-        gap: '3px',
-        zIndex: 10,
-      }}>
-        {[1, 2, 3].map(i => (
-          <div
-            key={i}
-            style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: 'transparent',
-              border: '1.5px solid rgba(255, 255, 255, 0.7)',
-            }}
-          />
-        ))}
-      </div>
-    );
-  }
+const truncate = (text: string) => (text.length <= LABEL_MAX_CHARS ? text : `${text.substring(0, LABEL_MAX_CHARS)}...`);
 
-  let filledCircles = 0;
-  if (confidenceScore > 0.7) {
-    filledCircles = 3;
-  } else if (confidenceScore > 0.4) {
-    filledCircles = 2;
-  } else if (confidenceScore > 0.0) {
-    filledCircles = 1;
-  } else {
-    filledCircles = 0;
-  }
-
-  return (
-    <div style={{
-      position: 'absolute',
-      top: '6px',
-      left: '6px',
-      display: 'flex',
-      gap: '3px',
-      zIndex: 10,
-    }}>
-      {[1, 2, 3].map(i => (
-        <div
-          key={i}
-          style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
-            backgroundColor: i <= filledCircles ? 'rgba(255, 255, 255, 0.9)' : 'transparent',
-            border: '1.5px solid rgba(255, 255, 255, 0.7)',
-          }}
-        />
-      ))}
-    </div>
-  );
-};
-
-const pencilButtonStyle: React.CSSProperties = {
-  position: 'absolute',
-  right: '16px',
-  bottom: '-11px',
-  width: '20px',
-  height: '20px',
-  padding: 0,
-  borderRadius: '50%',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  background: '#ffffff',
-  border: '1px solid #d9dfe7',
-  color: '#586476',
-  cursor: 'pointer',
-  zIndex: 11,
-};
-
-// Holds the path step number and the collapse badge side by side in the top-right corner,
-// so the badge keeps the corner and the step number sits just left of it
-const cornerStyle: React.CSSProperties = {
-  position: 'absolute',
-  right: '-10px',
-  top: '-12px',
-  display: 'flex',
-  alignItems: 'center',
-  gap: '4px',
-  zIndex: 12,
-};
-
-const pathStepStyle: React.CSSProperties = {
-  width: '28px',
-  height: '28px',
-  borderRadius: '50%',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  background: '#d4581c',
-  border: '2px solid #ffffff',
-  boxShadow: '0 2px 8px rgba(212, 88, 28, 0.45)',
-  color: '#ffffff',
-  fontSize: '13px',
-  fontWeight: 700,
-  lineHeight: 1,
-  pointerEvents: 'none',
-};
-
-const COLLAPSE_TEAL = '#0c7f78';
-
-const collapseBadgeStyle = (collapsed: boolean, hovered: boolean): React.CSSProperties => ({
-  height: '28px',
-  minWidth: '28px',
-  padding: '0 8px',
-  borderRadius: '14px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  boxSizing: 'border-box',
-  background: collapsed ? COLLAPSE_TEAL : '#ffffff',
-  border: `2px solid ${collapsed ? '#ffffff' : COLLAPSE_TEAL}`,
-  boxShadow: hovered
-    ? '0 3px 10px rgba(15, 23, 42, 0.28)'
-    : collapsed ? '0 2px 8px rgba(12, 127, 120, 0.45)' : '0 2px 6px rgba(15, 23, 42, 0.18)',
-  color: collapsed ? '#ffffff' : COLLAPSE_TEAL,
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-  fontSize: collapsed ? '13px' : '17px',
-  fontWeight: 700,
-  lineHeight: 1,
-  cursor: 'pointer',
-  transform: hovered ? 'scale(1.08)' : 'none',
-  transition: 'transform 120ms ease, box-shadow 120ms ease',
-});
-
-export const GraphNode = memo((props: GraphNodeProps) => {
-  const { data, style = {}, id, onEditRequest, onToggleCollapse } = props;
+/** A graph node: a white disc with its label, confidence dots, path step and edit button */
+export const GraphNode = memo(function GraphNode({ id, data, onEditRequest, onToggleCollapse }: GraphNodeProps) {
   const [showTooltip, setShowTooltip] = useState(false);
-  const [badgeHovered, setBadgeHovered] = useState(false);
-
-  const truncateText = (text: string) => {
-    if (!text) return '';
-    if (text.length <= 30) return text;
-    return text.substring(0, 30) + '...';
-  };
+  const label: string = data.customLabel || data.label;
+  const filled = filledDotsFor(data.confidenceScore);
+  const dotFill = data.isCenter ? '#ffffff' : '#147d74';
 
   const handleEditClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     // Keep this click from reaching React Flow's onNodeClick (path highlight)
     // and the window listener that closes the popup
     e.stopPropagation();
+
     // Place the popup above the pencil, or below it if there's no room
     const rect = e.currentTarget.getBoundingClientRect();
     const preferredX = rect.left + rect.width / 2 - NODE_EDIT_POPUP_WIDTH / 2;
     const preferredYAbove = rect.top - NODE_EDIT_POPUP_HEIGHT - 12;
     const preferredYBelow = rect.bottom + 12;
-    // Keep the popup inside the graph panel horizontally so it doesn't cover the chat/quiz panel.
-    // Falls back to the window edges if the panel is narrower than the popup.
+
+    // Keep the popup inside the graph panel horizontally, falling back to the window edges
     const panel = e.currentTarget.closest('.react-flow')?.getBoundingClientRect();
     const fitsInPanel = panel && panel.width >= NODE_EDIT_POPUP_WIDTH + 2 * VIEWPORT_PADDING;
     const minX = fitsInPanel ? panel.left + VIEWPORT_PADDING : VIEWPORT_PADDING;
@@ -236,18 +58,19 @@ export const GraphNode = memo((props: GraphNodeProps) => {
       ? panel.right - NODE_EDIT_POPUP_WIDTH - VIEWPORT_PADDING
       : window.innerWidth - NODE_EDIT_POPUP_WIDTH - VIEWPORT_PADDING;
     const maxY = window.innerHeight - NODE_EDIT_POPUP_HEIGHT - VIEWPORT_PADDING;
-    const x = clamp(preferredX, minX, maxX);
-    const y = clamp(preferredYAbove > VIEWPORT_PADDING ? preferredYAbove : preferredYBelow, VIEWPORT_PADDING, maxY);
+
     onEditRequest?.({
       nodeId: id,
-      label: data.customLabel || data.label,
+      label,
+      isCenter: Boolean(data.isCenter),
       color: data.color || '#3b82f6',
-      x,
-      y,
+      x: clamp(preferredX, minX, maxX),
+      y: clamp(preferredYAbove > VIEWPORT_PADDING ? preferredYAbove : preferredYBelow, VIEWPORT_PADDING, maxY),
     });
   };
 
   const isCollapsed = data.hiddenCount > 0;
+  const collapseLabel = isCollapsed ? `Expand branch (${data.hiddenCount} hidden)` : 'Collapse branch';
 
   const handleCollapseClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     // Keep this click from reaching React Flow's onNodeClick (path highlight and selection)
@@ -255,76 +78,66 @@ export const GraphNode = memo((props: GraphNodeProps) => {
     onToggleCollapse?.(id);
   };
 
+  // React Flow selects the node on Enter or Space; the button's own click does the toggling
   const handleCollapseKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
-    // React Flow selects the node on Enter or Space; the button's own click does the toggling
     if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
   };
 
-  const collapseLabel = isCollapsed ? `Expand branch (${data.hiddenCount} hidden)` : 'Collapse branch';
+  const confidenceLabel = filled === null
+    ? 'No confidence score yet'
+    : `Confidence ${Math.round(data.confidenceScore * 100)}%`;
 
   return (
     <>
-      <Handle 
-        type="target" 
-        position={Position.Top} 
-        style={{ background: '#555', width: '8px', height: '8px', top: '-4px' }} 
-      />
+      <Handle type="target" position={Position.Top} className="nodrag nopan" />
       <div
-        style={{
-          ...nodeStyles,
-          ...style,
-          position: 'relative',
-          cursor: 'pointer',
-        }}
+        className={faceClass(Boolean(data.isCenter))}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
       >
-        {renderConfidenceCircles(data.confidenceScore)}
-        {data.customLabel || truncateText(data.label)}
-        <div style={cornerStyle}>
-          {data.pathStep != null && (
+        <span className={dotsClass} role="img" aria-label={confidenceLabel}>
+          {Array.from({ length: DOT_COUNT }, (_, i) => (
             <span
-              style={pathStepStyle}
-              aria-label={`Path step ${data.pathStep}`}
-            >
-              {data.pathStep}
-            </span>
-          )}
-          {data.collapsible && (
-            <button
-              type="button"
-              className="nodrag nopan"
-              style={collapseBadgeStyle(isCollapsed, badgeHovered)}
-              onClick={handleCollapseClick}
-              onKeyDown={handleCollapseKeyDown}
-              // Mouse only: a touch tap would leave the hover look stuck on
-              onPointerEnter={(e) => setBadgeHovered(e.pointerType === 'mouse')}
-              onPointerLeave={() => setBadgeHovered(false)}
-              title={collapseLabel}
-              aria-label={collapseLabel}
-              aria-expanded={!isCollapsed}
-            >
-              {isCollapsed ? `+${data.hiddenCount}` : '−'}
-            </button>
-          )}
-        </div>
+              key={i}
+              className={dotBorderClass(Boolean(data.isCenter), filled === null)}
+              style={{ background: filled !== null && i < filled ? dotFill : 'transparent' }}
+            />
+          ))}
+        </span>
+        {data.customLabel || truncate(data.label)}
+      </div>
+      {/* Rim buttons sit outside the face, which clips to the disc, so they can sit on its border */}
+      {data.pathStep != null && (
+        <span className={`${stepClass} ${rimPosition.topLeft}`} aria-label={`Path step ${data.pathStep}`}>
+          {data.pathStep}
+        </span>
+      )}
+      {data.collapsible && (
         <button
           type="button"
-          className="nodrag nopan"
-          style={pencilButtonStyle}
-          onClick={handleEditClick}
-          title="Edit node"
-          aria-label="Edit node"
+          className={`${collapseBadgeClass(isCollapsed)} ${rimPosition.topRight} nodrag nopan`}
+          onClick={handleCollapseClick}
+          onKeyDown={handleCollapseKeyDown}
+          title={collapseLabel}
+          aria-label={collapseLabel}
+          aria-expanded={!isCollapsed}
         >
-          <Pencil size={12} />
+          {isCollapsed ? `+${data.hiddenCount}` : '−'}
         </button>
-      </div>
-      {showTooltip && !data.customLabel && <NodeTooltip content={data.description} />}
-      <Handle 
-        type="source" 
-        position={Position.Bottom} 
-        style={{ background: '#555', width: '8px', height: '8px', bottom: '-4px' }} 
-      />
+      )}
+      <button
+        type="button"
+        className={`${rimEditClass} ${rimPosition.bottomRight} nodrag nopan`}
+        onClick={handleEditClick}
+        title="Edit node"
+        aria-label="Edit node"
+      >
+        <Pencil size={14} strokeWidth={3} aria-hidden="true" />
+      </button>
+      {showTooltip && !data.customLabel && data.description && (
+        <div className={tooltipClass} role="tooltip">{data.description}</div>
+      )}
+      <Handle type="source" position={Position.Bottom} className="nodrag nopan" />
     </>
   );
 });

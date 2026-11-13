@@ -1,54 +1,33 @@
-//GraphVisualization.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import ReactFlow, {
-  Node,
-  Edge,
-  Background,
-  Controls,
-  MiniMap,
-  NodeMouseHandler,
-  NodeProps,
-  ReactFlowInstance,
-  useNodesState,
-  useEdgesState,
-} from 'reactflow';
+import ReactFlow, { MiniMap, NodeMouseHandler, NodeProps, ReactFlowInstance, useEdgesState, useNodesState } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Search, X } from 'lucide-react';
+import './graph/graph-flow.css';
 import PathBar from './graph/PathBar';
-import { computeNodeSizes } from '../lib/nodesizing';
-import { buildGraphTree, GraphTree } from '../lib/graphTree';
+import { buildGraphTree } from '../lib/graphTree';
 import { useCollapse } from '../lib/collapse';
-import { radialLayout, toTopLeft, NodeSize, Point, RadialTreeNode } from '../lib/radialLayout';
 import { getPathHighlight } from '../lib/pathHighlight';
 import { buildSearchResultItems } from '../lib/searchResults';
-import { applyGraphStyles, BaseGraph, ConfidenceKeys, DEFAULT_NODE_BORDER, NodeEdit, PATH_COLOR, resolveConfidenceScores } from '../lib/graphStyles';
-import { API_BASE_URL } from '../config/api';
-import { GraphNode, NodeEditState, NODE_EDIT_POPUP_WIDTH, NODE_EDIT_POPUP_HEIGHT, VIEWPORT_PADDING } from './graph/GraphNode';
+import { applyGraphStyles, BaseGraph, NodeEdit, PATH_COLOR, resolveConfidenceScores } from '../lib/graphStyles';
+import { buildBaseGraph, DEFAULT_NODE_SIZE } from '../lib/buildBaseGraph';
+import { getNodeColor } from '../lib/graphPalette';
+import type { GraphData } from '../types/graph';
+import type { ConceptProgress } from '../types/chat';
+import { GraphNode } from './graph/GraphNode';
+import { NodeEditState } from './graph/nodeEdit';
+import NodeEditPopup from './graph/NodeEditPopup';
+import GraphSearchBar from './graph/GraphSearchBar';
+import GraphZoomControls from './graph/GraphZoomControls';
+import GraphLegend from './graph/GraphLegend';
+import GraphFocusHint from './graph/GraphFocusHint';
+import GraphLoader from './graph/GraphLoader';
+import GraphEmptyState from './graph/GraphEmptyState';
+import { useGraphSearch } from './graph/useGraphSearch';
+import { graphView } from './graph/graphClasses';
 
-interface GraphData {
-  status: string;
-  graph_id?: string;
-  subject?: string;
-  graph: {
-    nodes: any[];
-    relationships: any[];
-  };
-}
-
-interface ConceptProgress {
-  conceptId: string;
-  confidenceScore: number;
-  lastAttempted?: Date;
-}
-
-// Path bar preview with hardcoded steps; wired up in P2b
-// The current PathBar is a P2b preview with hardcoded steps and no handlers.
-// Keep it hidden until it is wired to the loaded graph and active path.
+// Path bar preview with hardcoded steps; wired up in P2b. Keep hidden until it is wired
+// to the loaded graph and active path.
 const SHOW_PATH_BAR = false;
-
-// Must match the fallback size nodes are rendered at below
-const DEFAULT_NODE_SIZE: NodeSize = { width: 200, height: 70 };
 
 // Rings from the center that the first view zooms to; the rest of the graph is a pan away
 const INITIAL_FOCUS_DEPTH = 2;
@@ -56,491 +35,37 @@ const INITIAL_FOCUS_DEPTH = 2;
 // Zoom a clicked search result is shown at, at least, so its label is readable
 const SEARCH_RESULT_MIN_ZOOM = 0.8;
 
-/**
- * Top-left positions for React Flow: the center in the middle and one ring per depth
- * (src/lib/radialLayout.ts). Nodes the tree doesn't reach go in a row under the outer ring.
- */
-function layoutRadially(nodes: Node[], tree: GraphTree, sizes: Map<string, NodeSize>): Map<string, Point> {
-  const ids = new Set(nodes.map(node => node.id));
-  const sizeOf = (id: string) => sizes.get(id) ?? DEFAULT_NODE_SIZE;
-
-  // The tree is built from the raw graph; drop nodes that weren't rendered
-  const radialTree = new Map<string, RadialTreeNode>();
-  tree.nodes.forEach((treeNode, id) => {
-    if (ids.has(id)) radialTree.set(id, { id, children: treeNode.children.filter(child => ids.has(child)) });
-  });
-
-  const positions = new Map<string, Point>();
-  if (tree.centerId && radialTree.has(tree.centerId)) {
-    const { positions: centers } = radialLayout(tree.centerId, radialTree, sizes, { defaultSize: DEFAULT_NODE_SIZE });
-    centers.forEach((center, id) => positions.set(id, toTopLeft(center, sizeOf(id))));
-  }
-
-  const unplaced = nodes.filter(node => !positions.has(node.id));
-  if (unplaced.length > 0) {
-    let bottom = 0;
-    positions.forEach((pos, id) => { bottom = Math.max(bottom, pos.y + sizeOf(id).height); });
-    let x = 0;
-    unplaced.forEach(node => {
-      positions.set(node.id, { x, y: bottom + 200 });
-      x += sizeOf(node.id).width + 40;
-    });
-  }
-  return positions;
-}
-
-const SUBJECT_MAP: { [key: string]: string } = {
-  'math': 'math',
-  'mathematics': 'math',
-  'english': 'english',
-  'literature': 'english',
-  'history': 'history',
-  'science': 'science',
-  'other': 'default',
-  'default': 'default',
-};
+// Opacity of nodes outside the category picked in the legend
+const CATEGORY_DIM_OPACITY = 0.18;
 
 interface GraphVisualizationProps {
   data: GraphData | null;
   conceptProgress: ConceptProgress[];
   isLoading?: boolean;
+  onFocusChange?: (label: string | null) => void;
+  focusClearToken?: number;
 }
 
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
-
-const COLOR_PALETTE = {
-  BLUE: 'rgba(59, 130, 246, 1)',
-  INDIGO: 'rgba(99, 102, 241, 1)',
-  PURPLE: 'rgba(139, 92, 246, 1)',
-  PINK: 'rgba(236, 72, 153, 1)',
-  RED: 'rgba(239, 68, 68, 1)',
-  ORANGE: 'rgba(249, 115, 22, 1)',
-  AMBER: 'rgba(245, 158, 11, 1)',
-  YELLOW: 'rgba(234, 179, 8, 1)',
-  LIME: 'rgba(132, 204, 22, 1)',
-  GREEN: 'rgba(34, 197, 94, 1)',
-  EMERALD: 'rgba(16, 185, 129, 1)',
-  TEAL: 'rgba(20, 184, 166, 1)',
-  CYAN: 'rgba(6, 182, 212, 1)',
-  SKY: 'rgba(14, 165, 233, 1)',
-  VIOLET: 'rgba(124, 58, 237, 1)',
-  FUCHSIA: 'rgba(217, 70, 239, 1)',
-  ROSE: 'rgba(244, 63, 94, 1)',
-  SLATE: 'rgba(100, 116, 139, 1)',
-};
-
-const subjectColorSchemes: { [subject: string]: { [nodeType: string]: string } } = {
-  base: {
-    Topic: COLOR_PALETTE.BLUE,
-    Subtopic: COLOR_PALETTE.TEAL,
-    Definition: COLOR_PALETTE.PURPLE,
-    Example: COLOR_PALETTE.PINK,
-    Source: COLOR_PALETTE.SLATE,
-    Application: COLOR_PALETTE.ORANGE,
-  },
-
-  english: {
-    Topic: COLOR_PALETTE.BLUE,
-    Subtopic: COLOR_PALETTE.TEAL,
-    Definition: COLOR_PALETTE.PURPLE,
-    Example: COLOR_PALETTE.PINK,
-    Work: COLOR_PALETTE.INDIGO,
-    Author: COLOR_PALETTE.VIOLET,
-    LiteraryDevice: COLOR_PALETTE.FUCHSIA,
-    Theme: COLOR_PALETTE.ROSE,
-    CriticalTheory: COLOR_PALETTE.AMBER,
-    Application: COLOR_PALETTE.ORANGE,
-    Genre: COLOR_PALETTE.CYAN,
-  },
-
-  history: {
-    Topic: COLOR_PALETTE.BLUE,
-    Event: COLOR_PALETTE.RED,
-    Figure: COLOR_PALETTE.VIOLET,
-    Location: COLOR_PALETTE.GREEN,
-    Concept: COLOR_PALETTE.PURPLE,
-    Document: COLOR_PALETTE.AMBER,
-    Cause: COLOR_PALETTE.ORANGE,
-    Consequence: COLOR_PALETTE.PINK,
-    Definition: COLOR_PALETTE.TEAL,
-    Source: COLOR_PALETTE.SLATE,
-  },
-
-  math: {
-    Topic: COLOR_PALETTE.BLUE,
-    Subtopic: COLOR_PALETTE.TEAL,
-    Definition: COLOR_PALETTE.PURPLE,
-    Example: COLOR_PALETTE.PINK,
-    Formula: COLOR_PALETTE.GREEN,
-    Property: COLOR_PALETTE.CYAN,
-    Theorem: COLOR_PALETTE.AMBER,
-    Proof: COLOR_PALETTE.ORANGE,
-    Application: COLOR_PALETTE.VIOLET,
-  },
-
-  mathematics: {
-    Topic: COLOR_PALETTE.BLUE,
-    Subtopic: COLOR_PALETTE.TEAL,
-    Definition: COLOR_PALETTE.PURPLE,
-    Example: COLOR_PALETTE.PINK,
-    Formula: COLOR_PALETTE.GREEN,
-    Property: COLOR_PALETTE.CYAN,
-    Theorem: COLOR_PALETTE.AMBER,
-    Proof: COLOR_PALETTE.ORANGE,
-    Application: COLOR_PALETTE.VIOLET,
-  },
-
-  science: {
-    Topic: COLOR_PALETTE.BLUE,
-    Subtopic: COLOR_PALETTE.TEAL,
-    Definition: COLOR_PALETTE.PURPLE,
-    Example: COLOR_PALETTE.PINK,
-    Equation: COLOR_PALETTE.GREEN,
-    Principle: COLOR_PALETTE.EMERALD,
-    Theory: COLOR_PALETTE.AMBER,
-    Evidence: COLOR_PALETTE.CYAN,
-    Scientist: COLOR_PALETTE.VIOLET,
-    Concept: COLOR_PALETTE.INDIGO,
-    Application: COLOR_PALETTE.ORANGE,
-    GraphMetadata: COLOR_PALETTE.SLATE,
-    MendelianGenetics: COLOR_PALETTE.LIME,
-    CellTheory: COLOR_PALETTE.SKY,
-    Evolution: COLOR_PALETTE.ROSE,
-    Discovery: COLOR_PALETTE.FUCHSIA,
-  },
-
-  default: {
-    Topic: COLOR_PALETTE.BLUE,
-    Subtopic: COLOR_PALETTE.TEAL,
-    Definition: COLOR_PALETTE.PURPLE,
-    Example: COLOR_PALETTE.PINK,
-    Source: COLOR_PALETTE.SLATE,
-    Application: COLOR_PALETTE.ORANGE,
-  },
-};
-
-// Loading screen component
-const GraphLoadingScreen = ({ isLoading }: { isLoading: boolean }) => {
-  return (
-    <div style={{
-      height: '100%',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '20px',
-      background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-      color: 'white',
-    }}>
-      {isLoading ? (
-        <>
-          {/* Animated graph nodes */}
-          <div style={{ position: 'relative', width: '80px', height: '80px' }}>
-            <style>{`
-              @keyframes orbit {
-                0% { transform: rotate(0deg) translateX(30px) rotate(0deg); }
-                100% { transform: rotate(360deg) translateX(30px) rotate(-360deg); }
-              }
-              @keyframes pulse-center {
-                0%, 100% { transform: scale(1); opacity: 0.9; }
-                50% { transform: scale(1.15); opacity: 1; }
-              }
-              @keyframes orbit2 {
-                0% { transform: rotate(120deg) translateX(30px) rotate(-120deg); }
-                100% { transform: rotate(480deg) translateX(30px) rotate(-480deg); }
-              }
-              @keyframes orbit3 {
-                0% { transform: rotate(240deg) translateX(30px) rotate(-240deg); }
-                100% { transform: rotate(600deg) translateX(30px) rotate(-600deg); }
-              }
-            `}</style>
-            {/* Center node */}
-            <div style={{
-              position: 'absolute',
-              top: '50%', left: '50%',
-              width: '20px', height: '20px',
-              borderRadius: '50%',
-              background: '#14b8a6',
-              transform: 'translate(-50%, -50%)',
-              animation: 'pulse-center 1.5s ease-in-out infinite',
-              boxShadow: '0 0 15px rgba(20, 184, 166, 0.6)',
-            }} />
-            {/* Orbiting nodes */}
-            {['#3b82f6', '#8b5cf6', '#f59e0b'].map((color, i) => (
-              <div key={i} style={{
-                position: 'absolute',
-                top: '50%', left: '50%',
-                width: '12px', height: '12px',
-                borderRadius: '50%',
-                background: color,
-                marginTop: '-6px', marginLeft: '-6px',
-                animation: `orbit${i === 0 ? '' : i + 1} ${1.8 + i * 0.3}s linear infinite`,
-                boxShadow: `0 0 8px ${color}`,
-              }} />
-            ))}
-          </div>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '18px', fontWeight: '600', color: '#e2e8f0', marginBottom: '6px' }}>
-              Building Knowledge Graph
-            </div>
-            <div style={{ fontSize: '14px', color: '#64748b' }}>
-              Extracting concepts and relationships...
-            </div>
-          </div>
-          {/* Animated progress dots */}
-          <div style={{ display: 'flex', gap: '6px' }}>
-            {[0, 1, 2].map(i => (
-              <div key={i} style={{
-                width: '8px', height: '8px',
-                borderRadius: '50%',
-                background: '#14b8a6',
-                animation: `pulse-center 1.2s ease-in-out ${i * 0.2}s infinite`,
-              }} />
-            ))}
-          </div>
-        </>
-      ) : (
-        <>
-          {/* Empty state icon */}
-          <div style={{
-            width: '72px', height: '72px',
-            borderRadius: '16px',
-            background: 'rgba(20, 184, 166, 0.1)',
-            border: '1px solid rgba(20, 184, 166, 0.2)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '32px',
-          }}>
-            🗂️
-          </div>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '18px', fontWeight: '600', color: '#e2e8f0', marginBottom: '6px' }}>
-              No Graph Uploaded Yet
-            </div>
-            <div style={{ fontSize: '14px', color: '#64748b', maxWidth: '260px', lineHeight: '1.5' }}>
-              Upload a PDF to generate your knowledge graph and start exploring concepts.
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
-
-// Node Edit Popup component
-const NodeEditPopup = ({
-  editState,
-  onClose,
-  onSave,
-}: {
-  editState: NodeEditState;
-  onClose: () => void;
-  onSave: (id: string, label: string, color: string) => void;
+/**
+ * The knowledge graph: React Flow canvas plus search, zoom, legend and the selected-concept hint.
+ * Structure lives in buildBaseGraph; styling layers (confidence, edits, search, path, collapse,
+ * category) are combined by applyGraphStyles, so a restyle never moves nodes.
+ */
+const GraphVisualization: React.FC<GraphVisualizationProps> = ({
+  data,
+  conceptProgress,
+  isLoading = false,
+  onFocusChange,
+  focusClearToken = 0,
 }) => {
-  const [label, setLabel] = useState(editState.label);
-  const [color, setColor] = useState(editState.color);
-  const [position, setPosition] = useState({ x: editState.x, y: editState.y });
-  const dragStateRef = useRef<{ dragging: boolean; offsetX: number; offsetY: number }>({
-    dragging: false,
-    offsetX: 0,
-    offsetY: 0,
-  });
-
-  const colorOptions = Object.values(COLOR_PALETTE);
-
-  useEffect(() => {
-    setLabel(editState.label);
-    setColor(editState.color);
-    setPosition({ x: editState.x, y: editState.y });
-  }, [editState]);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!dragStateRef.current.dragging) return;
-      const maxX = window.innerWidth - NODE_EDIT_POPUP_WIDTH - VIEWPORT_PADDING;
-      const maxY = window.innerHeight - NODE_EDIT_POPUP_HEIGHT - VIEWPORT_PADDING;
-      setPosition({
-        x: clamp(e.clientX - dragStateRef.current.offsetX, VIEWPORT_PADDING, maxX),
-        y: clamp(e.clientY - dragStateRef.current.offsetY, VIEWPORT_PADDING, maxY),
-      });
-    };
-
-    const handleMouseUp = () => {
-      dragStateRef.current.dragging = false;
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, []);
-
-  const handleDragStart = (e: React.MouseEvent<HTMLDivElement>) => {
-    dragStateRef.current = {
-      dragging: true,
-      offsetX: e.clientX - position.x,
-      offsetY: e.clientY - position.y,
-    };
-  };
-
-  return (
-    <div
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        position: 'fixed',
-        top: position.y,
-        left: position.x,
-        zIndex: 9999,
-        background: 'white',
-        borderRadius: '10px',
-        boxShadow: '0 8px 30px rgba(0,0,0,0.18)',
-        padding: '12px',
-        width: `${NODE_EDIT_POPUP_WIDTH}px`,
-        boxSizing: 'border-box',
-        border: '1px solid #e5e7eb',
-      }}
-    >
-      {/* Header */}
-      <div
-        onMouseDown={handleDragStart}
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '8px',
-          cursor: 'move',
-          userSelect: 'none',
-        }}
-      >
-        <span style={{ fontWeight: '600', fontSize: '13px', color: '#111827' }}>Edit Node</span>
-        <button
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={onClose}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}
-        >
-          <X className="w-3.5 h-3.5" style={{ color: '#6b7280' }} />
-        </button>
-      </div>
-
-      {/* Label field */}
-      <div style={{ marginBottom: '8px' }}>
-        <label style={{ fontSize: '11px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '3px' }}>
-          Label
-        </label>
-        <input
-          type="text"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '5px 8px',
-            borderRadius: '6px',
-            border: '1px solid #d1d5db',
-            fontSize: '12px',
-            color: '#111827',
-            outline: 'none',
-            boxSizing: 'border-box',
-          }}
-          onFocus={(e) => e.target.style.borderColor = '#14b8a6'}
-          onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
-        />
-      </div>
-
-      {/* Color picker */}
-      <div style={{ marginBottom: '10px' }}>
-        <label style={{ fontSize: '11px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '3px' }}>
-          Color
-        </label>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-          {colorOptions.map((c) => (
-            <button
-              key={c}
-              onClick={() => setColor(c)}
-              style={{
-                width: '18px',
-                height: '18px',
-                borderRadius: '50%',
-                background: c,
-                border: color === c ? '2px solid #111827' : '2px solid transparent',
-                cursor: 'pointer',
-                outline: color === c ? '2px solid white' : 'none',
-                outlineOffset: '-3px',
-                transition: 'transform 0.1s',
-              }}
-              title={c}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Preview */}
-      <div style={{ marginBottom: '10px' }}>
-        <label style={{ fontSize: '11px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '3px' }}>
-          Preview
-        </label>
-        <div style={{
-          background: color,
-          color: 'white',
-          padding: '6px 10px',
-          borderRadius: '6px',
-          fontSize: '12px',
-          fontWeight: '500',
-          textAlign: 'center',
-          wordBreak: 'break-word',
-        }}>
-          {label || 'Node Label'}
-        </div>
-      </div>
-
-      {/* Buttons */}
-      <div style={{ display: 'flex', gap: '8px' }}>
-        <button
-          onClick={onClose}
-          style={{
-            flex: 1,
-            padding: '5px',
-            borderRadius: '6px',
-            border: '1px solid #d1d5db',
-            background: 'white',
-            color: '#374151',
-            fontSize: '12px',
-            cursor: 'pointer',
-            fontWeight: '500',
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={() => { onSave(editState.nodeId, label, color); onClose(); }}
-          style={{
-            flex: 1,
-            padding: '5px',
-            borderRadius: '6px',
-            border: 'none',
-            background: '#14b8a6',
-            color: 'white',
-            fontSize: '12px',
-            cursor: 'pointer',
-            fontWeight: '500',
-          }}
-        >
-          Apply
-        </button>
-      </div>
-    </div>
-  );
-};
-
-const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptProgress, isLoading = false }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [activePathTargetId, setActivePathTargetId] = useState<string | null>(null);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [minimapLocked, setMinimapLocked] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [nodeEditState, setNodeEditState] = useState<NodeEditState | null>(null);
+  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
 
   // Custom label/color edits by node id. Kept apart from the nodes so a restyle doesn't drop them,
   // and tagged with the graph they were made on so a newly loaded graph doesn't inherit them.
@@ -548,91 +73,83 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, conceptPr
     { graph: null, byId: {} }
   );
 
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword');
-  const searchContext = useMemo(() => ({
-    graph: data?.graph, graphId: data?.graph_id, query: searchQuery, mode: searchMode,
-  }), [data?.graph, data?.graph_id, searchQuery, searchMode]);
-  const [searchResponse, setSearchResponse] = useState<{
-    context: typeof searchContext; nodeIds: string[];
-  } | null>(null);
-  const [pendingSearchNavigation, setPendingSearchNavigation] = useState<typeof searchContext | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
-  // Hide previous hits immediately, including the debounce before a new request starts.
-  const hasCurrentSearchResponse = searchResponse?.context === searchContext;
-  const searchResults = useMemo(
-    () => searchResponse?.context === searchContext ? searchResponse.nodeIds : [],
-    [searchContext, searchResponse]
+  const search = useGraphSearch(data);
+  const { searchQuery, searchMode, searchContext, hasCurrentSearchResponse, searchResults, isSearching } = search;
+  const { setSearchQuery, setSearchMode, setPendingSearchNavigation, pendingSearchNavigation } = search;
+
+  const graphTree = useMemo(
+    () => buildGraphTree(data?.graph ?? { nodes: [], relationships: [] }),
+    [data?.graph]
   );
 
-  // Node edit popup state
-  const [nodeEditState, setNodeEditState] = useState<NodeEditState | null>(null);
+  const baseGraph = useMemo(
+    () => (data?.graph ? buildBaseGraph(data, graphTree) : null),
+    [data, graphTree]
+  );
 
-const graphTree = useMemo(
-  () =>
-    buildGraphTree(
-      data?.graph ?? {
-        nodes: [],
-        relationships: [],
-      }
-    ),
-  [data?.graph]
-);
+  const activePath = useMemo(
+    () => (activePathTargetId ? getPathHighlight(graphTree, activePathTargetId) : null),
+    [activePathTargetId, graphTree]
+  );
 
-const activePath = useMemo(
-  () =>
-    activePathTargetId
-      ? getPathHighlight(graphTree, activePathTargetId)
-      : null,
-  [activePathTargetId, graphTree]
-);
+  const clearActivePath = useCallback(() => {
+    setActivePathTargetId(null);
+  }, []);
 
-const clearActivePath = useCallback(() => {
-  setActivePathTargetId(null);
-}, []);
-
-const handleNodeClick = useCallback<NodeMouseHandler>(
-  (_, node) => {
-    if (node.id === graphTree.centerId) {
-      clearActivePath();
-      return;
-    }
-
-    setActivePathTargetId(node.id);
-  },
-  [clearActivePath, graphTree.centerId]
-);
-
-useEffect(() => {
-  const handleEscape = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') {
-      clearActivePath();
-    }
-  };
-
-  window.addEventListener('keydown', handleEscape);
-
-  return () => {
-    window.removeEventListener('keydown', handleEscape);
-  };
-}, [clearActivePath]);
-
-useEffect(() => {
-  if (
-    activePathTargetId &&
-    !graphTree.nodes.has(activePathTargetId)
-  ) {
-    clearActivePath();
-  }
-}, [activePathTargetId, clearActivePath, graphTree]);
-
-  // Close popup when clicking elsewhere
+  const appliedClearToken = useRef(focusClearToken);
   useEffect(() => {
-    const handler = () => setNodeEditState(null);
-    if (nodeEditState) {
-      window.addEventListener('click', handler);
+    if (focusClearToken === appliedClearToken.current) return;
+    appliedClearToken.current = focusClearToken;
+    clearActivePath();
+  }, [focusClearToken, clearActivePath]);
+
+  const focusedLabel = useMemo(() => {
+    if (!activePathTargetId) return null;
+    const label = nodes.find((node) => node.id === activePathTargetId)?.data?.label;
+    return typeof label === 'string' ? label : null;
+  }, [activePathTargetId, nodes]);
+
+  useEffect(() => {
+    onFocusChange?.(focusedLabel);
+  }, [focusedLabel, onFocusChange]);
+
+  // Category color of the highlighted node: its glow and path edges take it
+  const activePathColor = useMemo(() => {
+    const node = baseGraph?.nodes.find((n) => n.id === activePathTargetId);
+    return typeof node?.data?.color === 'string' ? node.data.color : PATH_COLOR;
+  }, [baseGraph, activePathTargetId]);
+
+  // Clicking the highlighted node again clears its path; the center always clears it
+  const handleNodeClick = useCallback<NodeMouseHandler>(
+    (_, node) => {
+      if (node.id === graphTree.centerId) {
+        clearActivePath();
+        return;
+      }
+      setActivePathTargetId((current) => (current === node.id ? null : node.id));
+    },
+    [clearActivePath, graphTree.centerId]
+  );
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') clearActivePath();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [clearActivePath]);
+
+  useEffect(() => {
+    if (activePathTargetId && !graphTree.nodes.has(activePathTargetId)) {
+      clearActivePath();
     }
+  }, [activePathTargetId, clearActivePath, graphTree]);
+
+  // Close the edit popup when clicking elsewhere
+  useEffect(() => {
+    if (!nodeEditState) return;
+    const handler = () => setNodeEditState(null);
+    window.addEventListener('click', handler);
     return () => window.removeEventListener('click', handler);
   }, [nodeEditState]);
 
@@ -642,237 +159,6 @@ useEffect(() => {
       byId: { ...(prev.graph === baseGraph ? prev.byId : {}), [nodeId]: { label, color } },
     }));
   };
-
-  const getNodeLabel = (node: any) => {
-    const nameBasedNodeTypes = [
-      'Topic', 'Subtopic', 'Event', 'Figure', 'Location',
-      'Concept', 'Document', 'Work', 'Author', 'LiteraryDevice',
-      'Theme', 'CriticalTheory', 'Genre', 'Formula', 'Property',
-      'Theorem', 'Proof', 'Equation', 'Principle', 'Theory',
-      'Evidence', 'Scientist'
-    ];
-
-    const shouldUseName = node.labels.some(label => nameBasedNodeTypes.includes(label));
-
-    const truncateText = (text: string, maxWords: number = 4): string => {
-      const words = text.split(' ');
-      if (words.length <= maxWords) return text;
-      return words.slice(0, maxWords).join(' ') + '...';
-    };
-
-    if (shouldUseName) {
-      if (node.properties.name && node.properties.name.trim()) {
-        return truncateText(node.properties.name.trim());
-      }
-    }
-
-    const possibleProperties = [
-      'text', 'description', 'illustration', 'explanation',
-      'content', 'title', 'label', 'summary', 'definition', 'name',
-    ];
-
-    for (const prop of possibleProperties) {
-      const value = node.properties[prop];
-      if (value && typeof value === 'string' && value.trim()) {
-        return truncateText(value.trim());
-      }
-    }
-
-    for (const [key, value] of Object.entries(node.properties || {})) {
-      if (typeof value === 'string' && value.trim() && key !== 'id') {
-        return truncateText(value.trim());
-      }
-    }
-
-    const nodeType = node.labels?.[0] || 'Node';
-    console.warn('Node with no displayable properties, using fallback:', {
-      labels: node.labels,
-      properties: Object.keys(node.properties || {}),
-      id: node.id,
-      fallback: nodeType
-    });
-
-    return nodeType;
-  };
-
-  const getNodeColor = (nodeType: string, subject: string = 'default') => {
-    const normalizedSubject = subject.toLowerCase().trim();
-    const colorScheme = subjectColorSchemes[normalizedSubject] || subjectColorSchemes.default;
-    const color = colorScheme[nodeType] || COLOR_PALETTE.SLATE;
-    return color;
-  };
-
-  useEffect(() => {
-    const { graph, graphId, query, mode } = searchContext;
-    setIsSearching(false);
-    if (!query.trim() || !graph || !graphId) return;
-
-    const controller = new AbortController();
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      setIsSearching(true);
-      try {
-        const endpoint = mode === 'semantic' ? 'semantic-search-graph' : 'search-graph';
-        const url = `${API_BASE_URL}/api/${endpoint}?graph_id=${encodeURIComponent(graphId)}&query=${encodeURIComponent(query)}`;
-        const response = await fetch(url, { credentials: 'include', signal: controller.signal });
-        const result = await response.json();
-        if (!cancelled) {
-          setSearchResponse({ context: searchContext, nodeIds: result.status === 'success' ? result.node_ids || [] : [] });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.error('[Graph Search] Error:', error);
-          setSearchResponse({ context: searchContext, nodeIds: [] });
-        }
-      } finally {
-        if (!cancelled) setIsSearching(false);
-      }
-    }, 300);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearTimeout(timer);
-    };
-  }, [searchContext]);
-
-  // Graph structure: labels, colors, sizes and positions. Depends on the graph data only,
-  // so quiz answers, edits and search never re-run the layout. Styling is layered on below.
-  const baseGraph = useMemo((): BaseGraph | null => {
-    if (!data?.graph) return null;
-
-    const subject = data.subject || 'default';
-
-    // One row per id: duplicate ids break React keys and inflate the graph.
-    const seenNodeIds = new Set<string>();
-    const nodesInput = data.graph.nodes.filter((n) => {
-      const id = String(n.id);
-      if (seenNodeIds.has(id)) return false;
-      seenNodeIds.add(id);
-      return true;
-    });
-
-    // Edge ids end in the index into relationships[], which graphTree's parentEdgeIndex refers to
-    const processedEdges: Edge[] = data.graph.relationships.map((rel, i) => ({
-      id: `${rel.source}-${rel.target}-${String(rel.type)}-${i}`,
-      source: rel.source,
-      target: rel.target,
-      label: rel.type.replace(/_/g, ' '),
-      type: 'smoothstep',
-      style: { stroke: '#888', strokeWidth: 2 },
-      labelStyle: { fill: '#888', fontSize: 10 },
-      animated: false,
-      data: {
-        graphEdgeIndex: i,
-      },
-    }));
-
-    // Node Sizing
-    const nodeIds = nodesInput.map(n => n.id);
-
-    // Guard: only pass edges whose endpoints exist in nodeIds so phantom IDs
-    // (e.g. stale refs after deduplication) don't pollute connectionCount stats.
-    const nodeIdSet = new Set(nodeIds);
-    const safeEdges = processedEdges.filter(
-      e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target)
-    );
-
-    // Sizing ignores confidence (confidenceWeight defaults to 0), so it doesn't need scores here
-    const { sizes, connectionCount } = computeNodeSizes(
-      nodeIds,
-      safeEdges,
-      new Map(),
-      { scale: 'log' }
-    );
-
-    const connectedNodeIds = new Set<string>();
-    safeEdges.forEach(edge => {
-      connectedNodeIds.add(edge.source);
-      connectedNodeIds.add(edge.target);
-    });
-
-    const isFallbackLabel = (label: string, nodeType: string): boolean => {
-      const normalizedLabel = label.toLowerCase().trim();
-      return label === nodeType ||
-             label === 'Node' ||
-             normalizedLabel === 'other' ||
-             normalizedLabel === 'unknown' ||
-             normalizedLabel === 'undefined' ||
-             normalizedLabel === 'null' ||
-             normalizedLabel === '';
-    };
-
-    const confidenceKeys: ConfidenceKeys[] = [];
-    const nodeTypes: string[] = [];
-
-    const processedNodes: Node[] = nodesInput
-      .map((node) => {
-        const nodeType = node.labels[0];
-        const nodeColor = getNodeColor(nodeType, subject);
-        const nodeLabel = getNodeLabel(node);
-
-        const hasFallbackLabel = isFallbackLabel(nodeLabel, nodeType);
-        const hasConnections = connectedNodeIds.has(node.id);
-
-        if (hasFallbackLabel && !hasConnections) {
-          return null;
-        }
-
-        if (!nodeTypes.includes(nodeType)) nodeTypes.push(nodeType);
-
-        confidenceKeys.push({
-          nodeId: node.id,
-          altIds: [
-            node.properties.conceptId,
-            node.properties.topicId,
-            node.properties.topicID,
-            node.properties.topic_id,
-            node.properties.concept_id,
-            node.properties.id,
-          ].filter(Boolean).map(String),
-          name: node.properties.name || undefined,
-        });
-
-        const size = sizes.get(node.id) ?? DEFAULT_NODE_SIZE;
-        return {
-          id: node.id,
-          type: 'default',
-          data: {
-            label: nodeLabel,
-            description: node.properties.description || node.properties.text,
-            type: nodeType,
-            subject: subject,
-            connections: connectionCount.get(node.id) ?? 0,  // expose for tooltip
-            color: nodeColor,
-          },
-          position: { x: 0, y: 0 },
-          style: {
-            background: nodeColor,
-            color: '#ffffff',
-            border: DEFAULT_NODE_BORDER,
-            width: `${size.width}px`,
-            height: `${size.height}px`,
-            padding: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: '24px',
-          },
-        };
-      })
-      .filter((node): node is Node => node !== null);
-
-    const validNodeIds = new Set(processedNodes.map(node => node.id));
-    const validEdges = processedEdges.filter(edge =>
-      validNodeIds.has(edge.source) && validNodeIds.has(edge.target)
-    );
-
-    const nodePositions = layoutRadially(processedNodes, graphTree, sizes);
-    processedNodes.forEach(node => {
-      node.position = nodePositions.get(node.id) ?? { x: 0, y: 0 };
-    });
-
-    return { subject, nodes: processedNodes, edges: validEdges, confidenceKeys, nodeTypes };
-  }, [data, graphTree]);
 
   // The center and its nearest rings, for the first view of each graph
   const initialFocusNodes = useMemo(() => {
@@ -896,18 +182,33 @@ useEffect(() => {
   const searchHits = useMemo(() => new Set(searchResults.map(String)), [searchResults]);
   const collapse = useCollapse(graphTree, baseGraph?.nodes);
 
-  // Passes the edit and collapse callbacks to every GraphNode as props. Both never change,
-  // so React Flow gets the same nodeTypes each render.
+  // Passed to every GraphNode as props: the pencil opens the editor, the badge toggles a branch.
+  // Both callbacks are stable, so React Flow keeps the same nodeTypes across renders.
   const nodeTypes = useMemo(() => ({
     default: (props: NodeProps) => (
       <GraphNode {...props} onEditRequest={setNodeEditState} onToggleCollapse={collapse.toggleCollapsed} />
     ),
   }), [collapse.toggleCollapsed]);
 
-  const styledGraph = useMemo(
-    () => baseGraph && applyGraphStyles(baseGraph, { confidenceScores, nodeEdits, searchHits, activePath, collapse: collapse.layer }),
-    [baseGraph, confidenceScores, nodeEdits, searchHits, activePath, collapse.layer]
-  );
+  const styledGraph = useMemo(() => {
+    if (!baseGraph) return null;
+    const styled = applyGraphStyles(baseGraph, {
+      confidenceScores,
+      nodeEdits,
+      searchHits,
+      activePath,
+      collapse: collapse.layer,
+      pathColor: activePathColor,
+    });
+    if (!activeCategory) return styled;
+    return {
+      nodes: styled.nodes.map(node => ({
+        ...node,
+        style: { ...node.style, opacity: node.data.type === activeCategory ? 1 : CATEGORY_DIM_OPACITY },
+      })),
+      edges: styled.edges,
+    };
+  }, [baseGraph, confidenceScores, nodeEdits, searchHits, activePath, activePathColor, collapse.layer, activeCategory]);
 
   // Push the styled graph into React Flow. A new base graph replaces everything; a style-only
   // change keeps what React Flow tracks itself (dragged positions, measured sizes, selection).
@@ -927,7 +228,9 @@ useEffect(() => {
       return styledGraph.nodes.map(node => {
         const current = prevById.get(node.id);
         // A node that gets hidden is deselected too, so Backspace can't delete it unseen
-        return current ? { ...current, data: node.data, style: node.style, hidden: node.hidden, selected: current.selected && !node.hidden } : node;
+        return current
+          ? { ...current, data: node.data, style: node.style, hidden: node.hidden, selected: current.selected && !node.hidden }
+          : node;
       });
     });
     setEdges(prev => {
@@ -942,9 +245,7 @@ useEffect(() => {
   // Normal relationship labels stay hidden until their edge is hovered. Path edges
   // keep the label and animation supplied by applyGraphStyles.
   const visibleEdges = useMemo(() => {
-    const baseEdgesById = new Map(
-      (baseGraph?.edges ?? []).map(edge => [edge.id, edge])
-    );
+    const baseEdgesById = new Map((baseGraph?.edges ?? []).map(edge => [edge.id, edge]));
 
     return edges.map(edge => {
       const hovered = edge.id === hoveredEdgeId;
@@ -954,10 +255,7 @@ useEffect(() => {
       return {
         ...edge,
         label: baseEdge?.label,
-        labelStyle: {
-          ...edge.labelStyle,
-          fill: '#374151',
-        },
+        labelStyle: { ...edge.labelStyle, fill: '#374151' },
         zIndex: Math.max(Number(edge.zIndex ?? 0), 1),
       };
     });
@@ -968,9 +266,6 @@ useEffect(() => {
     () => buildSearchResultItems(searchResults.map(String), styledGraph?.nodes ?? [], graphTree),
     [searchResults, styledGraph, graphTree]
   );
-
-  // Zoom to the center's nearest rings once per graph, after its nodes reach React Flow
-  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
 
   // Open a search result: show its path and pan to it, keeping the current zoom unless it's too far out to read.
   // TODO(C1): call expandTo(nodeId) first so a result inside a collapsed branch is shown.
@@ -992,6 +287,11 @@ useEffect(() => {
     });
   }, [clearActivePath, flowInstance, graphTree.centerId]);
 
+  const handleSearchSubmit = () => {
+    if (!hasCurrentSearchResponse) setPendingSearchNavigation(searchContext);
+    else if (searchResultItems.length > 0) handleSearchResultClick(searchResultItems[0].id);
+  };
+
   useEffect(() => {
     if (!pendingSearchNavigation) return;
     if (pendingSearchNavigation !== searchContext) {
@@ -1001,7 +301,9 @@ useEffect(() => {
     if (!hasCurrentSearchResponse) return;
     setPendingSearchNavigation(null);
     if (searchResultItems.length > 0) handleSearchResultClick(searchResultItems[0].id);
-  }, [pendingSearchNavigation, searchContext, hasCurrentSearchResponse, searchResultItems, handleSearchResultClick]);
+  }, [pendingSearchNavigation, searchContext, hasCurrentSearchResponse, searchResultItems, handleSearchResultClick, setPendingSearchNavigation]);
+
+  // Zoom to the center's nearest rings once per graph, after its nodes reach React Flow
   const fittedBaseRef = useRef<BaseGraph | null>(null);
   useEffect(() => {
     if (!flowInstance || !baseGraph || fittedBaseRef.current === baseGraph || initialFocusNodes.length === 0) return;
@@ -1012,21 +314,24 @@ useEffect(() => {
     return () => cancelAnimationFrame(frame);
   }, [flowInstance, baseGraph, initialFocusNodes]);
 
-
-  // Show loading/empty state
   if (!data?.graph) {
-    return <GraphLoadingScreen isLoading={isLoading} />;
+    return (
+      <div className={`graph-view ${graphView}`}>
+        {isLoading
+          ? <GraphLoader title="Building knowledge graph" detail="Extracting concepts and relationships…" />
+          : <GraphEmptyState />}
+      </div>
+    );
   }
 
-  const legendEntries = (baseGraph?.nodeTypes ?? []).map(type => ({
-    type,
-    color: getNodeColor(type, baseGraph?.subject)
-  })).sort((a, b) => a.type.localeCompare(b.type));
+  const legendEntries = (baseGraph?.nodeTypes ?? [])
+    .map(type => ({ type, color: getNodeColor(type, baseGraph?.subject) }))
+    .sort((a, b) => a.type.localeCompare(b.type));
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* Node Edit Popup. Portaled to <body> because the Chat page wraps the graph in a
-          backdrop-blur panel, which would make position: fixed relative to that panel. */}
+    <div className={`graph-view ${graphView}`}>
+      {/* Portaled to <body> because the Chat page wraps the graph in a backdrop-blur panel,
+          which would make position: fixed relative to that panel. */}
       {nodeEditState && createPortal(
         <NodeEditPopup
           editState={nodeEditState}
@@ -1036,251 +341,48 @@ useEffect(() => {
         document.body
       )}
 
-      {/* Hint tooltip */}
-      <div style={{
-        position: 'absolute',
-        bottom: '16px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 10,
-        background: 'rgba(0,0,0,0.5)',
-        color: 'rgba(255,255,255,0.7)',
-        fontSize: '11px',
-        padding: '4px 10px',
-        borderRadius: '20px',
-        pointerEvents: 'none',
-      }}>
-        Click a node to see its path
-      </div>
+      <GraphSearchBar
+        query={searchQuery}
+        mode={searchMode}
+        isSearching={isSearching}
+        results={searchResultItems}
+        activeNodeId={activePathTargetId}
+        onQueryChange={setSearchQuery}
+        onModeChange={setSearchMode}
+        onSubmit={handleSearchSubmit}
+        onResultClick={handleSearchResultClick}
+      />
 
-      {/* Search Bar */}
-      <div style={{
-        position: 'absolute',
-        top: '16px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 10,
-        width: '90%',
-        maxWidth: '600px',
-      }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          background: 'white',
-          borderRadius: '8px',
-          padding: '8px 12px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-          border: '1px solid #e5e7eb',
-        }}>
-          <Search className="w-5 h-5 text-gray-400 mr-2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter' || !searchQuery.trim()) return;
-              e.preventDefault();
-              if (!hasCurrentSearchResponse) setPendingSearchNavigation(searchContext);
-              else if (searchResultItems.length > 0) handleSearchResultClick(searchResultItems[0].id);
-            }}
-            placeholder="Search topics, concepts, definitions..."
-            style={{
-              flex: 1,
-              border: 'none',
-              outline: 'none',
-              fontSize: '14px',
-              color: '#1f2937',
-            }}
+      {SHOW_PATH_BAR && (
+        <div style={{ position: 'absolute', top: 64, left: 14, zIndex: 30, width: 'min(340px, calc(100% - 230px))' }}>
+          <PathBar
+            steps={[
+              { id: 'linear-algebra', label: 'Linear Algebra' },
+              { id: 'vector-spaces', label: 'Vector spaces' },
+              { id: 'eigenvalues', label: 'Eigenvalues' },
+            ]}
+            onStepClick={() => {}}
+            onFocus={() => {}}
+            onClear={() => {}}
           />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              style={{ padding: '4px', cursor: 'pointer', background: 'transparent', border: 'none' }}
-            >
-              <X className="w-4 h-4 text-gray-400 hover:text-gray-600" />
-            </button>
-          )}
-          {isSearching && (
-            <div className="ml-2 text-sm text-gray-500">Searching...</div>
-          )}
-          <div style={{
-            display: 'flex',
-            gap: '4px',
-            marginLeft: '8px',
-            borderLeft: '1px solid #e5e7eb',
-            paddingLeft: '8px',
-          }}>
-            <button
-              onClick={() => setSearchMode('keyword')}
-              style={{
-                padding: '4px 8px',
-                fontSize: '12px',
-                borderRadius: '4px',
-                border: 'none',
-                background: searchMode === 'keyword' ? '#14b8a6' : '#f3f4f6',
-                color: searchMode === 'keyword' ? 'white' : '#6b7280',
-                cursor: 'pointer',
-                fontWeight: searchMode === 'keyword' ? '600' : '400',
-              }}
-            >
-              Keyword
-            </button>
-            <button
-              onClick={() => setSearchMode('semantic')}
-              style={{
-                padding: '4px 8px',
-                fontSize: '12px',
-                borderRadius: '4px',
-                border: 'none',
-                background: searchMode === 'semantic' ? '#14b8a6' : '#f3f4f6',
-                color: searchMode === 'semantic' ? 'white' : '#6b7280',
-                cursor: 'pointer',
-                fontWeight: searchMode === 'semantic' ? '600' : '400',
-              }}
-            >
-              Semantic
-            </button>
-          </div>
-        </div>
-        {SHOW_PATH_BAR && (
-          <div style={{ marginTop: '10px' }}>
-            <PathBar
-              steps={[
-                { id: 'linear-algebra', label: 'Linear Algebra' },
-                { id: 'vector-spaces', label: 'Vector spaces' },
-                { id: 'eigenvalues', label: 'Eigenvalues' },
-              ]}
-              onStepClick={() => { }}
-              onFocus={() => { }}
-              onClear={() => { }}
-            />
-          </div>
-        )}
-        {searchResultItems.length > 0 && (
-          <div style={{
-            marginTop: '8px',
-            background: 'white',
-            borderRadius: '8px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-            fontSize: '12px',
-            color: '#6b7280',
-            overflow: 'hidden',
-          }}>
-            <div style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6' }}>
-              Found {searchResultItems.length} matching node{searchResultItems.length !== 1 ? 's' : ''}
-            </div>
-            <ul style={{ listStyle: 'none', margin: 0, padding: '4px 0', maxHeight: '240px', overflowY: 'auto' }}>
-              {searchResultItems.map(item => {
-                const isActive = item.id === activePathTargetId;
-                return (
-                  <li key={item.id}>
-                    <button
-                      onClick={() => handleSearchResultClick(item.id)}
-                      title={item.trail.length > 0 ? [...item.trail, item.label].join(' › ') : item.label}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        width: '100%',
-                        padding: '6px 12px',
-                        border: 'none',
-                        background: isActive ? 'rgba(212, 88, 28, 0.08)' : 'transparent',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        font: 'inherit',
-                      }}
-                      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#f9fafb'; }}
-                      onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
-                    >
-                      <span style={{
-                        width: '10px',
-                        height: '10px',
-                        borderRadius: '50%',
-                        background: item.color,
-                        flexShrink: 0,
-                      }} />
-                      <span style={{ minWidth: 0, flex: 1 }}>
-                        <span style={{
-                          display: 'block',
-                          fontSize: '13px',
-                          color: isActive ? PATH_COLOR : '#1f2937',
-                          fontWeight: isActive ? 600 : 500,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}>
-                          {item.label}
-                        </span>
-                        {item.trail.length > 0 && (
-                          <span style={{
-                            display: 'block',
-                            fontSize: '11px',
-                            color: '#9ca3af',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}>
-                            {item.trail.join(' › ')}
-                          </span>
-                        )}
-                      </span>
-                      <span style={{ fontSize: '11px', color: '#9ca3af', flexShrink: 0 }}>{item.type}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-      </div>
-
-      {/* Legend */}
-      {legendEntries.length > 0 && (
-        <div style={{
-          position: 'absolute',
-          bottom: '10px',
-          left: '10px',
-          background: 'rgba(255, 255, 255, 0.95)',
-          border: '1px solid #e5e7eb',
-          borderRadius: '6px',
-          padding: '8px 10px',
-          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-          zIndex: 1000,
-          maxWidth: '250px',
-          maxHeight: '300px',
-          overflowY: 'auto',
-        }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-            {legendEntries.map((entry) => (
-              <div
-                key={entry.type}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  fontSize: '10px',
-                  padding: '2px 6px',
-                  background: '#f9fafb',
-                  borderRadius: '2px',
-                }}
-                title={entry.type.replace(/([A-Z])/g, ' $1').trim()}
-              >
-                <div style={{
-                  width: '12px',
-                  height: '12px',
-                  borderRadius: '2px',
-                  backgroundColor: entry.color,
-                  border: '1px solid rgba(0, 0, 0, 0.15)',
-                  flexShrink: 0,
-                }} />
-                <span style={{ color: '#4b5563', whiteSpace: 'nowrap' }}>
-                  {entry.type.replace(/([A-Z])/g, ' $1').trim()}
-                </span>
-              </div>
-            ))}
-          </div>
         </div>
       )}
+
+      <GraphZoomControls
+        onZoomIn={() => flowInstance?.zoomIn()}
+        onZoomOut={() => flowInstance?.zoomOut()}
+        onReset={() => flowInstance?.fitView()}
+        minimapLocked={minimapLocked}
+        onToggleMinimapLock={() => setMinimapLocked(locked => !locked)}
+      />
+
+      {focusedLabel && <GraphFocusHint label={focusedLabel} onClear={clearActivePath} />}
+
+      <GraphLegend
+        entries={legendEntries}
+        activeType={activeCategory}
+        onSelect={(type) => setActiveCategory(current => (current === type ? null : type))}
+      />
 
       <ReactFlow
         nodes={nodes}
@@ -1289,14 +391,8 @@ useEffect(() => {
         onEdgesChange={onEdgesChange}
         onNodeClick={handleNodeClick}
         onPaneClick={clearActivePath}
-        onEdgeMouseEnter={(_, edge) => {
-          setHoveredEdgeId(edge.id);
-        }}
-        onEdgeMouseLeave={(_, edge) => {
-          setHoveredEdgeId(currentId =>
-            currentId === edge.id ? null : currentId
-          );
-        }}
+        onEdgeMouseEnter={(_, edge) => setHoveredEdgeId(edge.id)}
+        onEdgeMouseLeave={(_, edge) => setHoveredEdgeId(currentId => (currentId === edge.id ? null : currentId))}
         nodeTypes={nodeTypes}
         onInit={setFlowInstance}
         minZoom={0.1}
@@ -1309,40 +405,7 @@ useEffect(() => {
           labelStyle: { fontSize: 12, fill: '#888' },
         }}
       >
-        <Background color="#888" gap={16} />
-        <Controls
-          showZoom={true}
-          showFitView={true}
-          position="bottom-right"
-          style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
-        >
-          <button
-            onClick={() => setMinimapLocked(!minimapLocked)}
-            style={{
-              background: minimapLocked ? '#555' : '#fff',
-              color: minimapLocked ? '#fff' : '#555',
-              border: '1px solid #555',
-              borderRadius: '4px',
-              padding: '4px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '24px',
-              height: '24px',
-            }}
-            title={minimapLocked ? 'Unlock minimap' : 'Lock minimap'}
-          >
-            {minimapLocked ? '🔒' : '🔓'}
-          </button>
-        </Controls>
         <MiniMap
-          style={{
-            background: 'rgba(255,255,255,0.1)',
-            position: 'absolute',
-            right: minimapLocked ? '0' : '20px',
-            bottom: minimapLocked ? '0' : '20px',
-          }}
           nodeColor={(n) => (n.style?.background as string) || '#fff'}
           zoomable={!minimapLocked}
           pannable={!minimapLocked}
