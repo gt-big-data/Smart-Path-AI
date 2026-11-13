@@ -445,8 +445,9 @@ body:has(.smartpath-workspace) {
 	pointer-events: none;
 	transition: opacity 0.12s ease;
 }
+/* Buttons show on hover, or when a button in the row takes keyboard focus (not when the rename field auto-focuses) */
 .library-row:hover > .row-actions,
-.library-row:focus-within > .row-actions {
+.library-row:has(.row-actions button:focus-visible) > .row-actions {
 	opacity: 1;
 	pointer-events: auto;
 }
@@ -458,12 +459,32 @@ body:has(.smartpath-workspace) {
 	transform: translateY(-50%);
 	margin: 0;
 }
-/* On hover or focus, the name gives up that width so the buttons stay visible */
+/* On hover, the name or rename field gives up that width so the buttons stay visible */
 .library-row:hover > .chat-open,
-.library-row:focus-within > .chat-open,
 .library-row:hover > .folder-name,
-.library-row:focus-within > .folder-name {
+.library-row:hover > .rename-input,
+.library-row:has(.row-actions button:focus-visible) > .chat-open,
+.library-row:has(.row-actions button:focus-visible) > .folder-name {
 	padding-right: var(--row-actions-space);
+}
+/* Inline rename field: fills the row's free width, and shrinks only while the row is hovered */
+.rename-input {
+	flex: 1 1 auto;
+	min-width: 0;
+	width: 100%;
+	height: 26px;
+	box-sizing: border-box;
+	padding: 0 6px;
+	border: 1px solid rgba(255, 255, 255, 0.28);
+	border-radius: 2px;
+	background: #1d2026;
+	color: #ffffff;
+	font: inherit;
+	font-size: 12px;
+	outline: none;
+}
+.rename-input:focus {
+	border-color: #55b9ae;
 }
 .disclosure {
 	border: 0;

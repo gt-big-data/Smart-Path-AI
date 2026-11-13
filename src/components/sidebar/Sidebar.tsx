@@ -303,9 +303,6 @@ export default function Sidebar({
             className={`root-drop-zone ${dragOverFolderId === 'root' ? 'drop-active' : ''}`}
             aria-label="Library root drop area"
           >
-            {(draggedChatId || draggedFolderId) && (
-              <span className="root-drop-hint">Move to Unorganized</span>
-            )}
             {unorganizedChats.map((chat) => (
               <SidebarChatRow
                 key={chat.id}
