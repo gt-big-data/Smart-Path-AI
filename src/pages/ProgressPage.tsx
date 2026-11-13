@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, TrendingDown, ChevronLeft } from 'lucide-react';
 import { API_BASE_URL } from '../config/api';
 import { useAuth } from '../context/AuthContext';
+import Icon from '../components/common/Icon';
 
 interface ProgressItem {
   concept_id: string;
@@ -43,45 +43,47 @@ const writeProgressCache = (cache: ProgressCache) => {
   }
 };
 
-const AccordionSection: React.FC<{
-  title: string;
-  nodeCount: number;
-  lastPracticed: string;
-  items: any[];
-  getScoreColor: (score: number) => string;
-  friendlyTopicLabel: (s: string) => string;
-}> = ({ title, nodeCount, lastPracticed, items, getScoreColor, friendlyTopicLabel }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  return (
-    <div className="border border-slate-200 rounded-lg overflow-hidden">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
-      >
-        <div className="flex flex-col">
-          <span className="font-medium text-slate-800">{title}</span>
-          <span className="text-xs text-slate-500">{nodeCount} topics · Last practiced {new Date(lastPracticed).toLocaleDateString()}</span>
-        </div>
-        <span className="text-slate-400 text-lg">{isOpen ? '▲' : '▼'}</span>
-      </button>
-      {isOpen && (
-        <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
-          {items.map((item) => (
-            <div key={item.concept_id} className="flex justify-between items-center px-4 py-2">
-              <span className="text-sm text-gray-700" title={item.topic_name}>
-                {friendlyTopicLabel(item.topic_name)}
-              </span>
-              <span className={`text-sm font-semibold ${getScoreColor(item.confidence_score)}`}>
-                {Math.round(item.confidence_score * 100)}%
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+/** Band for a 0-1 confidence score: low under 45%, medium under 70%, high otherwise */
+const confidenceBand = (score: number): 'low' | 'medium' | 'high' => {
+  const percent = score * 100;
+  if (percent < 45) return 'low';
+  if (percent < 70) return 'medium';
+  return 'high';
 };
 
+const isLikelyUUID = (s: string) => {
+  if (!s) return false;
+  // crude UUID v4-ish check (36 chars with hyphens)
+  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s);
+};
+
+const friendlyTopicLabel = (s: string) => {
+  if (!s) return '';
+  if (isLikelyUUID(s)) {
+    return `${s.slice(0, 8)}...${s.slice(-4)}`;
+  }
+  return s;
+};
+
+type Band = 'low' | 'medium' | 'high';
+
+/** Sets --band-color for a confidence band; children read it with text-(--band-color) / bg-(--band-color) */
+const BAND_COLOR: Record<Band, string> = {
+  low: '[--band-color:#c4474d]',
+  medium: '[--band-color:#d49a1f]',
+  high: '[--band-color:#2f956b]',
+};
+
+const PRIORITY_BAND: Record<Band, string> = {
+  low: 'border-[#e6b5b8] bg-[#fdf0f1]',
+  medium: 'border-[#ead68c] bg-[#fff9df]',
+  high: 'border-[#afd8c1] bg-[#edf8f1]',
+};
+
+const BACK_BUTTON =
+  'inline-flex h-9 cursor-pointer items-center gap-[7px] whitespace-nowrap border border-[#b9c7c4] bg-white px-3 text-[10px] font-semibold text-[#4f5e5b] hover:border-[#9fc7c1] hover:bg-teal-pale hover:text-teal-dark';
+
+/** Workspace progress page: confidence by topic, grouped by chat. Rendered in the chat shell beside the sidebar. */
 const ProgressPage: React.FC = () => {
   const { userEmail } = useAuth();
   const cached = useRef(readProgressCache(userEmail)).current;
@@ -90,6 +92,8 @@ const ProgressPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const [chatTitleMap, setChatTitleMap] = useState<Map<string, string>>(new Map(cached?.chatTitles ?? []));
+  // Chat groups the user collapsed; every group starts open
+  const [collapsedChats, setCollapsedChats] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     const fetchProfileData = async () => {
@@ -150,37 +154,37 @@ const ProgressPage: React.FC = () => {
             message: graphIdsError.message,
             code: graphIdsError.code
           });
-          
+
           if (graphIdsError.response?.status === 401) {
             setError('Please log in to view your progress.');
             setLoading(false);
             return;
           }
-          
+
           if (graphIdsError.response?.status === 404) {
             setError('User not found. Please log in again.');
             setLoading(false);
             return;
           }
-          
+
           if (graphIdsError.response?.status === 500) {
             const errorMsg = graphIdsError.response?.data?.error || graphIdsError.response?.data?.message || 'Server error';
             setError(`Server error: ${errorMsg}. Please try again later.`);
             setLoading(false);
             return;
           }
-          
+
           // Network or other errors
           if (graphIdsError.code === 'ECONNREFUSED' || graphIdsError.code === 'ETIMEDOUT') {
             setError('Unable to connect to the server. Please check if the server is running.');
             setLoading(false);
             return;
           }
-          
+
           // If graph IDs fail, we can't continue
-          const errorMessage = graphIdsError.response?.data?.message || 
-                              graphIdsError.response?.data?.error || 
-                              graphIdsError.message || 
+          const errorMessage = graphIdsError.response?.data?.message ||
+                              graphIdsError.response?.data?.error ||
+                              graphIdsError.message ||
                               'Failed to load your graph data. Please try again later.';
           setError(errorMessage);
           setLoading(false);
@@ -206,7 +210,7 @@ const ProgressPage: React.FC = () => {
           })
         );
 
-        const graphResponses = await Promise.all(graphPromises);
+        const graphResponses: any[] = await Promise.all(graphPromises);
 
         // Check if all graph fetches failed
         const successfulFetches = graphResponses.filter(res => res && !res.error && res.data);
@@ -215,14 +219,14 @@ const ProgressPage: React.FC = () => {
           const hasConnectionError = graphResponses.some((res: any) => {
             if (res && res.error) {
               const err = res.error;
-              return err.code === 'ECONNREFUSED' || 
-                     err.code === 'ETIMEDOUT' || 
+              return err.code === 'ECONNREFUSED' ||
+                     err.code === 'ETIMEDOUT' ||
                      err.response?.status === 503 ||
                      (err.response?.data?.error && err.response.data.error.includes('unavailable'));
             }
             return false;
           });
-          
+
           if (hasConnectionError) {
             setError('Could not load graph data. The AI service may be unavailable. Please ensure the Python service is running on port 8000.');
           } else {
@@ -301,7 +305,7 @@ const ProgressPage: React.FC = () => {
             }
           }
         }
-        
+
         console.log(`[ProgressPage] Built nodeNameById map with ${nodeNameById.size} entries`);
         console.log(`[ProgressPage] Sample node IDs from graph:`, nodes.slice(0, 3).map((n: any) => ({
           id: n.id,
@@ -314,7 +318,7 @@ const ProgressPage: React.FC = () => {
         console.log(`[ProgressPage] Trying to match ${progressList.length} progress records against ${nodes.length} nodes`);
         console.log(`[ProgressPage] Progress conceptIds:`, progressList.map((p: any) => p.conceptId || p.conceptID).slice(0, 5));
         console.log(`[ProgressPage] Sample node topicIDs:`, nodes.slice(0, 5).map((n: any) => n.properties?.topicID).filter(Boolean));
-        
+
         const normalized: Array<any> = progressList.map((p: any) => {
           const conceptId = String(p.conceptId || p.conceptID || p.topicId || p.topic_id || p.id);
           // Try map lookup first. If missing, attempt to find node by id and compute a label.
@@ -371,7 +375,7 @@ const ProgressPage: React.FC = () => {
           .filter((n: any) => n.topic_name === n.concept_id || n.topic_name.startsWith('Unknown Topic'))
           .map((n: any) => n.concept_id);
         console.log(`[ProgressPage] Still missing names for ${stillMissing.length} concepts:`, stillMissing);
-        
+
         if (stillMissing.length > 0 && graphIds.length > 0) {
           try {
             const idsParam = Array.from(new Set(stillMissing)).join(',');
@@ -422,17 +426,17 @@ const ProgressPage: React.FC = () => {
         }
 
         // Final fallback: Try to get topic names from quiz history
-        const stillUnknown = normalized.filter((n: any) => 
+        const stillUnknown = normalized.filter((n: any) =>
           n.topic_name.startsWith('Unknown Topic') || n.topic_name === n.concept_id
         );
         if (stillUnknown.length > 0) {
           try {
             console.log(`[ProgressPage] Attempting to find topic names from quiz history for ${stillUnknown.length} concepts...`);
             const quizHistoryRes = await axios.get(`${API_BASE_URL}/api/quiz-history`, { withCredentials: true });
-            const quizHistories = Array.isArray(quizHistoryRes.data?.quizHistories) 
-              ? quizHistoryRes.data.quizHistories 
+            const quizHistories = Array.isArray(quizHistoryRes.data?.quizHistories)
+              ? quizHistoryRes.data.quizHistories
               : [];
-            
+
             // Build a map of conceptId -> question text (first question we find for each conceptId)
             const conceptIdToQuestion = new Map<string, string>();
             for (const quiz of quizHistories) {
@@ -446,7 +450,7 @@ const ProgressPage: React.FC = () => {
                 }
               }
             }
-            
+
             // Try to extract a topic name from question text
             const extractTopicName = (questionText: string): string | null => {
               // Try to find topic mentions in the question
@@ -456,7 +460,7 @@ const ProgressPage: React.FC = () => {
                 /(?:about|regarding|concerning|related to) (.+?)[\?\.]/i,
                 /(?:the|a|an) (.+?) (?:is|are|was|were|refers|means|describes)/i,
               ];
-              
+
               for (const pattern of patterns) {
                 const match = questionText.match(pattern);
                 if (match && match[1]) {
@@ -467,16 +471,16 @@ const ProgressPage: React.FC = () => {
                   }
                 }
               }
-              
+
               // Fallback: use first few words of the question
               const words = questionText.split(/\s+/).slice(0, 5).join(' ');
               if (words.length > 10 && words.length < 60) {
                 return words + '...';
               }
-              
+
               return null;
             };
-            
+
             // Update normalized entries with question-based names
             let questionBasedCount = 0;
             for (const item of stillUnknown) {
@@ -490,7 +494,7 @@ const ProgressPage: React.FC = () => {
                 }
               }
             }
-            
+
             if (questionBasedCount > 0) {
               console.log(`[ProgressPage] ✅ Extracted ${questionBasedCount} topic names from quiz history questions`);
             }
@@ -502,12 +506,12 @@ const ProgressPage: React.FC = () => {
         // Don't filter out orphaned concepts - show them with fallback names
         // They might be from deleted graphs or graphs that haven't loaded yet
         const validConcepts = normalized; // Keep all concepts, even if we can't find the node name
-        
+
         const orphanedCount = normalized.filter(i => i.topic_name.startsWith('Unknown Topic')).length;
         if (orphanedCount > 0) {
           console.log(`[ProgressPage] ${orphanedCount} concepts have unknown names (may be from deleted/changed graphs)`);
         }
-        
+
         // Topics to review: simple threshold (confidence < 0.75), sorted ascending
         const topics_to_review = validConcepts.filter(i => i.confidence_score < 0.75).sort((a, b) => a.confidence_score - b.confidence_score).slice(0, 5);
 
@@ -520,7 +524,7 @@ const ProgressPage: React.FC = () => {
         if (full_progress.length > 0) {
           console.log('  - Sample full_progress items:', full_progress.slice(0, 3));
         }
-        
+
         setProfileData({ full_progress, topics_to_review });
         setError(null);
         if (userEmail) {
@@ -531,7 +535,7 @@ const ProgressPage: React.FC = () => {
         if (err.response) {
           console.error('Server Response Data:', err.response.data);
           const errorMessage = err.response.data?.error || err.response.data?.message || 'Failed to load profile data. The server returned an unexpected response.';
-          
+
           // Check for specific error types
           if (err.response.status === 401) {
             setError('Please log in to view your progress.');
@@ -553,150 +557,181 @@ const ProgressPage: React.FC = () => {
     fetchProfileData();
   }, [cached, userEmail]); // Runs once on mount; cached never changes and userEmail only on a new login
 
-  const getScoreColor = (score: number) => {
-    if (score < 0.4) return 'text-red-500';
-    if (score < 0.75) return 'text-yellow-500';
-    return 'text-green-500';
+  // Progress grouped by the chat (or graph) it was practiced in, most recent group first in the data order
+  const practicedChats = useMemo(() => {
+    const groups = new Map<string, ProgressItem[]>();
+    (profileData?.full_progress ?? []).forEach((item) => {
+      const chatId = item.chat_id || item.graph_id || 'unknown';
+      groups.set(chatId, [...(groups.get(chatId) ?? []), item]);
+    });
+    return Array.from(groups, ([chatId, items]) => ({
+      chatId,
+      title: chatTitleMap.get(chatId) || 'Untitled Chat',
+      items,
+      lastPracticed: items.reduce(
+        (latest, item) => (new Date(item.last_practiced) > new Date(latest) ? item.last_practiced : latest),
+        items[0].last_practiced,
+      ),
+    }));
+  }, [profileData, chatTitleMap]);
+
+  const toggleChat = (chatId: string) => {
+    setCollapsedChats((items) => {
+      const next = new Set(items);
+      if (next.has(chatId)) next.delete(chatId);
+      else next.add(chatId);
+      return next;
+    });
   };
 
-  const isLikelyUUID = (s: string) => {
-    if (!s) return false;
-    // crude UUID v4-ish check (36 chars with hyphens)
-    return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s);
-  };
-
-  const friendlyTopicLabel = (s: string) => {
-    if (!s) return '';
-    if (isLikelyUUID(s)) {
-      return `${s.slice(0, 8)}...${s.slice(-4)}`;
-    }
-    return s;
-  };
-
-  const renderContent = () => {
-    if (loading) {
-      return (
-        <div className="flex h-screen flex-col items-center justify-center bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
-          {/* Animated spinner */}
-          <div className="relative mb-6">
-            <div className="h-16 w-16 rounded-full border-4 border-teal-100" />
-            <div className="absolute inset-0 h-16 w-16 animate-spin rounded-full border-4 border-transparent border-t-teal-500" />
-          </div>
-          <p className="text-lg font-medium text-slate-700">Loading your progress</p>
-          <p className="mt-1 text-sm text-slate-400 animate-pulse">Gathering your progress data...</p>
-        </div>
-      );
-    }
-  
-    // With saved progress on screen, a failed background refresh keeps the data (see the notice below)
-    if (error && !profileData) {
-      return (
-        <div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50 text-center">
-          <div>
-            <p className="text-lg text-red-600">{error}</p>
-            <button
-              onClick={() => navigate(-1)}
-              className="mt-4 px-4 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 shadow-md shadow-teal-500/20 transition-all"
-            >
-              Go Back
-            </button>
-          </div>
-        </div>
-      );
-    }
-
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50 p-4 sm:p-6 lg:p-8">
-        <div className="max-w-4xl mx-auto">
-          <header className="mb-8 flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-800">Your Learning Progress</h1>
-              <p className="text-md text-slate-500 mt-1">Track your progress and find top topics to review.</p>
-            </div>
-            <button
-              onClick={() => navigate(-1)}
-              className="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm text-slate-700 border border-slate-200/60 rounded-lg hover:bg-white transition-all shadow-sm"
-            >
-              <ChevronLeft className="w-5 h-5" />
-              Back
-            </button>
-          </header>
-
-          {error && <p role="status" className="mb-6 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">Couldn't refresh your progress, so this is the last saved copy. {error}</p>}
-
-          <main className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Top Topics to Review */}
-            <section className="lg:col-span-1 bg-white/80 backdrop-blur-sm p-6 rounded-xl border border-slate-200/60 shadow-sm">
-              <div className="flex items-center gap-3 mb-4">
-                <TrendingDown className="w-6 h-6 text-yellow-500" />
-                <h2 className="text-xl font-semibold text-slate-800">Top Topics to Review</h2>
-              </div>
-              {profileData?.topics_to_review && profileData.topics_to_review.length > 0 ? (
-                <ul className="space-y-4">
-                  {profileData.topics_to_review.map((item) => (
-                    <li key={`${item.chat_id || item.graph_id}-${item.concept_id}`} className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                      <div className="flex justify-between items-center">
-                        <span className="font-medium text-gray-700" title={item.topic_name}>
-                          {friendlyTopicLabel(item.topic_name)}
-                        </span>
-                        <span className={`font-bold ${getScoreColor(item.confidence_score)}`}>
-                          {Math.round(item.confidence_score * 100)}%
-                        </span>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-gray-500">Great job! No priority topics to review right now.</p>
-              )}
-            </section>
-  
-            {/* Full Progress */}
-            {/* Full Progress - Accordion by Chat */}
-            <section className="lg:col-span-2 bg-white/80 backdrop-blur-sm p-6 rounded-xl border border-slate-200/60 shadow-sm">
-              <div className="flex items-center gap-3 mb-4">
-                <BookOpen className="w-6 h-6 text-teal-500" />
-                <h2 className="text-xl font-semibold text-slate-800">All Practiced Topics</h2>
-              </div>
-              {profileData?.full_progress && profileData.full_progress.length > 0 ? (
-                <div className="space-y-3">
-                  {Array.from(
-                    profileData.full_progress.reduce((acc, item) => {
-                      const chatId = item.chat_id || item.graph_id || 'unknown';
-                      if (!acc.has(chatId)) acc.set(chatId, []);
-                      acc.get(chatId)!.push(item);
-                      return acc;
-                    }, new Map<string, typeof profileData.full_progress>())
-                  ).map(([chatId, items]) => {
-                    const chatTitle = chatTitleMap.get(chatId) || 'Untitled Chat';
-                    const lastPracticed = items.reduce((latest, item) =>
-                      new Date(item.last_practiced) > new Date(latest) ? item.last_practiced : latest,
-                      items[0].last_practiced
-                    );
-                    return (
-                      <AccordionSection
-                        key={chatId}
-                        title={chatTitle}
-                        nodeCount={items.length}
-                        lastPracticed={lastPracticed}
-                        items={items}
-                        getScoreColor={getScoreColor}
-                        friendlyTopicLabel={friendlyTopicLabel}
-                      />
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-gray-500">You haven't practiced any topics yet. Complete a quiz to see your progress!</p>
-              )}
-            </section>
-          </main>
+      <div className="flex min-h-0 flex-auto flex-col items-center justify-center bg-[#f8faf9] p-6 text-center font-brand text-ink" role="status">
+        <h2 className="mb-[18px] mt-0 text-xl font-semibold">Loading learning progress</h2>
+        <div className="h-1.5 w-[min(390px,60%)] overflow-hidden bg-[#dce5e3]">
+          <span className="block h-full w-2/5 animate-progress-load bg-teal" />
         </div>
+        <p className="mb-0 mt-3 text-[10px] text-[#82908d]">Finding practiced topics and review priorities…</p>
       </div>
     );
   }
 
-  return renderContent();
+  // With saved progress on screen, a failed background refresh keeps the data (see the notice below)
+  if (error && !profileData) {
+    return (
+      <div className="flex min-h-0 flex-auto flex-col items-center justify-center bg-[#f8faf9] p-6 text-center font-brand text-ink" role="alert">
+        <h2 className="mb-[18px] mt-0 text-xl font-semibold">Progress unavailable</h2>
+        <p className="mb-0 mt-3 text-[10px] text-[#82908d]">{error}</p>
+        <button type="button" className={`${BACK_BUTTON} mt-[18px]`} onClick={() => navigate('/chat')}>
+          <Icon name="collapse" size={15} />
+          Back to workspace
+        </button>
+      </div>
+    );
+  }
+
+  const reviewTopics = profileData?.topics_to_review ?? [];
+
+  return (
+    <div className="flex-auto min-h-0 overflow-y-auto bg-[#f3f7f6] p-[34px] font-brand text-ink max-[600px]:px-3.5 max-[600px]:py-[22px]">
+      <header className="flex items-end justify-between gap-6 border-b border-[#bdcbc8] pb-[25px] max-[600px]:flex-col max-[600px]:items-start">
+        <div>
+          <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-teal">Account analytics</span>
+          <h1 className="mb-[7px] mt-1.5 font-brand text-[32px] font-medium tracking-[-0.035em] text-[#25312f] max-[600px]:text-[26px]">
+            Your learning progress
+          </h1>
+          <p className="m-0 text-[11px] text-muted">Track your confidence and find the top topics to review.</p>
+        </div>
+        <button type="button" className={BACK_BUTTON} onClick={() => navigate('/chat')}>
+          <Icon name="collapse" size={15} />
+          Back to workspace
+        </button>
+      </header>
+
+      {error && (
+        <p role="status" className="mb-0 mt-5 border border-[#f0d58a] bg-[#fff8e1] px-3 py-2 text-[10px] text-[#8a6512]">
+          Couldn't refresh your progress, so this is the last saved copy. {error}
+        </p>
+      )}
+
+      <div className="grid items-start gap-5 pt-[26px] grid-cols-[minmax(250px,330px)_minmax(0,1fr)] max-[900px]:grid-cols-1">
+        <section className="border border-[#cbd7d4] bg-[#fbfcfc] p-[22px]" aria-labelledby="progress-review-title">
+          <div className="mb-[18px] flex items-start gap-[11px]">
+            <span className="grid h-[34px] w-[34px] shrink-0 place-items-center bg-teal-pale text-teal">
+              <Icon name="progress" size={18} />
+            </span>
+            <div>
+              <h2 id="progress-review-title" className="mb-1 mt-0 text-[17px] font-semibold text-[#2d3937]">Top topics to review</h2>
+              <p className="m-0 text-[9px] leading-[1.45] text-[#7a8885]">Your lowest-confidence topics across every chat.</p>
+            </div>
+          </div>
+          {reviewTopics.length > 0 ? (
+            <ul className="m-0 grid list-none gap-2 p-0">
+              {reviewTopics.map((item) => {
+                const band = confidenceBand(item.confidence_score);
+                return (
+                  <li
+                    key={`${item.chat_id || item.graph_id}-${item.concept_id}`}
+                    className={`flex min-h-[62px] items-center gap-2.5 border px-[11px] py-2.5 ${BAND_COLOR[band]} ${PRIORITY_BAND[band]}`}
+                  >
+                    <span className="grid min-w-0 flex-1 gap-1">
+                      <strong title={item.topic_name} className="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold leading-[1.4] text-[#3e4a47]">
+                        {friendlyTopicLabel(item.topic_name)}
+                      </strong>
+                      <small className="overflow-hidden text-ellipsis whitespace-nowrap text-[8px] text-[#89938f]">
+                        {chatTitleMap.get(item.chat_id || item.graph_id || '') || 'Untitled Chat'}
+                      </small>
+                    </span>
+                    <em className="text-[15px] font-bold not-italic text-(--band-color)">{Math.round(item.confidence_score * 100)}%</em>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="m-0 text-[11px] text-[#6f7d7a]">Great job! No priority topics to review right now.</p>
+          )}
+        </section>
+
+        <section className="border border-[#cbd7d4] bg-[#fbfcfc] p-[22px]" aria-labelledby="progress-practiced-title">
+          <div className="mb-[18px] flex items-start gap-[11px]">
+            <span className="grid h-[34px] w-[34px] shrink-0 place-items-center bg-teal-pale text-teal">
+              <Icon name="book" size={18} />
+            </span>
+            <div>
+              <h2 id="progress-practiced-title" className="mb-1 mt-0 text-[17px] font-semibold text-[#2d3937]">All practiced topics</h2>
+              <p className="m-0 text-[9px] leading-[1.45] text-[#7a8885]">Confidence grouped by the chat where you practiced it.</p>
+            </div>
+          </div>
+          {practicedChats.length > 0 ? (
+            <div className="grid gap-2.5">
+              {practicedChats.map((group) => {
+                const open = !collapsedChats.has(group.chatId);
+                return (
+                  <article key={group.chatId} className="border border-[#d5dddb] bg-white">
+                    <button
+                      type="button"
+                      className="flex min-h-16 w-full cursor-pointer items-center gap-3 border-0 bg-[#f0f4f3] px-3.5 py-[11px] text-left [&>svg]:text-[#7d8b88] [&>svg]:transition-transform aria-expanded:[&>svg]:rotate-90"
+                      aria-expanded={open}
+                      onClick={() => toggleChat(group.chatId)}
+                    >
+                      <span className="grid min-w-0 flex-1 gap-1">
+                        <strong className="overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-[#303c39]">{group.title}</strong>
+                        <small className="text-[9px] text-[#778481]">
+                          {group.items.length} topics · Last practiced {new Date(group.lastPracticed).toLocaleDateString()}
+                        </small>
+                      </span>
+                      <Icon name="chevron" size={16} />
+                    </button>
+                    {open &&
+                      group.items.map((item) => {
+                        const band = confidenceBand(item.confidence_score);
+                        const percent = Math.round(item.confidence_score * 100);
+                        return (
+                          <div
+                            key={item.concept_id}
+                            className={`grid min-h-[43px] grid-cols-[minmax(130px,1fr)_minmax(70px,120px)_38px] items-center gap-3 border-t border-[#e3e8e7] px-3.5 ${BAND_COLOR[band]}`}
+                          >
+                            <span title={item.topic_name} className="overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-[#4d5b58]">
+                              {friendlyTopicLabel(item.topic_name)}
+                            </span>
+                            <div className="h-1 bg-[#e2e8e6]" aria-hidden="true">
+                              <span className="block h-full bg-(--band-color)" style={{ width: `${percent}%` }} />
+                            </div>
+                            <strong className="text-right text-[10px] text-(--band-color)">{percent}%</strong>
+                          </div>
+                        );
+                      })}
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="m-0 text-[11px] text-[#6f7d7a]">You haven't practiced any topics yet. Complete a quiz to see your progress!</p>
+          )}
+        </section>
+      </div>
+    </div>
+  );
 };
 
 export default ProgressPage;

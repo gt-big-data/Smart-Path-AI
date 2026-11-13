@@ -26,7 +26,7 @@ const ProfilePage: React.FC = () => {
             <p className="text-lg text-slate-600 mb-4">Please log in to view your profile.</p>
             <button
               onClick={() => navigate('/login')}
-              className="px-6 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all shadow-md shadow-teal-500/20 btn-lift"
+              className="px-6 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all shadow-md shadow-teal-500/20 transition-all duration-200 hover:-translate-y-px active:translate-y-0"
             >
               Go to Login
             </button>

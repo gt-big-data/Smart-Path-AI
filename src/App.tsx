@@ -1,12 +1,10 @@
 import type { ReactNode } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Chat from './pages/Chat';
-import Quiz from './pages/Quiz';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Home from './pages/Home';
 import ProfilePage from './pages/ProfilePage';
-import ProgressPage from './pages/ProgressPage';
 import AboutUs from './pages/AboutUs';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ProgressProvider } from './context/ProgressContext';
@@ -49,14 +47,10 @@ function AppContent() {
         }
       />
       <Route
-        path="/quiz"
-        element={<ProtectedRoute><Quiz /></ProtectedRoute>}
-      />
-      <Route
         path="/progress"
         element={
           <ProtectedRoute>
-            <ProgressPage />
+            <Chat view="progress" />
           </ProtectedRoute>
         }
       />

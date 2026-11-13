@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Brain, ChevronLeft, Linkedin } from 'lucide-react';
 import Navigation from '../components/Navigation';
 
-interface TeamMember {
+export interface TeamMember {
   name: string;
   role: string;
   description: string;
@@ -18,7 +18,7 @@ interface TeamMember {
 
 // Team members — add your photo URL and update description as needed.
 // @ the team lead once you've added your info!
-const teamMembers: TeamMember[] = [
+export const teamMembers: TeamMember[] = [
   // ===================== Spring 2026 =====================
   // --- Leadership ---
   {

@@ -1,144 +1,106 @@
-import React, { useState } from 'react';
-import { Brain, ArrowLeft } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import React, { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { useAuthFormField } from "../lib/authFormDraft";
+import Icon from "../components/common/Icon";
+import AuthShell from "../components/auth/AuthShell";
+import {
+  authAlert,
+  authAlertTriggered,
+  authAlertText,
+  authAlertTitle,
+  authDisclaimer,
+  authDivider,
+  authDividerLabel,
+  authForm,
+  authHeading,
+  authHeadingText,
+  authHeadingTitle,
+  authInput,
+  authLabel,
+  authLink,
+  authSubmit,
+  googleButton,
+  googleMark,
+} from "../components/auth/authClasses";
 
 export default function Login() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-
-  // Single error for the login form
+  const [email, setEmail] = useAuthFormField("email");
+  const [password, setPassword] = useAuthFormField("password");
   const [loginError, setLoginError] = useState(() =>
-    new URLSearchParams(window.location.search).get('error') === 'google_login_failed'
-      ? 'Google sign-in was cancelled or could not be completed. Please try again.'
-      : '');
-
+    new URLSearchParams(window.location.search).get("error") === "google_login_failed"
+      ? "Google sign-in was cancelled or could not be completed. Please try again."
+      : "",
+  );
+  // Incremented on every failed submit so the alert remounts and replays its shine, even when the message is unchanged.
+  const [alertKey, setAlertKey] = useState(0);
   const navigate = useNavigate();
   const { login, loginWithGoogle } = useAuth();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoginError(''); // Clear previous errors
-
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoginError("");
     try {
       await login(email, password);
-      navigate('/');
-    } catch (err: any) {
-      // Handle error response from the backend
-      const errorMessage = err.response?.data?.message || err.message || 'An error occurred';
-      setLoginError(errorMessage);
+      navigate("/");
+    } catch (error: any) {
+      setLoginError(error.response?.data?.message || error.message || "An error occurred");
+      setAlertKey((key) => key + 1);
     }
   };
 
   return (
-      <div className="min-h-screen bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50 flex flex-col">
-        <div className="container mx-auto px-6 py-4">
-          <Link to="/" className="inline-flex items-center text-teal-600 hover:text-teal-700">
-            <ArrowLeft className="h-5 w-5 mr-2" />
-            Back to Home
-          </Link>
-        </div>
-
-        <div className="flex-1 flex items-center justify-center px-6">
-          <div className="w-full max-w-md bg-white/80 backdrop-blur-sm rounded-2xl border border-slate-200/60 shadow-lg shadow-slate-200/50 p-8">
-            <div className="text-center mb-8">
-              <div className="inline-flex items-center justify-center space-x-2 mb-4">
-                <Brain className="h-10 w-10 text-teal-500" />
-                <span className="text-2xl font-bold text-slate-800">SmartPathAI</span>
-              </div>
-              <h2 className="text-3xl font-bold text-slate-800">Welcome back</h2>
-              <p className="text-slate-500 mt-2">Please enter your details to sign in</p>
-            </div>
-
-            {/* Google Login */}
-            <div className="mb-6">
-              <button
-                  onClick={loginWithGoogle}
-                  className="w-full flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 focus:outline-offset-0 shadow-sm"
-              >
-                <img src="https://www.google.com/favicon.ico" alt="Google" className="h-6 w-6" />
-                Continue with Google
-              </button>
-            </div>
-
-            <div className="relative mb-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">Or continue with</span>
-              </div>
-            </div>
-
-            {/* Login Form */}
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                  Email address
-                </label>
-                <input
-                    id="email"
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-4 py-2 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                    placeholder="Enter your email"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                  Password
-                </label>
-                <input
-                    id="password"
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-4 py-2 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                    placeholder="Enter your password"
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <input
-                      id="remember-me"
-                      type="checkbox"
-                      className="h-4 w-4 text-teal-600 focus:ring-teal-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-600">
-                    Remember me
-                  </label>
-                </div>
-                <button type="button" className="text-sm text-teal-600 hover:text-teal-700">
-                  Forgot password?
-                </button>
-              </div>
-
-              {/* Show an error message, if any */}
-              {loginError && (
-                  <p className="text-red-600 text-sm">{loginError}</p>
-              )}
-
-              <button
-                  type="submit"
-                  className="w-full bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg px-4 py-2.5 font-medium hover:from-teal-600 hover:to-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 shadow-md shadow-teal-500/20 transition-all btn-lift"
-              >
-                Sign in
-              </button>
-
-              <p className="text-center text-sm text-gray-600">
-                Don't have an account?{' '}
-                <Link to="/signup" className="text-teal-600 hover:text-teal-700 font-medium">
-                  Sign up
-                </Link>
-              </p>
-            </form>
-          </div>
-        </div>
+    <AuthShell
+      eyebrow="Welcome back"
+      title={<>Sign in to your<br />workspace.</>}
+      description="Your graphs, conversations, quizzes, and practice exams stay together in one workspace."
+    >
+      <div className={authHeading}>
+        <h2 className={authHeadingTitle}>Log in</h2>
+        <p className={authHeadingText}>New to SmartPath? <Link className={authLink} to="/signup">Create one</Link></p>
       </div>
+      {loginError && (
+        <div key={alertKey} className={`${authAlert} ${authAlertTriggered}`} role="alert">
+          <strong className={authAlertTitle}>Unable to log in</strong>
+          <p className={authAlertText}>{loginError}</p>
+        </div>
+      )}
+      <button type="button" className={googleButton} onClick={() => void loginWithGoogle()}>
+        <span className={googleMark}>G</span>Sign in with Google
+      </button>
+      <div className={authDivider}><span className={authDividerLabel}>or continue with email</span></div>
+      <form className={authForm} onSubmit={handleSubmit}>
+        <label className={authLabel} htmlFor="login-email">
+          Email address
+          <input
+            className={authInput}
+            id="login-email"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="name@example.com"
+          />
+        </label>
+        <label className={authLabel} htmlFor="login-password">
+          Password
+          <input
+            className={authInput}
+            id="login-password"
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Enter your password"
+          />
+        </label>
+        <button className={authSubmit} type="submit">
+          Log in <Icon name="arrow" size={16} />
+        </button>
+      </form>
+      <p className={authDisclaimer}>Your account details are securely handled by SmartPath.</p>
+    </AuthShell>
   );
 }
