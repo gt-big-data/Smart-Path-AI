@@ -75,6 +75,10 @@ export function errorText(error: unknown): string {
     const message = error.response?.data?.error;
     if (typeof message === "string") return message;
     if (error.response?.status === 401) return "Please sign in to continue.";
+    // A 404 without an API error body means the server does not expose the practice exam routes
+    if (error.response?.status === 404) {
+      return "The practice exam API was not found on the server. Restart or redeploy the backend, then try again.";
+    }
     return error.response
       ? `Request failed (${error.response.status}). Please try again.`
       : "Connection interrupted. Reload saved exams or the attempt before retrying.";

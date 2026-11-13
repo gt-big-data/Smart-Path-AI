@@ -72,8 +72,8 @@ test('save a PDF, reuse after reload, recover generation failures and reject ove
           return React.createElement('main', { style: { padding: 24 } },
             React.createElement('p', { id: 'test-error' }, error),
             React.createElement('p', { id: 'test-result' }, result),
-            React.createElement(Samples, { chatId: 'chat-test', busy, act,
-              onGenerated: value => setResult(value.id), refreshExams: async () => {} }));
+            React.createElement(Samples, { chatId: 'chat-test', onError: setError,
+              onGenerated: value => setResult(value.id) }));
         }
         createRoot(document.getElementById('root')).render(React.createElement(App));
       </script></body></html>` }));

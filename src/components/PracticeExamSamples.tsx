@@ -1,48 +1,98 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { Exam, SamplePdf, examApi, errorText } from "./practiceExamApi";
+import {
+  examButtonClass,
+  samplePickerRowClass,
+  samplePickerRowSelectedClass,
+  setupEmptyClass,
+  setupHeaderClass,
+  setupNoteClass,
+  setupPagerClass,
+  setupSectionClass,
+} from "./practiceExamClasses";
 
-const button = "rounded-lg border border-teal-600 px-4 py-2 text-sm font-medium text-teal-800 hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed";
-const primary = `${button} bg-teal-600 text-white hover:bg-teal-700`;
+const PAGE_SIZE = 20;
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
-export default function PracticeExamSamples({ chatId, busy, act, onGenerated, refreshExams }: {
+/**
+ * Setup step of the practice exam modal: upload or choose a sample exam PDF, then generate an exam from it.
+ * Errors are reported to the parent so each message has exactly one place on screen.
+ */
+export default function PracticeExamSamples({
+  chatId,
+  onGenerated,
+  onBusyChange,
+  onError,
+}: {
   chatId: string;
-  busy: boolean;
-  act: (label: string, action: () => Promise<void>) => Promise<void>;
   onGenerated: (exam: Exam) => void;
-  refreshExams: () => Promise<void>;
+  onBusyChange?: (busy: boolean) => void;
+  onError: (message: string) => void;
 }) {
   const [samples, setSamples] = useState<SamplePdf[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [listLoading, setListLoading] = useState(true);
   const [selected, setSelected] = useState<SamplePdf>();
   const [file, setFile] = useState<File>();
   const [message, setMessage] = useState("");
-  const [loadError, setLoadError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
-  const loadSamples = useCallback(async (page = 0) => {
-    setLoading(true);
-    try {
-      const { data } = await examApi.get("/samples", { params: { chat_id: chatId, limit: 20, offset: page } });
-      if (!mounted.current) return;
-      setSamples(data.samples);
-      setTotal(data.total);
-      setOffset(page);
-      setLoadError("");
-    } finally {
-      if (mounted.current) setLoading(false);
-    }
-  }, [chatId]);
+
   useEffect(() => {
     mounted.current = true;
-    void loadSamples().catch(e => { if (mounted.current) setLoadError(errorText(e)); });
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    onBusyChange?.(working !== "");
+  }, [working, onBusyChange]);
+
+  const loadSamples = useCallback(
+    async (page = 0) => {
+      setListLoading(true);
+      try {
+        const { data } = await examApi.get("/samples", {
+          params: { chat_id: chatId, limit: PAGE_SIZE, offset: page },
+        });
+        if (!mounted.current) return;
+        setSamples(data.samples);
+        setTotal(data.total);
+        setOffset(page);
+        onError("");
+      } catch (e) {
+        if (mounted.current) onError(errorText(e));
+      } finally {
+        if (mounted.current) setListLoading(false);
+      }
+    },
+    [chatId, onError],
+  );
+
+  useEffect(() => {
+    void loadSamples();
   }, [loadSamples]);
+
+  const run = async (label: string, action: () => Promise<void>) => {
+    if (working) return;
+    setWorking(label);
+    onError("");
+    try {
+      await action();
+    } catch (e) {
+      if (mounted.current) onError(errorText(e));
+    } finally {
+      if (mounted.current) setWorking("");
+    }
+  };
 
   const savePdf = async (): Promise<SamplePdf> => {
     if (!file || !file.name.toLowerCase().endsWith(".pdf")) throw new Error("Choose a PDF file.");
-    if (file.size > 10 * 1024 * 1024) throw new Error("The sample PDF must be at most 10 MB.");
+    if (file.size > MAX_PDF_BYTES) throw new Error("The sample PDF must be at most 10 MB.");
     const form = new FormData();
     form.append("chat_id", chatId);
     form.append("practice_exam", file);
@@ -52,84 +102,163 @@ export default function PracticeExamSamples({ chatId, busy, act, onGenerated, re
     setFile(undefined);
     if (input.current) input.current.value = "";
     setMessage("PDF saved. You can generate an exam now or reuse it later.");
-    await loadSamples().catch(e => setLoadError(errorText(e)));
+    await loadSamples();
     return sample;
   };
 
+  const chooseFile = (next?: File) => {
+    setFile(next);
+    if (next) setSelected(undefined);
+    setMessage("");
+  };
+
+  const chooseSaved = (sample: SamplePdf) => {
+    setSelected(sample);
+    setFile(undefined);
+    setMessage("");
+    if (input.current) input.current.value = "";
+  };
+
+  const selectionLabel = file
+    ? `New PDF: ${file.name}`
+    : selected
+      ? `Selected PDF: ${selected.filename}`
+      : "Choose a PDF above to generate an exam.";
+
   return (
-    <section className="rounded-xl border bg-teal-50/50 p-5 space-y-4">
-      <h3 className="font-semibold">Generate from a sample exam</h3>
-      <p className="text-sm">
-        Upload a sample exam PDF (up to 10 MB) or choose one saved in this chat.
-        Your chat’s course material supplies the content. Generation may take several minutes.
-      </p>
-      <label className="block text-sm font-medium">
-        Upload a new sample exam PDF
-        <input ref={input} className="mt-2 block w-full" type="file" accept=".pdf,application/pdf"
-          disabled={busy} onChange={e => {
-            const next = e.target.files?.[0];
-            setFile(next);
-            if (next) setSelected(undefined);
-            setMessage("");
-          }} />
-      </label>
-      <button className={button} disabled={!file || busy}
-        onClick={() => void act("Saving sample PDF…", async () => { await savePdf(); })}>
-        Save PDF
-      </button>
-      {message && <p role="status" className="text-sm text-teal-800">{message}</p>}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="font-medium">Saved sample PDFs ({total})</h4>
-        <button className={button} disabled={busy || loading}
-          onClick={() => void act("Loading sample PDFs…", () => loadSamples(offset))}>Refresh PDFs</button>
-      </div>
-      {loadError && <p role="alert" className="text-sm text-red-800">{loadError}</p>}
-      {loading && <p role="status" className="text-sm text-slate-500">Loading sample PDFs…</p>}
-      {!loading && !loadError && !samples.length && <p className="text-sm text-slate-500">No sample PDFs saved on this page. Upload one to begin.</p>}
-      <fieldset disabled={busy} className="space-y-2">
-        <legend className="sr-only">Choose a saved sample PDF</legend>
-        {samples.map(sample => (
-          <div key={sample.id} className={`flex flex-wrap items-center gap-3 rounded-lg border bg-white p-3 ${selected?.id === sample.id ? "border-teal-600" : ""}`}>
-            <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
-              <input type="radio" name={`sample-pdf-${chatId}`} checked={selected?.id === sample.id}
-                onChange={() => {
-                  setSelected(sample); setFile(undefined); setMessage("");
-                  if (input.current) input.current.value = "";
-                }} />
-              <span className="min-w-0">
-                <span className="block break-words font-medium">{sample.filename}</span>
-                <span className="text-xs text-slate-500">
-                  {Math.max(1, Math.round(sample.size_bytes / 1024))} KB · {new Date(sample.created_at).toLocaleString()}
-                </span>
-              </span>
-            </label>
-            <a className="text-sm text-teal-800 underline" href={`${examApi.defaults.baseURL}/samples/${sample.id}/file`}
-              target="_blank" rel="noopener noreferrer" aria-label={`View PDF ${sample.filename}`}>View PDF</a>
+    <>
+      <section className={setupSectionClass} aria-label="Upload a sample exam">
+        <label className="grid gap-[7px] text-[11px] font-semibold text-[#3f4d4a]">
+          Upload a new sample exam PDF
+          <input
+            ref={input}
+            type="file"
+            accept=".pdf,application/pdf"
+            disabled={!!working}
+            onChange={(e) => chooseFile(e.target.files?.[0])}
+            className="h-auto border border-[#c7d2d0] bg-[#f8faf9] p-[7px] text-[10px] text-[#65736f] disabled:opacity-50 file:mr-2.5 file:h-[30px] file:cursor-pointer file:border file:border-[#b7c8c5] file:bg-white file:px-2.5 file:font-semibold file:text-[#40504d]"
+          />
+        </label>
+        <div className={setupPagerClass}>
+          <button
+            type="button"
+            className={examButtonClass("neutral", "compact")}
+            disabled={!file || !!working}
+            onClick={() => void run("Saving sample PDF…", async () => { await savePdf(); })}
+          >
+            Save PDF
+          </button>
+        </div>
+        {message && <p role="status" className={setupNoteClass}>{message}</p>}
+      </section>
+
+      <section className={setupSectionClass} aria-label="Saved sample PDFs">
+        <header className={setupHeaderClass}>
+          <strong className="text-[11px] text-[#34423f]">Saved sample PDFs ({total})</strong>
+          <button
+            type="button"
+            className={examButtonClass("neutral", "compact")}
+            disabled={!!working || listLoading}
+            onClick={() => void loadSamples(offset)}
+          >
+            Refresh PDFs
+          </button>
+        </header>
+        {listLoading ? (
+          <p role="status" className={setupEmptyClass}>Loading sample PDFs…</p>
+        ) : samples.length ? (
+          <fieldset className="m-0 grid min-w-0 gap-1.5 border-0 p-0" disabled={!!working}>
+            <legend className="sr-only">Choose a saved sample PDF</legend>
+            {samples.map((sample) => (
+              <div
+                key={sample.id}
+                className={selected?.id === sample.id ? samplePickerRowSelectedClass : samplePickerRowClass}
+              >
+                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                  <input
+                    type="radio"
+                    name={`sample-pdf-${chatId}`}
+                    checked={selected?.id === sample.id}
+                    onChange={() => chooseSaved(sample)}
+                    className="m-0 h-[15px] w-[15px] accent-[#147d74]"
+                  />
+                  <span className="grid min-w-0 gap-px">
+                    <span className="truncate text-[10px] font-semibold text-[#263330]">{sample.filename}</span>
+                    <span className="text-[8px] text-[#7c8986]">
+                      {Math.max(1, Math.round(sample.size_bytes / 1024))} KB · {new Date(sample.created_at).toLocaleString()}
+                    </span>
+                  </span>
+                </label>
+                <a
+                  className="whitespace-nowrap text-[9px] font-semibold text-[#0f655e]"
+                  href={`${examApi.defaults.baseURL}/samples/${sample.id}/file`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`View PDF ${sample.filename}`}
+                >
+                  View PDF
+                </a>
+              </div>
+            ))}
+          </fieldset>
+        ) : (
+          <p className={setupEmptyClass}>No sample PDFs saved on this page. Upload one to begin.</p>
+        )}
+        {(offset > 0 || total > PAGE_SIZE) && (
+          <div className={setupPagerClass}>
+            <button
+              type="button"
+              className={examButtonClass("neutral", "compact")}
+              disabled={offset === 0 || !!working || listLoading}
+              onClick={() => void loadSamples(offset - PAGE_SIZE)}
+            >
+              Previous PDFs
+            </button>
+            <button
+              type="button"
+              className={examButtonClass("neutral", "compact")}
+              disabled={offset + PAGE_SIZE >= total || !!working || listLoading}
+              onClick={() => void loadSamples(offset + PAGE_SIZE)}
+            >
+              Next PDFs
+            </button>
           </div>
-        ))}
-      </fieldset>
-      {(offset > 0 || total > 20) && <div className="flex gap-2">
-        <button className={button} disabled={offset === 0 || busy || loading}
-          onClick={() => void act("Loading sample PDFs…", () => loadSamples(offset - 20))}>Previous PDFs</button>
-        <button className={button} disabled={offset + 20 >= total || busy || loading}
-          onClick={() => void act("Loading sample PDFs…", () => loadSamples(offset + 20))}>Next PDFs</button>
-      </div>}
-      <div className="space-y-3 border-t pt-4">
-        <p className="text-sm">{file ? `New PDF: ${file.name}` : selected ? `Selected PDF: ${selected.filename}` : "Choose a PDF above to generate an exam."}</p>
-        <button className={primary} disabled={(!file && !selected) || busy}
-          onClick={() => void act("Saving your PDF and generating an exam. This can take several minutes…", async () => {
-            const source = file ? await savePdf() : selected;
-            if (!source) throw new Error("Choose a sample PDF.");
-            try {
-              const { data } = await examApi.post("/", { chat_id: chatId, sample_pdf_id: source.id });
-              onGenerated(data);
-            } catch (e) {
-              setMessage("Your sample PDF is saved. You can select it and try generating again.");
-              await refreshExams().catch(() => {});
-              throw e;
+        )}
+      </section>
+
+      <section className={setupSectionClass} aria-label="Generate exam">
+        <p className={setupNoteClass}>{selectionLabel}</p>
+        {working && (
+          <p role="status" className="m-0 flex items-center gap-2 text-[10px] font-semibold text-[#0f655e]">
+            <Loader2 size={14} aria-hidden="true" className="animate-spin" />
+            {working}
+          </p>
+        )}
+        <div className="flex justify-end">
+          <button
+            type="button"
+            className="modal-button modal-button-primary"
+            disabled={(!file && !selected) || !!working}
+            onClick={() =>
+              void run("Saving your PDF and generating an exam. This can take several minutes…", async () => {
+                const source = file ? await savePdf() : selected;
+                if (!source) throw new Error("Choose a sample PDF.");
+                try {
+                  const { data } = await examApi.post("/", { chat_id: chatId, sample_pdf_id: source.id });
+                  if (mounted.current) onGenerated(data);
+                } catch (e) {
+                  if (mounted.current) {
+                    setMessage("Your sample PDF is saved. Refresh the saved exams list before generating again.");
+                  }
+                  throw e;
+                }
+              })
             }
-          })}>Generate exam</button>
-      </div>
-    </section>
+          >
+            Generate exam
+          </button>
+        </div>
+      </section>
+    </>
   );
 }

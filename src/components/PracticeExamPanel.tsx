@@ -1,27 +1,63 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, FileText, Loader2 } from "lucide-react";
+import { ArrowLeft, Check, Loader2, X } from "lucide-react";
 import { Answer, Attempt, Exam, examApi, errorText, selectedChoices } from "./practiceExamApi";
 import MathText from "./MathText";
-import PracticeExamSamples from "./PracticeExamSamples";
+import { examButtonClass, examFieldClass } from "./practiceExamClasses";
 
-const button =
-  "rounded-lg border border-teal-600 px-4 py-2 text-sm font-medium text-teal-800 hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed";
-const primary = `${button} bg-teal-600 text-white hover:bg-teal-700`;
+type PendingConfirm = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  tone: "warning" | "submit";
+  run: () => void;
+};
+
+// Each grade tone is a complete class string (the left border colour is the only tone-specific part).
+const GRADE_BASE = "grid gap-1.5 border-l-[3px] bg-[#f7f9f8] px-3.5 py-3 text-[10px] leading-[1.55]";
+const GRADE_TONE = {
+  correct: "border-l-[#3b9c70]",
+  incorrect: "border-l-[#c4474d]",
+  partial: "border-l-[#d89b3c]",
+} as const;
+
+const gradeTone = (earned: number, possible: number) => {
+  if (earned >= possible) return `${GRADE_BASE} ${GRADE_TONE.correct}`;
+  if (earned <= 0) return `${GRADE_BASE} ${GRADE_TONE.incorrect}`;
+  return `${GRADE_BASE} ${GRADE_TONE.partial}`;
+};
+
+const CHOICE_BASE =
+  "relative grid min-h-11 cursor-pointer grid-cols-[25px_minmax(0,1fr)] items-center gap-2.5 border px-3 py-2 text-[11px] [transition:border-color_0.15s_ease,background_0.15s_ease] focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-teal";
+const CHOICE_IDLE = "border-[#d8e0de] bg-white text-[#4b5956] hover:border-[#73aaa4] hover:bg-[#f5faf9]";
+const CHOICE_SELECTED = "border-teal bg-[#edf7f5] text-teal-dark";
+
+const LETTER_BASE = "grid h-[25px] w-[25px] place-items-center border text-[9px]";
+const LETTER_IDLE = "border-[#c3cecc]";
+const LETTER_SELECTED = "border-teal bg-teal text-white";
+
+const BACK_BUTTON = "justify-self-start";
+const SUBMIT_BUTTON = "justify-self-end max-[600px]:hidden";
+
+const SECTION_CARD = "grid gap-3.5 border border-[#ccd8d5] bg-paper p-[clamp(18px,3vw,26px)]";
+const QUESTION_CARD = "m-0 grid gap-3.5 border border-[#ccd8d5] bg-paper p-[clamp(18px,3vw,26px)]";
+const ATTEMPT_ROW =
+  "w-full cursor-pointer border border-[#c7d1cf] bg-white px-3 py-2.5 text-left text-[10px] text-[#263331] enabled:hover:border-[#73aaa4] enabled:hover:bg-[#f5faf9] disabled:cursor-not-allowed disabled:opacity-60";
+
+/**
+ * Full-screen practice exam view opened from the chat: takes one exam with autosaved answers,
+ * submits it for grading and shows the results. Exams are chosen in the exam setup modal.
+ */
 export default function PracticeExamPanel({
   chatId,
+  examId,
   title,
-  open,
   onClose,
 }: {
   chatId: string;
+  examId: string;
   title: string;
-  open: boolean;
   onClose: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const [exams, setExams] = useState<Exam[]>([]);
-  const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
   const [exam, setExam] = useState<Exam>();
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [attempt, setAttempt] = useState<Attempt>();
@@ -30,6 +66,7 @@ export default function PracticeExamPanel({
   const [error, setError] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
   const [blocked, setBlocked] = useState(false);
+  const [pending, setPending] = useState<PendingConfirm | null>(null);
   const current = useRef<Attempt>();
   const latest = useRef<Record<string, string>>({});
   const dirty = useRef(false);
@@ -46,25 +83,21 @@ export default function PracticeExamPanel({
     };
   }, []);
 
-  const loadExams = useCallback(
-    async (page = 0) => {
-      const { data } = await examApi.get("/", {
-        params: { chat_id: chatId, limit: 20, offset: page },
-      });
-      if (mounted.current) {
-        setExams(data.exams);
-        setTotal(data.total);
-        setOffset(page);
-      }
-    },
-    [chatId],
-  );
-  useEffect(() => {
-    if (open) {
-      dialog.current?.showModal();
-      void loadExams().catch((e) => setError(errorText(e)));
-    } else dialog.current?.close();
-  }, [open, loadExams]);
+  const loadExam = useCallback(async (id: string) => {
+    const [detail, history] = await Promise.all([
+      examApi.get(`/${id}`),
+      examApi.get(`/${id}/attempts`),
+    ]);
+    if (!mounted.current) return;
+    setExam(detail.data);
+    setAttempts(history.data.attempts);
+    setAttempt(undefined);
+    current.current = undefined;
+    setAnswers({});
+    latest.current = {};
+    requestId.current = undefined;
+    setSaveStatus("");
+  }, []);
 
   const adopt = (value: Attempt) => {
     current.current = value;
@@ -139,9 +172,29 @@ export default function PracticeExamPanel({
         await flush();
       } catch {
         // Panels stay mounted, retaining the unsaved draft and recovery controls.
+        return;
       }
       onClose();
     });
+
+  // Open the exam this view was started for; runs once per exam
+  useEffect(() => {
+    void act("Opening exam…", () => loadExam(examId));
+    // act is recreated on every render, so only the exam id drives this effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [examId]);
+
+  // Save pending answers if the panel unmounts first, for example when the user switches chats
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+  useEffect(
+    () => () => {
+      if (dirty.current) void flushRef.current().catch(() => {});
+    },
+    [],
+  );
+
+
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
       if (dirty.current || saving.current) {
@@ -153,7 +206,7 @@ export default function PracticeExamPanel({
     return () => window.removeEventListener("beforeunload", warn);
   }, []);
   useEffect(() => {
-    if (!open || attempt?.status !== "grading" || !exam) return;
+    if (attempt?.status !== "grading" || !exam) return;
     let cancelled = false;
     const poll = setInterval(() => {
       void examApi
@@ -172,23 +225,8 @@ export default function PracticeExamPanel({
       cancelled = true;
       clearInterval(poll);
     };
-  }, [open, attempt?.id, attempt?.status, exam]);
+  }, [attempt?.id, attempt?.status, exam]);
 
-  const selectExam = async (id: string) => {
-    await flush();
-    const [detail, history] = await Promise.all([
-      examApi.get(`/${id}`),
-      examApi.get(`/${id}/attempts`),
-    ]);
-    setExam(detail.data);
-    setAttempts(history.data.attempts);
-    setAttempt(undefined);
-    current.current = undefined;
-    setAnswers({});
-    latest.current = {};
-    requestId.current = undefined;
-    setSaveStatus("");
-  };
   const changeAnswer = (id: string, value: string) => {
     latest.current = { ...latest.current, [id]: value };
     setAnswers(latest.current);
@@ -207,180 +245,155 @@ export default function PracticeExamPanel({
   const parts =
     exam?.exam.sections.flatMap((s) => s.questions.filter((q) => !q.error).flatMap((q) => q.parts)) ??
     [];
+  const answeredCount = parts.filter((p) =>
+    p.type === "multi_select" ? selectedChoices(answers[p.id]).length : answers[p.id]?.trim(),
+  ).length;
+
+  // Destructive or grading actions go through the confirm dialog first
+  const askConfirm = (next: PendingConfirm) => setPending(next);
+  const confirmPending = () => {
+    const next = pending;
+    setPending(null);
+    next?.run();
+  };
+  const submitForGrading = () =>
+    askConfirm({
+      title: "Submit for grading?",
+      message: "Submit the saved answers for grading? Unanswered parts receive zero points.",
+      confirmLabel: "Submit for grading",
+      tone: "submit",
+      run: () =>
+        void act("Saving answers and grading…", async () => {
+          await flush();
+          try {
+            const { data } = await examApi.post(
+              `/${exam!.id}/attempts/${current.current!.id}/submit`,
+              { revision: current.current!.revision },
+              { timeout: 300_000 },
+            );
+            adopt(data.attempt);
+          } catch (e) {
+            try {
+              const { data } = await examApi.get(
+                `/${exam!.id}/attempts/${current.current!.id}`,
+              );
+              adopt(data.attempt);
+            } catch {
+              paused.current = true;
+              setBlocked(true);
+            }
+            throw e;
+          }
+        }),
+    });
+  const reloadSaved = () =>
+    askConfirm({
+      title: "Replace visible answers?",
+      message: "Replace your visible answers with the saved version? Copy anything you want to keep first.",
+      confirmLabel: "Replace answers",
+      tone: "warning",
+      run: () =>
+        void act("Reloading saved attempt…", async () => {
+          const { data } = await examApi.get(
+            `/${exam!.id}/attempts/${current.current!.id}`,
+          );
+          adopt(data.attempt);
+        }),
+    });
+
+  const canSubmit = !!attempt && attempt.status !== "submitted";
 
   return (
-    <dialog
-      ref={dialog}
-      onCancel={(e) => {
-        e.preventDefault();
-        close();
-      }}
+    <section
+      className="relative flex min-h-0 w-full flex-auto flex-col bg-[#fafbfb] font-brand text-[11px] text-[#263331] antialiased [font-synthesis:none]"
       aria-labelledby={`exam-title-${chatId}`}
-      className="m-auto h-[92vh] w-[min(1100px,96vw)] max-w-none rounded-2xl p-0 text-slate-800 shadow-2xl backdrop:bg-slate-900/50"
     >
-      <div className="flex h-full flex-col">
-        <header className="flex items-center justify-between border-b p-5">
-          <div>
-            <h2 id={`exam-title-${chatId}`} className="text-xl font-semibold">
-              Practice exams
-            </h2>
-            <p className="text-sm text-slate-500">{title}</p>
-          </div>
+      <header className="grid min-h-[58px] shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3.5 border-b border-[#d8e0de] bg-paper px-[18px] max-[600px]:grid-cols-[auto_1fr] max-[600px]:px-3">
+        <button type="button" className={`${examButtonClass()} ${BACK_BUTTON}`} disabled={!!busy} onClick={close}>
+          <ArrowLeft size={14} aria-hidden="true" />
+          Back to chat
+        </button>
+        <div className="flex min-w-0 flex-col items-center gap-0.5 text-center">
+          <span className="text-[8px] font-semibold uppercase tracking-[0.1em] text-[#8d9996]">Practice exam</span>
+          <strong id={`exam-title-${chatId}`} className="max-w-full truncate text-[11px] font-semibold text-[#202a29]" title={title}>
+            {exam ? exam.title : title}
+          </strong>
+        </div>
+        {exam && canSubmit ? (
           <button
-            className={button}
-            disabled={!!busy}
-            onClick={close}
-            aria-label="Save and close practice exams"
+            type="button"
+            className={`${examButtonClass("primary")} ${SUBMIT_BUTTON}`}
+            disabled={!!busy || blocked}
+            onClick={submitForGrading}
           >
-            <X size={20} />
+            {attempt?.status === "grading" ? "Retry grading" : "Submit exam"}
           </button>
-        </header>
-        <div className="overflow-y-auto p-5 space-y-5">
-          {busy && (
-            <p role="status" className="flex items-center gap-2 text-teal-700">
-              <Loader2 className="animate-spin" size={18} />
-              {busy}
+        ) : (
+          <span aria-hidden="true" />
+        )}
+      </header>
+
+      {exam && (
+        <div className="flex min-h-[34px] shrink-0 flex-wrap items-center justify-center gap-[18px] border-b border-[#e0e6e4] px-[18px] text-[9px] text-[#75827f]">
+          <span>{exam.total_points} points</span>
+          {exam.exam.time_limit_minutes ? (
+            <span>Suggested time: {exam.exam.time_limit_minutes} minutes (not enforced)</span>
+          ) : null}
+          <span>{parts.length} scored parts</span>
+          {attempt && <span>{attempt.status === "submitted" ? "Submitted" : `Attempt ${attempt.status.replace("_", " ")}`}</span>}
+          {attempt && attempt.status !== "submitted" && <span role="status">{saveStatus}</span>}
+        </div>
+      )}
+
+      <div className="grid min-h-0 flex-auto content-start gap-[18px] overflow-y-auto px-[clamp(20px,5vw,56px)] pt-7 pb-10 max-[600px]:px-3.5 max-[600px]:pt-[18px] max-[600px]:pb-7">
+        {busy && (
+          <p role="status" className="m-0 flex items-center gap-2 text-[10px] font-semibold text-teal">
+            <Loader2 size={16} aria-hidden="true" className="animate-spin" />
+            {busy}
+          </p>
+        )}
+        {error && (
+          <div role="alert" className="m-0 border border-[#e1b0b3] bg-[#fdf1f1] px-3.5 py-3 text-[10px] leading-[1.55] text-[#7f3a3e]">
+            {error}
+          </div>
+        )}
+        {blocked && (
+          <div className="grid m-0 justify-items-start gap-2.5 border border-[#e6cf8f] bg-[#fdf6e3] px-3.5 py-3 text-[10px] leading-[1.55] text-[#8a5a00]">
+            <p className="m-0">
+              Your local answers are still visible. Reloading replaces them with the last saved answers.
             </p>
-          )}
-          {error && (
-            <div role="alert" className="rounded-lg bg-red-50 p-4 text-red-800">
-              {error}
-            </div>
-          )}
-          {blocked && (
-            <div className="rounded-lg border border-amber-300 p-4">
-              <p>
-                Your local answers are still visible. Reloading replaces them
-                with the last saved answers; copy anything you want to keep
-                first.
-              </p>
-              <button
-                className={button}
-                disabled={!!busy}
-                onClick={() => {
-                  if (
-                    !window.confirm(
-                      "Replace your visible answers with the saved version?",
-                    )
-                  )
-                    return;
-                  void act("Reloading saved attempt…", async () => {
-                    const { data } = await examApi.get(
-                      `/${exam!.id}/attempts/${current.current!.id}`,
-                    );
-                    adopt(data.attempt);
-                  });
-                }}
-              >
-                Reload saved answers
-              </button>
-            </div>
-          )}
-          {!exam ? (
-            <>
-              <PracticeExamSamples key={chatId} chatId={chatId} busy={!!busy} act={act}
-                onGenerated={value => { setExam(value); setAttempts([]); }}
-                refreshExams={() => loadExams()} />
-              <div className="flex justify-between items-center">
-                <h3 className="font-semibold">Saved exams ({total})</h3>
-                <button
-                  className={button}
-                  disabled={!!busy}
-                  onClick={() =>
-                    void act("Refreshing exams…", () => loadExams(offset))
-                  }
-                >
-                  Refresh
-                </button>
-              </div>
-              <p className="text-xs text-slate-500">
-                After a connection timeout, refresh this list before generating
-                again.
-              </p>
-              {!exams.length && (
-                <p className="py-6 text-center text-slate-500">
-                  No saved exams on this page. Generate an exam to begin.
-                </p>
-              )}
-              {exams.map((item) => (
-                <button
-                  key={item.id}
-                  disabled={!!busy}
-                  onClick={() =>
-                    void act("Opening exam…", () => selectExam(item.id))
-                  }
-                  className="flex w-full items-center gap-3 rounded-xl border p-4 text-left hover:border-teal-500"
-                >
-                  <FileText className="text-teal-600" />
-                  <span className="flex-1">
-                    <span className="block font-medium">{item.title}</span>
-                    <span className="text-sm text-slate-500">
-                      {item.total_points} points ·{" "}
-                      {new Date(item.created_at).toLocaleString()}
-                    </span>
-                  </span>
-                  <span>Open →</span>
-                </button>
-              ))}
-              <div className="flex gap-2">
-                <button
-                  className={button}
-                  disabled={!offset || !!busy}
-                  onClick={() =>
-                    void act("Loading exams…", () => loadExams(offset - 20))
-                  }
-                >
-                  Previous
-                </button>
-                <button
-                  className={button}
-                  disabled={offset + 20 >= total || !!busy}
-                  onClick={() =>
-                    void act("Loading exams…", () => loadExams(offset + 20))
-                  }
-                >
-                  Next
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <button
-                className={button}
-                disabled={!!busy}
-                onClick={() =>
-                  void act("Saving…", async () => {
-                    await flush();
-                    setExam(undefined);
-                    setAttempt(undefined);
-                    current.current = undefined;
-                    await loadExams();
-                  })
-                }
-              >
-                ← Saved exams
-              </button>
-              <div>
-                <h3 className="text-2xl font-semibold">{exam.title}</h3>
-                {exam.sample_pdf_id && <a className="text-sm text-teal-800 underline"
+            <button type="button" className={examButtonClass()} disabled={!!busy} onClick={reloadSaved}>
+              Reload saved answers
+            </button>
+          </div>
+        )}
+
+        {!exam ? null : (
+          <>
+            <div className="grid gap-2">
+              <h3 className="m-0 text-[20px] font-semibold leading-[1.25] tracking-[-0.02em] text-[#202a29]">{exam.title}</h3>
+              {exam.sample_pdf_id && (
+                <a
+                  className="text-[10px] font-semibold text-[#0f655e]"
                   href={`${examApi.defaults.baseURL}/samples/${exam.sample_pdf_id}/file`}
-                  target="_blank" rel="noopener noreferrer">
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   View sample PDF: {exam.sample_filename || "Original sample"}
-                </a>}
-                <p className="text-sm text-slate-500">
-                  {exam.total_points} points
-                  {exam.exam.time_limit_minutes
-                    ? ` · Suggested time: ${exam.exam.time_limit_minutes} minutes (not enforced)`
-                    : ""}
-                </p>
-                <p className="mt-3 whitespace-pre-wrap">
-                  <MathText>{exam.exam.instructions}</MathText>
-                </p>
-              </div>
-              {!attempt ? (
-                <section className="rounded-xl border p-4 space-y-3">
+                </a>
+              )}
+              <p className="m-0 text-[10px] leading-[1.55] text-[#8d9996]">{exam.total_points} points</p>
+              <p className="m-0 whitespace-pre-wrap text-[11px] leading-[1.6] text-[#4b5956]">
+                <MathText>{exam.exam.instructions}</MathText>
+              </p>
+            </div>
+
+            {!attempt ? (
+              <section className={SECTION_CARD}>
+                <div>
                   <button
-                    className={primary}
+                    type="button"
+                    className={examButtonClass("primary")}
                     disabled={!!busy || !parts.length}
                     onClick={() =>
                       void act("Starting attempt…", async () => {
@@ -396,56 +409,55 @@ export default function PracticeExamPanel({
                   >
                     Start new attempt
                   </button>
-                  <h4 className="font-medium">Attempt history</h4>
-                  {!attempts.length && (
-                    <p className="text-sm text-slate-500">No attempts yet.</p>
-                  )}
+                </div>
+                <h4 className="m-0 text-xs font-semibold text-[#202a29]">Attempt history</h4>
+                {!attempts.length && <p className="m-0 text-[10px] leading-[1.55] text-[#687572]">No attempts yet.</p>}
+                <div className="grid gap-2">
                   {attempts.map((a) => (
                     <button
                       key={a.id}
-                      className="block w-full rounded-lg border p-3 text-left hover:bg-slate-50"
+                      type="button"
+                      className={ATTEMPT_ROW}
                       disabled={!!busy}
                       onClick={() =>
                         void act("Loading attempt…", async () => {
-                          const { data } = await examApi.get(
-                            `/${exam.id}/attempts/${a.id}`,
-                          );
+                          const { data } = await examApi.get(`/${exam.id}/attempts/${a.id}`);
                           adopt(data.attempt);
                         })
                       }
                     >
-                      {new Date(a.created_at).toLocaleString()} ·{" "}
-                      {a.status.replace("_", " ")}{" "}
-                      {a.grading
-                        ? `· ${a.grading.score}/${a.grading.total}`
-                        : ""}
+                      {new Date(a.created_at).toLocaleString()} · {a.status.replace("_", " ")}{" "}
+                      {a.grading ? `· ${a.grading.score}/${a.grading.total}` : ""}
                     </button>
                   ))}
-                </section>
-              ) : (
-                <section className="rounded-xl bg-teal-50 p-4 space-y-2">
-                  <p className="font-medium">
-                    {attempt.status === "submitted"
-                      ? `Score: ${attempt.grading?.score} / ${attempt.grading?.total}`
-                      : `Attempt: ${attempt.status.replace("_", " ")}`}
+                </div>
+              </section>
+            ) : (
+              <section className="grid gap-2.5 border border-[#b5d6cf] bg-[#edf7f5] px-[18px] py-4">
+                <p className="m-0 text-[11px] font-semibold text-[#202a29]">
+                  {attempt.status === "submitted"
+                    ? `Score: ${attempt.grading?.score} / ${attempt.grading?.total}`
+                    : `Attempt: ${attempt.status.replace("_", " ")}`}
+                </p>
+                <p role="status" className="m-0 text-[10px] leading-[1.55] text-[#687572]">
+                  {attempt.status === "grading"
+                    ? "Grading in progress. Results refresh automatically. If interrupted, retry after ten minutes."
+                    : saveStatus}
+                </p>
+                {attempt.error && (
+                  <p className="m-0 border border-[#e1b0b3] bg-[#fdf1f1] px-3.5 py-3 text-[10px] leading-[1.55] text-[#7f3a3e]">
+                    {attempt.error}
                   </p>
-                  <p role="status" className="text-sm">
-                    {attempt.status === "grading"
-                      ? "Grading in progress. Results refresh automatically. If interrupted, retry after ten minutes."
-                      : saveStatus}
-                  </p>
-                  {attempt.error && (
-                    <p className="text-sm text-red-700">{attempt.error}</p>
-                  )}
+                )}
+                <div>
                   <button
-                    className={button}
+                    type="button"
+                    className={examButtonClass()}
                     disabled={!!busy}
                     onClick={() =>
                       void act("Loading history…", async () => {
                         await flush();
-                        const { data } = await examApi.get(
-                          `/${exam.id}/attempts`,
-                        );
+                        const { data } = await examApi.get(`/${exam.id}/attempts`);
                         setAttempts(data.attempts);
                         setAttempt(undefined);
                         current.current = undefined;
@@ -454,172 +466,192 @@ export default function PracticeExamPanel({
                   >
                     Attempt history / retake
                   </button>
-                </section>
-              )}
-              {exam.exam.sections.map((section, si) => (
-                <section key={si} className="space-y-4">
-                  <h4 className="border-b pb-2 text-lg font-semibold">
-                    {section.name}
-                  </h4>
-                  <p className="whitespace-pre-wrap text-sm">
-                    <MathText>{section.instructions}</MathText>
-                  </p>
-                  {section.questions.map((q) => (
-                    <article
-                      key={q.id}
-                      className="rounded-xl border p-5 space-y-4"
-                    >
-                      <h5 className="font-semibold">Question {q.label}</h5>
-                      {q.error && (
-                        <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-                          <strong>Question unavailable for scoring.</strong> {q.error} Excluded from the score total.
-                        </p>
-                      )}
-                      <p><MathText>{q.stem}</MathText></p>
-                      {q.parts.map((p, pi) => {
-                        const selected = selectedChoices(answers[p.id]);
-                        const grade = attempt?.grading?.results.find(
-                          (r) => r.part_id === p.id,
-                        );
-                        return (
-                          <div key={p.id} className={p.group_label ? "border-l-2 border-teal-100 pl-4" : ""}>
+                </div>
+              </section>
+            )}
+
+            {exam.exam.sections.map((section, si) => (
+              <section key={si} className="grid gap-4">
+                <h4 className="m-0 border-b border-[#d8e0de] pb-2.5 text-[15px] font-semibold text-[#202a29]">{section.name}</h4>
+                <p className="m-0 text-[10px] leading-[1.55] text-[#687572]">
+                  <MathText>{section.instructions}</MathText>
+                </p>
+                {section.questions.map((q) => (
+                  <article key={q.id} className={QUESTION_CARD}>
+                    <span className="text-[9px] font-bold uppercase tracking-[0.11em] text-teal">Question {q.label}</span>
+                    {q.error && (
+                      <p role="status" className="m-0 border border-[#e6cf8f] bg-[#fdf6e3] px-3 py-2.5 text-[10px] leading-[1.5] text-[#8a5a00]">
+                        <strong>Question unavailable for scoring.</strong> {q.error} Excluded from the score total.
+                      </p>
+                    )}
+                    <p className="m-0 whitespace-pre-wrap text-[13px] font-medium leading-[1.5] text-[#202a29]">
+                      <MathText>{q.stem}</MathText>
+                    </p>
+                    {q.parts.map((p, pi) => {
+                      const selected = selectedChoices(answers[p.id]);
+                      const grade = attempt?.grading?.results.find((r) => r.part_id === p.id);
+                      const choices =
+                        p.type === "tf" ? ["True", "False"] : (p.choices ?? []);
+                      const isChoicePart = ["mcq", "tf", "binary", "multi_select"].includes(p.type);
+                      return (
+                        <div key={p.id} className={p.group_label ? "grid gap-3 border-l-2 border-[#cfe6e2] pl-3.5" : undefined}>
                           {p.group_label && p.group_label !== q.parts[pi - 1]?.group_label && (
-                            <h6 className="mb-3 font-semibold">
+                            <h6 className="m-0 text-[11px] font-semibold text-[#202a29]">
                               {p.group_label} <MathText>{p.group_instructions}</MathText>
                             </h6>
                           )}
-                          <fieldset
-                            disabled={!editable || !!q.error}
-                            className="space-y-2"
-                          >
-                            <legend className="whitespace-pre-wrap font-medium">
+                          <fieldset disabled={!editable || !!q.error} className="group m-0 grid min-w-0 gap-2.5 border-0 p-0">
+                            <legend className="mb-2 p-0 text-[11px] font-medium leading-[1.5] whitespace-pre-wrap text-[#263331]">
                               {p.label} <MathText>{p.prompt}</MathText>{" "}
-                              <span className="text-sm text-slate-500">
+                              <span className="text-[9px] font-normal text-[#687572]">
                                 ({p.points} points{q.error ? "; excluded" : ""})
                               </span>
                             </legend>
-                            {["mcq", "tf", "binary", "multi_select"].includes(p.type) ? (
-                              (p.type === "tf"
-                                ? ["True", "False"]
-                                : (p.choices ?? [])
-                              ).map((choice) => (
-                                <label
-                                  key={choice}
-                                  className="flex items-start gap-3 rounded-lg border p-3"
-                                >
-                                  <input
-                                    className="mt-1 accent-teal-600"
-                                    type={p.type === "multi_select" ? "checkbox" : "radio"}
-                                    name={`${attempt?.id ?? "preview"}-${p.id}`}
-                                    checked={p.type === "multi_select" ? selected.includes(choice) : answers[p.id] === choice}
-                                    onChange={(e) => {
-                                      if (p.type !== "multi_select") return changeAnswer(p.id, choice);
-                                      changeAnswer(p.id, JSON.stringify(e.target.checked
-                                        ? [...selected, choice] : selected.filter(c => c !== choice)));
-                                    }}
-                                  />
-                                  <span className="whitespace-pre-wrap">
-                                    <MathText>{choice}</MathText>
-                                  </span>
-                                </label>
-                              ))
+                            {isChoicePart ? (
+                              <div className="grid gap-2">
+                                {choices.map((choice, ci) => {
+                                  const checked =
+                                    p.type === "multi_select"
+                                      ? selected.includes(choice)
+                                      : answers[p.id] === choice;
+                                  return (
+                                    <label
+                                      key={choice}
+                                      className={`${CHOICE_BASE} group-disabled:opacity-75 ${checked ? CHOICE_SELECTED : CHOICE_IDLE}`}
+                                    >
+                                      <input
+                                        className="sr-only"
+                                        type={p.type === "multi_select" ? "checkbox" : "radio"}
+                                        name={`${attempt?.id ?? "preview"}-${p.id}`}
+                                        checked={checked}
+                                        onChange={(e) => {
+                                          if (p.type !== "multi_select") return changeAnswer(p.id, choice);
+                                          changeAnswer(
+                                            p.id,
+                                            JSON.stringify(
+                                              e.target.checked
+                                                ? [...selected, choice]
+                                                : selected.filter((c) => c !== choice),
+                                            ),
+                                          );
+                                        }}
+                                      />
+                                      <span className={`${LETTER_BASE} ${checked ? LETTER_SELECTED : LETTER_IDLE}`} aria-hidden="true">
+                                        {String.fromCharCode(65 + ci)}
+                                      </span>
+                                      <span className="min-w-0 whitespace-pre-wrap">
+                                        <MathText>{choice}</MathText>
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
                             ) : p.type === "numeric" ? (
                               <input
                                 aria-label={`Answer ${q.label} ${p.label}`}
-                                className="w-full rounded-lg border p-3 disabled:bg-slate-50"
+                                className={examFieldClass}
                                 value={answers[p.id] ?? ""}
                                 maxLength={20000}
                                 placeholder="Answer, including units"
-                                onChange={(e) =>
-                                  changeAnswer(p.id, e.target.value)
-                                }
+                                onChange={(e) => changeAnswer(p.id, e.target.value)}
                               />
                             ) : (
                               <textarea
                                 aria-label={`Answer ${q.label} ${p.label}`}
-                                className="w-full rounded-lg border p-3 disabled:bg-slate-50"
+                                className={examFieldClass}
                                 rows={p.type === "long_answer" ? 6 : 3}
                                 maxLength={20000}
                                 value={answers[p.id] ?? ""}
                                 placeholder="Your answer"
-                                onChange={(e) =>
-                                  changeAnswer(p.id, e.target.value)
-                                }
+                                onChange={(e) => changeAnswer(p.id, e.target.value)}
                               />
                             )}
                             {grade && (
-                              <div className="rounded-lg bg-slate-50 p-3 text-sm whitespace-pre-wrap">
-                                <p className="font-semibold">
-                                  {grade.points_earned} /{" "}
-                                  {grade.points_possible} points
+                              <div className={gradeTone(grade.points_earned, grade.points_possible)}>
+                                <p className="m-0 text-[11px] font-semibold text-[#202a29]">
+                                  {grade.points_earned} / {grade.points_possible} points
                                 </p>
-                                <p><MathText>{grade.feedback}</MathText></p>
-                                <p className="mt-2">
+                                <p className="m-0 whitespace-pre-wrap text-[#4b5956]">
+                                  <MathText>{grade.feedback}</MathText>
+                                </p>
+                                <p className="m-0 whitespace-pre-wrap text-[#4b5956]">
                                   <strong>Answer:</strong>{" "}
-                                  <MathText>{p.type === "multi_select"
-                                    ? selectedChoices(grade.correct_answer).join("; ") : grade.correct_answer}</MathText>
+                                  <MathText>
+                                    {p.type === "multi_select"
+                                      ? selectedChoices(grade.correct_answer).join("; ")
+                                      : grade.correct_answer}
+                                  </MathText>
                                 </p>
-                                <p><MathText>{grade.explanation}</MathText></p>
+                                <p className="m-0 whitespace-pre-wrap text-[#4b5956]">
+                                  <MathText>{grade.explanation}</MathText>
+                                </p>
                               </div>
                             )}
                           </fieldset>
-                          </div>
-                        );
-                      })}
-                    </article>
-                  ))}
-                </section>
-              ))}
-              {attempt && attempt.status !== "submitted" && (
-                <div className="flex flex-wrap items-center gap-3 border-t pt-4">
-                  <p className="text-sm">
-                    {parts.filter((p) => p.type === "multi_select" ? selectedChoices(answers[p.id]).length : answers[p.id]?.trim()).length} /{" "}
-                    {parts.length} parts answered
-                  </p>
-                  <button
-                    className={primary}
-                    disabled={!!busy || blocked}
-                    onClick={() => {
-                      if (
-                        !window.confirm(
-                          "Submit the saved answers for grading? Unanswered parts receive zero points.",
-                        )
-                      )
-                        return;
-                      void act("Saving answers and grading…", async () => {
-                        await flush();
-                        try {
-                          const { data } = await examApi.post(
-                            `/${exam.id}/attempts/${current.current!.id}/submit`,
-                            { revision: current.current!.revision },
-                            { timeout: 300_000 },
-                          );
-                          adopt(data.attempt);
-                        } catch (e) {
-                          try {
-                            const { data } = await examApi.get(
-                              `/${exam.id}/attempts/${current.current!.id}`,
-                            );
-                            adopt(data.attempt);
-                          } catch {
-                            paused.current = true;
-                            setBlocked(true);
-                          }
-                          throw e;
-                        }
-                      });
-                    }}
-                  >
-                    {attempt.status === "grading"
-                      ? "Retry interrupted grading"
-                      : "Submit for grading"}
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
+                        </div>
+                      );
+                    })}
+                  </article>
+                ))}
+              </section>
+            ))}
+
+            {attempt && attempt.status !== "submitted" && (
+              <footer className="flex flex-wrap items-center gap-3 border-t border-[#d8e0de] pt-[18px] text-[10px]">
+                <span className="mr-auto text-[#687572]">
+                  {answeredCount} / {parts.length} parts answered
+                </span>
+                <button
+                  type="button"
+                  className={examButtonClass("primary")}
+                  disabled={!!busy || blocked}
+                  onClick={submitForGrading}
+                >
+                  {attempt.status === "grading" ? "Retry interrupted grading" : "Submit for grading"}
+                </button>
+              </footer>
+            )}
+          </>
+        )}
       </div>
-    </dialog>
+
+      {pending && (
+        <div className="absolute inset-0 z-30 grid place-items-center bg-[rgba(30,37,36,0.5)] p-[18px]">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby={`confirm-title-${chatId}`}
+            aria-describedby={`confirm-text-${chatId}`}
+            className="grid w-[min(380px,100%)] box-border gap-3 border border-[#c4cfcd] bg-white p-6"
+          >
+            <span
+              className={`grid h-[38px] w-[38px] place-items-center ${
+                pending.tone === "warning" ? "bg-[#fbe8e9] text-[#c4474d]" : "bg-[#edf7f5] text-teal"
+              }`}
+            >
+              {pending.tone === "warning" ? <X size={18} aria-hidden="true" /> : <Check size={18} aria-hidden="true" />}
+            </span>
+            <h3 id={`confirm-title-${chatId}`} className="mt-1 mb-0 text-base font-semibold text-[#202a29]">
+              {pending.title}
+            </h3>
+            <p id={`confirm-text-${chatId}`} className="m-0 text-[11px] leading-[1.6] text-[#687572]">
+              {pending.message}
+            </p>
+            <div className="mt-2 flex justify-end gap-2">
+              <button type="button" className={examButtonClass()} onClick={() => setPending(null)}>
+                Keep working
+              </button>
+              <button
+                type="button"
+                className={examButtonClass(pending.tone === "warning" ? "danger" : "primary")}
+                onClick={confirmPending}
+              >
+                {pending.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
