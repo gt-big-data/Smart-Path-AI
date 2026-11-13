@@ -14,11 +14,12 @@ import ReactFlow, {
   useEdgesState,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Search, X } from 'lucide-react';
+import { ChevronsDownUp, ChevronsUpDown, Search, X } from 'lucide-react';
 import PathBar from './graph/PathBar';
 import { computeNodeSizes } from '../lib/nodesizing';
 import { buildGraphTree, GraphTree } from '../lib/graphTree';
 import { useCollapse } from '../lib/collapse';
+import { useCollapseDefaults } from '../lib/collapseDefaults';
 import { radialLayout, toTopLeft, NodeSize, Point, RadialTreeNode } from '../lib/radialLayout';
 import { getPathHighlight } from '../lib/pathHighlight';
 import { buildSearchResultItems } from '../lib/searchResults';
@@ -908,6 +909,7 @@ useEffect(() => {
     () => baseGraph && applyGraphStyles(baseGraph, { confidenceScores, nodeEdits, searchHits, activePath, collapse: collapse.layer }),
     [baseGraph, confidenceScores, nodeEdits, searchHits, activePath, collapse.layer]
   );
+  const { collapseToCenter, expandAll } = useCollapseDefaults(collapse, graphTree, baseGraph?.nodes.length ?? 0, data?.graph_id);
 
   // Push the styled graph into React Flow. A new base graph replaces everything; a style-only
   // change keeps what React Flow tracks itself (dragged positions, measured sizes, selection).
@@ -1316,6 +1318,12 @@ useEffect(() => {
           position="bottom-right"
           style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
         >
+          <button type="button" className="react-flow__controls-button" onClick={collapseToCenter} title="Collapse to center" aria-label="Collapse to center">
+            <ChevronsDownUp />
+          </button>
+          <button type="button" className="react-flow__controls-button" onClick={expandAll} title="Expand all" aria-label="Expand all">
+            <ChevronsUpDown />
+          </button>
           <button
             onClick={() => setMinimapLocked(!minimapLocked)}
             style={{

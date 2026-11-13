@@ -141,6 +141,8 @@ async function runFixture(browser, fixture) {
 
   await page.goto(`${BASE}/?fixture=${fixture}`);
   const ctx0 = await page.evaluate(() => window.__qa?.nodes?.length);
+  // Graphs over 50 nodes open collapsed (C3). Every check below needs every node, so open them all
+  await page.click('.react-flow__controls button[aria-label="Expand all"]');
   await page.waitForFunction(n => document.querySelectorAll('.react-flow__node').length >= n, ctx0, { timeout: 60000 });
   const renderMs = await page.evaluate(() => performance.now() - window.__qaLoadStart);
   await settle(page, 1000); // initial fitView animates for 600ms
