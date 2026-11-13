@@ -23,6 +23,7 @@ node_modules
 *.sublime-project
 *.sublime-workspace
 justfile
+.claude/
 
 # OS
 .DS_Store
