@@ -44,17 +44,17 @@ const examOptions = [
 function ChatPreview() {
   return (
     <>
-      <div className="flex h-[35px] items-center border-b border-line bg-[#eef3f2] px-[13px] text-[10px] text-[#6b7d79]">
+      <div className="flex h-8.75 items-center border-b border-line bg-[#eef3f2] px-3.25 text-[10px] text-[#6b7d79]">
         Cell biology review
       </div>
-      <div className="flex h-[calc(100%_-_35px)] flex-col gap-4 bg-[#f8faf9] p-[38px] max-[700px]:px-[18px] max-[700px]:py-6">
+      <div className="flex h-[calc(100%-35px)] flex-col gap-4 bg-[#f8faf9] p-9.5 max-[700px]:px-4.5 max-[700px]:py-6">
         <div className={`${bubble} rounded-[5px_13px_13px] bg-[#e8f1ef]`}>
           How does glycolysis connect to ATP production?
         </div>
         <div className={`${bubble} self-end rounded-[13px_5px_13px_13px] bg-teal text-white`}>
           Glycolysis produces a net gain of two ATP and prepares glucose for the next stage of cellular respiration.
         </div>
-        <div className="mt-auto flex justify-between rounded-[3px] border border-line px-3 py-[11px] text-[11px] text-[#9aa8a5]">
+        <div className="mt-auto flex justify-between rounded-[3px] border border-line px-3 py-2.75 text-[11px] text-[#9aa8a5]">
           Ask a follow-up question <Send size={14} className="text-teal" />
         </div>
       </div>
@@ -96,12 +96,12 @@ function GraphPreview() {
 
 function ExamPreview() {
   return (
-    <div className="h-full bg-[#fbfcfc] p-12 max-[700px]:px-[18px] max-[700px]:py-6">
+    <div className="h-full bg-paper p-12 max-[700px]:px-4.5 max-[700px]:py-6">
       <div className="flex justify-between text-[11px] text-muted">
         <span>Practice exam</span>
         <strong>Question 04 / 15</strong>
       </div>
-      <h3 className="mb-6 mt-[42px] max-w-[510px] text-2xl font-medium">
+      <h3 className="mb-6 mt-10.5 max-w-127.5 text-2xl font-medium">
         Which process produces a net gain of two ATP?
       </h3>
       <div className="grid grid-cols-2 gap-2.5 text-xs max-[700px]:grid-cols-1">
@@ -114,7 +114,7 @@ function ExamPreview() {
           </span>
         ))}
       </div>
-      <div className="mt-[38px] h-[3px] bg-[#d7e2df]">
+      <div className="mt-9.5 h-0.75 bg-[#d7e2df]">
         <i className="block h-full w-[48%] bg-teal" />
       </div>
     </div>
@@ -123,12 +123,12 @@ function ExamPreview() {
 
 function ProgressPreview() {
   return (
-    <div className="h-full bg-[#f8faf9] p-12 max-[700px]:px-[18px] max-[700px]:py-6">
+    <div className="h-full bg-[#f8faf9] p-12 max-[700px]:px-4.5 max-[700px]:py-6">
       <div className="flex justify-between text-[11px] text-muted">
         <span>Concept confidence</span>
         <strong className="text-[28px] font-medium text-teal">78%</strong>
       </div>
-      <svg viewBox="0 0 520 220" role="img" className="mt-[26px] h-[220px] w-full">
+      <svg viewBox="0 0 520 220" role="img" className="mt-6.5 h-55 w-full">
         <path d="M15 184C94 180 109 130 174 143S270 88 326 103 410 32 505 47" fill="none" stroke="#147d74" strokeWidth={3} />
         <path d="M15 190H505" fill="none" stroke="#c4d2cf" strokeWidth={1} />
       </svg>
@@ -144,7 +144,7 @@ const productShots = [
   { number: '04', title: 'Track what is sticking', content: <ProgressPreview /> },
 ];
 
-type LandingTeamMember = { name: string; linkedin?: string; photo?: string };
+type LandingTeamMember = { name: string; linkedin?: string; portfolio?: string; photo?: string };
 type LandingTeam = { name: string; members: LandingTeamMember[] };
 
 const landingTeams: LandingTeam[] = [
@@ -179,35 +179,35 @@ const landingTeams: LandingTeam[] = [
 
 function TeamRoster() {
   return (
-    <section className={`${container} pb-[105px] pt-[82px]`} id="team">
+    <section className={`${container} pb-26.25 pt-20.5`} id="team">
       <div className="grid grid-cols-[80px_1fr] border-t border-[#9fb5b1] pt-7 max-[700px]:grid-cols-[45px_1fr]">
         <span className="text-xs text-teal">03</span>
         <div>
-          <p className="mb-2 mt-0 text-xs uppercase tracking-[0.1em] text-[#687875]">People behind the path</p>
+          <p className="mb-2 mt-0 text-xs uppercase tracking-widest text-[#687875]">People behind the path</p>
           <h2 className="m-0 text-[38px] font-medium tracking-[-0.035em] max-[700px]:text-[30px]">
             Built by a team that cares about how people learn.
           </h2>
         </div>
       </div>
-      <div className="mt-[70px] grid gap-[84px] max-[700px]:mt-[45px]">
+      <div className="mt-17.5 grid gap-21 max-[700px]:mt-11.25">
         {landingTeams.map((team) => (
-          <section className="border-t border-[#c7d4d2] pt-[18px]" key={team.name}>
-            <div className="mb-[38px] flex items-baseline justify-between">
+          <section className="border-t border-[#c7d4d2] pt-4.5" key={team.name}>
+            <div className="mb-9.5 flex items-baseline justify-between">
               <h3 className="m-0 text-[17px] font-semibold">{team.name}</h3>
               <span className="text-[10px] text-[#84928f]">{team.members.length.toString().padStart(2, '0')}</span>
             </div>
-            <div className="grid grid-cols-4 gap-[34px] max-[700px]:grid-cols-2 max-[700px]:gap-y-[45px]">
+            <div className="grid grid-cols-4 gap-8.5 max-[700px]:grid-cols-2 max-[700px]:gap-y-11.25">
               {team.members.map((member, index) => (
                 <article className="block" key={`${team.name}-${member.name}`}>
-                  <div className="mb-[22px] grid aspect-square w-[132px] place-items-center overflow-hidden rounded-full bg-[#dce8e6] text-xs tracking-[0.1em] text-teal max-[700px]:w-[min(120px,100%)]">
+                  <div className="mb-5.5 grid aspect-square w-33 place-items-center overflow-hidden rounded-full bg-[#dce8e6] text-xs tracking-widest text-teal max-[700px]:w-[min(120px,100%)]">
                     {member.photo ? (
-                      <img className="h-full w-full object-cover [object-position:50%_20%]" src={member.photo} alt={member.name} />
+                      <img className="h-full w-full object-cover object-[50%_20%]" src={member.photo} alt={member.name} />
                     ) : (
                       String(index + 1).padStart(2, '0')
                     )}
                   </div>
-                  <h4 className="mb-[18px] mt-0 text-lg font-semibold">{member.name}</h4>
-                  <div className="flex gap-[18px]">
+                  <h4 className="mb-4.5 mt-0 text-lg font-semibold">{member.name}</h4>
+                  <div className="flex gap-4.5">
                     <a
                       className={memberLink}
                       href={member.linkedin ?? '#'}
@@ -218,9 +218,12 @@ function TeamRoster() {
                       <Linkedin size={12} />
                       LinkedIn
                     </a>
-                    <a className={memberLink} href="#" onClick={(event) => event.preventDefault()}>
-                      Portfolio ↗
-                    </a>
+                    {member.portfolio ?
+                      (<a className={memberLink} href="#" onClick={(event) => event.preventDefault()}>
+                        Portfolio ↗
+                      </a>) : 
+                      <></>
+                    }
                   </div>
                 </article>
               ))}
@@ -267,13 +270,13 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#f7f9f8] font-brand text-[#172321]">
-      <header className={`relative flex h-[76px] items-center border-b border-[#cfd9d7] ${container}`}>
+      <header className={`relative flex h-19 items-center border-b border-[#cfd9d7] ${container}`}>
         <button
           type="button"
           className={`${landingButton} inline-flex items-center gap-2.5 bg-transparent p-0 text-lg font-bold text-[#172321]`}
           onClick={() => window.scrollTo({ top: 0 })}
         >
-          <span className="grid h-[30px] w-[30px] place-items-center rounded-[2px] bg-teal text-white">
+          <span className="grid h-7.5 w-7.5 place-items-center rounded-xs bg-teal text-white">
             <Brain size={17} />
           </span>
           <span>SmartPath</span>
@@ -285,7 +288,7 @@ export default function Home() {
         <nav className="ml-auto flex items-center gap-6 max-[700px]:gap-3" aria-label="Account navigation">
           {isAuthenticated ? (
             <>
-              <span className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#c5dcd8] bg-[#edf7f5] px-[13px] py-[7px] text-sm font-semibold text-[#176860] max-[700px]:hidden">
+              <span className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#c5dcd8] bg-[#edf7f5] px-3.25 py-1.75 text-sm font-semibold text-[#176860] max-[700px]:hidden">
                 {userName ? `Hi, ${userName}` : 'Signed in'}
               </span>
               <button type="button" className={accountButton} onClick={() => navigate('/chat')}>Dashboard</button>
@@ -308,28 +311,28 @@ export default function Home() {
       </header>
 
       <main>
-        <section className={`${container} pb-[92px] pt-24 text-center max-[700px]:pb-[72px] max-[700px]:pt-[76px]`}>
+        <section className={`${container} pb-23 pt-24 text-center max-[700px]:pb-18 max-[700px]:pt-19`}>
           <span className={sectionEyebrow}>AI-powered learning companion</span>
-          <h1 className="mb-0 mt-[22px] text-[clamp(34px,4.5vw,56px)] font-medium leading-[1.12] tracking-[-0.04em]">
+          <h1 className="mb-0 mt-5.5 text-[clamp(34px,4.5vw,56px)] font-medium leading-[1.12] tracking-[-0.04em]">
             Turn course material into connected knowledge you can explore, question, and practice.
           </h1>
           <button
             type="button"
-            className={`${landingButton} mt-8 inline-flex items-center gap-[9px] border-x-0 border-t-0 border-b border-teal bg-transparent pb-1.5 text-[13px] font-semibold text-[#116d65]`}
+            className={`${landingButton} mt-8 inline-flex items-center gap-2.25 border-x-0 border-t-0 border-b border-teal bg-transparent pb-1.5 text-[13px] font-semibold text-[#116d65]`}
             onClick={() => navigate(isAuthenticated ? '/chat' : '/login')}
           >
             Open the workspace <ArrowRight size={17} />
           </button>
         </section>
 
-        <section className="overflow-hidden pb-[105px]" id="product">
-          <div className={`${container} mb-[22px] flex gap-3.5 border-t border-[#9fb5b1] pt-5 text-[11px] uppercase tracking-[0.1em] text-[#697b78]`}>
+        <section className="overflow-hidden pb-26.25" id="product">
+          <div className={`${container} mb-5.5 flex gap-3.5 border-t border-[#9fb5b1] pt-5 text-[11px] uppercase tracking-widest text-[#697b78]`}>
             <span>01</span>
             <p className="m-0">A clearer path through complex material</p>
           </div>
           <div
             ref={productScroller}
-            className="flex snap-x snap-mandatory gap-[18px] overflow-x-auto px-[max(24px,calc((100vw_-_1180px)/2))] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex snap-x snap-mandatory gap-4.5 overflow-x-auto px-[max(24px,calc((100vw-1180px)/2))] scrollbar-none [&::-webkit-scrollbar]:hidden"
           >
             {productShots.map((shot) => (
               <article className="w-[min(720px,78vw)] shrink-0 snap-center max-[700px]:w-[91vw]" key={shot.number}>
@@ -337,45 +340,45 @@ export default function Home() {
                   <span className="text-[10px] text-teal">{shot.number}</span>
                   <strong className="text-[13px] font-semibold">{shot.title}</strong>
                 </div>
-                <div className="h-[390px] overflow-hidden border border-[#aebfbc] bg-white max-[700px]:h-80">{shot.content}</div>
+                <div className="h-97.5 overflow-hidden border border-[#aebfbc] bg-white max-[700px]:h-80">{shot.content}</div>
               </article>
             ))}
           </div>
         </section>
 
-        <section className="border-t border-[#9fb5b1] pb-[72px] pt-[58px] max-[700px]:pb-[52px] max-[700px]:pt-[42px]" aria-labelledby="mission-title">
-          <div className={`${container} relative grid min-h-[455px] grid-cols-[1.08fr_0.92fr] overflow-hidden rounded-[6px] bg-[#25282d] text-white max-[800px]:grid-cols-1`}>
+        <section className="border-t border-[#9fb5b1] pb-18 pt-14.5 max-[700px]:pb-13 max-[700px]:pt-10.5" aria-labelledby="mission-title">
+          <div className={`${container} relative grid min-h-113.75 grid-cols-[1.08fr_0.92fr] overflow-hidden rounded-md bg-[#25282d] text-white max-[800px]:grid-cols-1`}>
             <span className="absolute left-6 top-5 z-10 text-[11px] font-medium text-[#8e9a98]" aria-hidden="true">
               02
             </span>
-            <div className="flex flex-col items-start p-[clamp(42px,5vw,66px)] max-[700px]:px-[25px] max-[700px]:py-9">
+            <div className="flex flex-col items-start p-[clamp(42px,5vw,66px)] max-[700px]:px-6.25 max-[700px]:py-9">
               <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#65b7af]">Our mission</span>
-              <h2 id="mission-title" className="mb-5 mt-[22px] max-w-[590px] text-[clamp(31px,3.2vw,44px)] font-normal leading-[1.16] tracking-[-0.04em] max-[700px]:text-[32px]">
+              <h2 id="mission-title" className="mb-5 mt-5.5 max-w-147.5 text-[clamp(31px,3.2vw,44px)] font-normal leading-[1.16] tracking-[-0.04em] max-[700px]:text-[32px]">
                 Learning should feel like discovery, not memorization.
               </h2>
-              <p className="mb-2 max-w-[610px] text-[13px] leading-[1.75] text-[#d0d6d5]">
+              <p className="mb-2 max-w-152.5 text-[13px] leading-[1.75] text-[#d0d6d5]">
                 SmartPathAI turns course material into a web of ideas, giving every learner a patient, personal study partner that makes complex subjects clear, navigable, and genuinely exciting.
               </p>
               <a
                 href="#team"
                 onClick={(event) => scrollToSection(event, 'team')}
-                className="mt-[22px] inline-flex min-h-10 items-center gap-2.5 bg-white px-4 text-xs font-bold text-[#26302f] no-underline transition-colors hover:text-teal-dark"
+                className="mt-5.5 inline-flex min-h-10 items-center gap-2.5 bg-white px-4 text-xs font-bold text-[#26302f] no-underline transition-colors hover:text-teal-dark"
               >
                 Meet the team <ArrowRight size={16} />
               </a>
             </div>
-            <div className="relative flex items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_52%,#1b7972_0,#155e59_28%,#1f4543_62%,#263334_100%)] px-11 py-[60px] max-[800px]:min-h-[360px] max-[700px]:min-h-[320px] max-[700px]:px-[25px] max-[700px]:py-[42px]">
-              <span className="absolute left-1/2 top-[65px] -translate-x-1/2 font-serif text-[110px] leading-none text-white/10" aria-hidden="true">
+            <div className="relative flex items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_52%,#1b7972_0,#155e59_28%,#1f4543_62%,#263334_100%)] px-11 py-15 max-[800px]:min-h-90 max-[700px]:min-h-80 max-[700px]:px-6.25 max-[700px]:py-10.5">
+              <span className="absolute left-1/2 top-16.25 -translate-x-1/2 font-serif text-[110px] leading-none text-white/10" aria-hidden="true">
                 “
               </span>
-              <blockquote className="relative z-10 m-0 max-w-[390px] text-center text-[clamp(24px,2.5vw,34px)] font-normal leading-[1.42] tracking-[-0.025em] text-[#f5f8f7]">
+              <blockquote className="relative z-10 m-0 max-w-97.5 text-center text-[clamp(24px,2.5vw,34px)] font-normal leading-[1.42] tracking-tight text-[#f5f8f7]">
                 The moment something clicks is the moment learning becomes yours.
               </blockquote>
               <div className="absolute inset-0" aria-hidden="true">
                 {missionTwinkles.map((twinkle, index) => (
                   <i
                     key={index}
-                    className="absolute rounded-full bg-[#9fe3dc] opacity-15 shadow-[0_0_10px_rgba(159,227,220,0.85)] [animation:mission-twinkle_var(--twinkle-duration)_ease-in-out_infinite_var(--twinkle-delay)] motion-reduce:animate-none motion-reduce:opacity-65"
+                    className="absolute rounded-full bg-[#9fe3dc] opacity-15 shadow-[0_0_10px_rgba(159,227,220,0.85)] animate-[mission-twinkle_var(--twinkle-duration)_ease-in-out_infinite_var(--twinkle-delay)] motion-reduce:animate-none motion-reduce:opacity-65"
                     style={
                       {
                         left: 'left' in twinkle ? twinkle.left : undefined,
@@ -398,7 +401,7 @@ export default function Home() {
         <TeamRoster />
       </main>
 
-      <footer className={`${container} grid min-h-[86px] grid-cols-3 items-center border-t border-[#cfd9d7] text-[11px] text-muted max-[700px]:grid-cols-1 max-[700px]:gap-2.5 max-[700px]:py-5 max-[700px]:text-center`}>
+      <footer className={`${container} grid min-h-21.5 grid-cols-3 items-center border-t border-[#cfd9d7] text-[11px] text-muted max-[700px]:grid-cols-1 max-[700px]:gap-2.5 max-[700px]:py-5 max-[700px]:text-center`}>
         <span>SmartPathAI</span>
         <a
           className="text-center font-semibold text-teal no-underline hover:underline hover:underline-offset-[3px]"

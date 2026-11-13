@@ -128,7 +128,7 @@ export default function PracticeExamSamples({
   return (
     <>
       <section className={setupSectionClass} aria-label="Upload a sample exam">
-        <label className="grid gap-[7px] text-[11px] font-semibold text-[#3f4d4a]">
+        <label className="grid gap-1.75 text-[11px] font-semibold text-[#3f4d4a]">
           Upload a new sample exam PDF
           <input
             ref={input}
@@ -136,7 +136,7 @@ export default function PracticeExamSamples({
             accept=".pdf,application/pdf"
             disabled={!!working}
             onChange={(e) => chooseFile(e.target.files?.[0])}
-            className="h-auto border border-[#c7d2d0] bg-[#f8faf9] p-[7px] text-[10px] text-[#65736f] disabled:opacity-50 file:mr-2.5 file:h-[30px] file:cursor-pointer file:border file:border-[#b7c8c5] file:bg-white file:px-2.5 file:font-semibold file:text-[#40504d]"
+            className="h-auto border border-[#c7d2d0] bg-[#f8faf9] p-1.75 text-[10px] text-[#65736f] disabled:opacity-50 file:mr-2.5 file:h-7.5 file:cursor-pointer file:border file:border-[#b7c8c5] file:bg-white file:px-2.5 file:font-semibold file:text-[#40504d]"
           />
         </label>
         <div className={setupPagerClass}>
@@ -180,17 +180,17 @@ export default function PracticeExamSamples({
                     name={`sample-pdf-${chatId}`}
                     checked={selected?.id === sample.id}
                     onChange={() => chooseSaved(sample)}
-                    className="m-0 h-[15px] w-[15px] accent-[#147d74]"
+                    className="m-0 h-3.75 w-3.75 accent-teal"
                   />
                   <span className="grid min-w-0 gap-px">
-                    <span className="truncate text-[10px] font-semibold text-[#263330]">{sample.filename}</span>
+                    <span className="truncate text-[10px] font-semibold text-ink">{sample.filename}</span>
                     <span className="text-[8px] text-[#7c8986]">
                       {Math.max(1, Math.round(sample.size_bytes / 1024))} KB · {new Date(sample.created_at).toLocaleString()}
                     </span>
                   </span>
                 </label>
                 <a
-                  className="whitespace-nowrap text-[9px] font-semibold text-[#0f655e]"
+                  className="whitespace-nowrap text-[9px] font-semibold text-teal-dark"
                   href={`${examApi.defaults.baseURL}/samples/${sample.id}/file`}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -229,7 +229,7 @@ export default function PracticeExamSamples({
       <section className={setupSectionClass} aria-label="Generate exam">
         <p className={setupNoteClass}>{selectionLabel}</p>
         {working && (
-          <p role="status" className="m-0 flex items-center gap-2 text-[10px] font-semibold text-[#0f655e]">
+          <p role="status" className="m-0 flex items-center gap-2 text-[10px] font-semibold text-teal-dark">
             <Loader2 size={14} aria-hidden="true" className="animate-spin" />
             {working}
           </p>

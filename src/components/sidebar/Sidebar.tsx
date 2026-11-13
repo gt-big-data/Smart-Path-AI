@@ -19,7 +19,7 @@ interface SidebarProps {
   chats: Chat[];
   currentChatId: string;
   searchQuery: string;
-  searchInputRef: RefObject<HTMLInputElement | null>;
+  searchInputRef: RefObject<HTMLInputElement>;
   expandedFolders: Record<string, boolean>;
   isCreatingFolder: boolean;
   newFolderName: string;
@@ -182,7 +182,7 @@ export default function Sidebar({
       {isCollapsed && (
         <button
           type="button"
-          className="fixed left-[17px] top-[18px] z-[25] grid h-9 w-9 place-items-center rounded-[2px] border border-[#e2dfe5] bg-white text-[#25282d] hover:bg-[#e7f3f1] hover:text-[#0f655e]"
+          className="fixed left-4.25 top-4.5 z-25 grid h-9 w-9 place-items-center rounded-xs border border-[#e2dfe5] bg-white text-[#25282d] hover:bg-teal-pale hover:text-teal-dark"
           onClick={onOpenSidebar}
           aria-label="Open sidebar"
           title="Open sidebar"

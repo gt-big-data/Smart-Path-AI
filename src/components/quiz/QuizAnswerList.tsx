@@ -30,7 +30,7 @@ const LETTER_STATE_CLASS: Record<string, string> = {
 /** Lettered answer cards for multiple choice and true/false questions */
 export default function QuizAnswerList({ choices, selected, correctChoice, result, onSelect }: QuizAnswerListProps) {
   return (
-    <div className="grid gap-[9px]" role="radiogroup" aria-label="Answer choices">
+    <div className="grid gap-2.25" role="radiogroup" aria-label="Answer choices">
       {choices.map((choice, index) => {
         const letter = choice.match(/^([A-D])[).]/)?.[1] ?? String.fromCharCode(65 + index);
         const text = choice.replace(LETTER_PREFIX, '');
@@ -48,10 +48,10 @@ export default function QuizAnswerList({ choices, selected, correctChoice, resul
             aria-checked={picked}
             disabled={!!result}
             onClick={() => onSelect(choice)}
-            className={`grid min-h-[47px] w-full cursor-pointer grid-cols-[25px_minmax(0,1fr)_23px] items-center gap-2.5 border border-[#d8e0de] bg-white px-3 py-[7px] text-left text-[#53615e] [transition:border-color_0.15s_ease,background_0.15s_ease] enabled:hover:border-[#73aaa4] enabled:hover:bg-[#f5faf9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal disabled:cursor-default ${CARD_STATE_CLASS[state]}`}
+            className={`grid min-h-11.75 w-full cursor-pointer grid-cols-[25px_minmax(0,1fr)_23px] items-center gap-2.5 border border-[#d8e0de] bg-white px-3 py-1.75 text-left text-[#53615e] [transition:border-color_0.15s_ease,background_0.15s_ease] enabled:hover:border-[#73aaa4] enabled:hover:bg-[#f5faf9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal disabled:cursor-default ${CARD_STATE_CLASS[state]}`}
           >
             <span
-              className={`grid h-[25px] w-[25px] place-items-center border border-[#c5d0ce] text-[9px] ${LETTER_STATE_CLASS[state]}`}
+              className={`grid h-6.25 w-6.25 place-items-center border border-[#c5d0ce] text-[9px] ${LETTER_STATE_CLASS[state]}`}
               aria-hidden="true"
             >
               {letter}

@@ -52,13 +52,13 @@ export default function WorkspaceHeader({
   };
 
   return (
-    <header className="flex min-h-[70px] items-center justify-between gap-5 border-b border-[#d5dfdd] bg-[#fbfcfc] px-[17px] max-[900px]:min-h-[60px] max-[900px]:gap-2.5 max-[900px]:px-4 group-[.sidebar-is-collapsed]:pl-[65px]">
+    <header className="flex min-h-17.5 items-center justify-between gap-5 border-b border-line bg-paper px-4.25 max-[900px]:min-h-15 max-[900px]:gap-2.5 max-[900px]:px-4 group-[.sidebar-is-collapsed]:pl-16.25">
       <div className="min-w-0">
-        <span className="mb-0.5 block text-[10px] text-[#71807d]">{breadcrumb}</span>
+        <span className="mb-0.5 block text-[10px] text-muted">{breadcrumb}</span>
         {isEditingTitle ? (
           <input
             autoFocus
-            className="box-border h-7 w-[min(100%,460px)] border border-teal bg-white px-1.5 text-xl font-semibold leading-[26px] text-[#263330] shadow-[0_0_0_3px_rgba(20,125,116,0.15)] outline-none"
+            className="box-border h-7 w-[min(100%,460px)] border border-teal bg-white px-1.5 text-xl font-semibold leading-6.5 text-ink shadow-[0_0_0_3px_rgba(20,125,116,0.15)] outline-none"
             aria-label="Chat name"
             value={titleDraft}
             onChange={(e) => setTitleDraft(e.target.value)}
@@ -70,7 +70,7 @@ export default function WorkspaceHeader({
           />
         ) : (
           <h1
-            className={`m-0 truncate text-xl font-semibold leading-7 text-[#263330] max-[900px]:text-lg${onRenameTitle ? ' cursor-text' : ''}`}
+            className={`m-0 truncate text-xl font-semibold leading-7 text-ink max-[900px]:text-lg${onRenameTitle ? ' cursor-text' : ''}`}
             title={onRenameTitle ? `${title} (double-click to rename)` : title}
             onDoubleClick={startTitleEdit}
           >

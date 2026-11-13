@@ -19,8 +19,8 @@ export default function QuizProgress({ total, currentIndex, results }: QuizProgr
   const percent = total ? Math.round((answered / total) * 100) : 0;
 
   return (
-    <div className="mx-auto w-[min(1048px,calc(100%_-_40px))] shrink-0 pt-[22px] pb-[17px] max-[600px]:w-[calc(100%_-_24px)]">
-      <div className="mb-[9px] flex items-center justify-between text-[9px] font-semibold text-[#52625f]">
+    <div className="mx-auto w-[min(1048px,calc(100%-40px))] shrink-0 pt-5.5 pb-4.25 max-[600px]:w-[calc(100%-24px)]">
+      <div className="mb-2.25 flex items-center justify-between text-[9px] font-semibold text-[#52625f]">
         <span>Question {currentIndex + 1} of {total}</span>
         <span>{percent}% complete</span>
       </div>

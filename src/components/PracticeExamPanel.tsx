@@ -308,13 +308,13 @@ export default function PracticeExamPanel({
       className="relative flex min-h-0 w-full flex-auto flex-col bg-[#fafbfb] font-brand text-[11px] text-[#263331] antialiased [font-synthesis:none]"
       aria-labelledby={`exam-title-${chatId}`}
     >
-      <header className="grid min-h-[58px] shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3.5 border-b border-[#d8e0de] bg-paper px-[18px] max-[600px]:grid-cols-[auto_1fr] max-[600px]:px-3">
+      <header className="grid min-h-14.5 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3.5 border-b border-[#d8e0de] bg-paper px-4.5 max-[600px]:grid-cols-[auto_1fr] max-[600px]:px-3">
         <button type="button" className={`${examButtonClass()} ${BACK_BUTTON}`} disabled={!!busy} onClick={close}>
           <ArrowLeft size={14} aria-hidden="true" />
           Back to chat
         </button>
         <div className="flex min-w-0 flex-col items-center gap-0.5 text-center">
-          <span className="text-[8px] font-semibold uppercase tracking-[0.1em] text-[#8d9996]">Practice exam</span>
+          <span className="text-[8px] font-semibold uppercase tracking-widest text-[#8d9996]">Practice exam</span>
           <strong id={`exam-title-${chatId}`} className="max-w-full truncate text-[11px] font-semibold text-[#202a29]" title={title}>
             {exam ? exam.title : title}
           </strong>
@@ -334,7 +334,7 @@ export default function PracticeExamPanel({
       </header>
 
       {exam && (
-        <div className="flex min-h-[34px] shrink-0 flex-wrap items-center justify-center gap-[18px] border-b border-[#e0e6e4] px-[18px] text-[9px] text-[#75827f]">
+        <div className="flex min-h-8.5 shrink-0 flex-wrap items-center justify-center gap-4.5 border-b border-[#e0e6e4] px-4.5 text-[9px] text-[#75827f]">
           <span>{exam.total_points} points</span>
           {exam.exam.time_limit_minutes ? (
             <span>Suggested time: {exam.exam.time_limit_minutes} minutes (not enforced)</span>
@@ -345,7 +345,7 @@ export default function PracticeExamPanel({
         </div>
       )}
 
-      <div className="grid min-h-0 flex-auto content-start gap-[18px] overflow-y-auto px-[clamp(20px,5vw,56px)] pt-7 pb-10 max-[600px]:px-3.5 max-[600px]:pt-[18px] max-[600px]:pb-7">
+      <div className="grid min-h-0 flex-auto content-start gap-4.5 overflow-y-auto px-[clamp(20px,5vw,56px)] pt-7 pb-10 max-[600px]:px-3.5 max-[600px]:pt-4.5 max-[600px]:pb-7">
         {busy && (
           <p role="status" className="m-0 flex items-center gap-2 text-[10px] font-semibold text-teal">
             <Loader2 size={16} aria-hidden="true" className="animate-spin" />
@@ -371,10 +371,10 @@ export default function PracticeExamPanel({
         {!exam ? null : (
           <>
             <div className="grid gap-2">
-              <h3 className="m-0 text-[20px] font-semibold leading-[1.25] tracking-[-0.02em] text-[#202a29]">{exam.title}</h3>
+              <h3 className="m-0 text-[20px] font-semibold leading-tight tracking-[-0.02em] text-[#202a29]">{exam.title}</h3>
               {exam.sample_pdf_id && (
                 <a
-                  className="text-[10px] font-semibold text-[#0f655e]"
+                  className="text-[10px] font-semibold text-teal-dark"
                   href={`${examApi.defaults.baseURL}/samples/${exam.sample_pdf_id}/file`}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -433,7 +433,7 @@ export default function PracticeExamPanel({
                 </div>
               </section>
             ) : (
-              <section className="grid gap-2.5 border border-[#b5d6cf] bg-[#edf7f5] px-[18px] py-4">
+              <section className="grid gap-2.5 border border-[#b5d6cf] bg-[#edf7f5] px-4.5 py-4">
                 <p className="m-0 text-[11px] font-semibold text-[#202a29]">
                   {attempt.status === "submitted"
                     ? `Score: ${attempt.grading?.score} / ${attempt.grading?.total}`
@@ -480,11 +480,11 @@ export default function PracticeExamPanel({
                   <article key={q.id} className={QUESTION_CARD}>
                     <span className="text-[9px] font-bold uppercase tracking-[0.11em] text-teal">Question {q.label}</span>
                     {q.error && (
-                      <p role="status" className="m-0 border border-[#e6cf8f] bg-[#fdf6e3] px-3 py-2.5 text-[10px] leading-[1.5] text-[#8a5a00]">
+                      <p role="status" className="m-0 border border-[#e6cf8f] bg-[#fdf6e3] px-3 py-2.5 text-[10px] leading-normal text-[#8a5a00]">
                         <strong>Question unavailable for scoring.</strong> {q.error} Excluded from the score total.
                       </p>
                     )}
-                    <p className="m-0 whitespace-pre-wrap text-[13px] font-medium leading-[1.5] text-[#202a29]">
+                    <p className="m-0 whitespace-pre-wrap text-[13px] font-medium leading-normal text-[#202a29]">
                       <MathText>{q.stem}</MathText>
                     </p>
                     {q.parts.map((p, pi) => {
@@ -501,7 +501,7 @@ export default function PracticeExamPanel({
                             </h6>
                           )}
                           <fieldset disabled={!editable || !!q.error} className="group m-0 grid min-w-0 gap-2.5 border-0 p-0">
-                            <legend className="mb-2 p-0 text-[11px] font-medium leading-[1.5] whitespace-pre-wrap text-[#263331]">
+                            <legend className="mb-2 p-0 text-[11px] font-medium leading-normal whitespace-pre-wrap text-[#263331]">
                               {p.label} <MathText>{p.prompt}</MathText>{" "}
                               <span className="text-[9px] font-normal text-[#687572]">
                                 ({p.points} points{q.error ? "; excluded" : ""})
@@ -597,7 +597,7 @@ export default function PracticeExamPanel({
             ))}
 
             {attempt && attempt.status !== "submitted" && (
-              <footer className="flex flex-wrap items-center gap-3 border-t border-[#d8e0de] pt-[18px] text-[10px]">
+              <footer className="flex flex-wrap items-center gap-3 border-t border-[#d8e0de] pt-4.5 text-[10px]">
                 <span className="mr-auto text-[#687572]">
                   {answeredCount} / {parts.length} parts answered
                 </span>
@@ -616,7 +616,7 @@ export default function PracticeExamPanel({
       </div>
 
       {pending && (
-        <div className="absolute inset-0 z-30 grid place-items-center bg-[rgba(30,37,36,0.5)] p-[18px]">
+        <div className="absolute inset-0 z-30 grid place-items-center bg-[rgba(30,37,36,0.5)] p-4.5">
           <div
             role="alertdialog"
             aria-modal="true"
@@ -625,7 +625,7 @@ export default function PracticeExamPanel({
             className="grid w-[min(380px,100%)] box-border gap-3 border border-[#c4cfcd] bg-white p-6"
           >
             <span
-              className={`grid h-[38px] w-[38px] place-items-center ${
+              className={`grid h-9.5 w-9.5 place-items-center ${
                 pending.tone === "warning" ? "bg-[#fbe8e9] text-[#c4474d]" : "bg-[#edf7f5] text-teal"
               }`}
             >

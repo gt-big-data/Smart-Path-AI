@@ -74,7 +74,7 @@ export default function GraphPanel({
       <div className={panelLabel}>
         <span>Knowledge map</span>
         {hasGraph && (
-          <div className="font-medium normal-case tracking-normal text-[#8b9694]">
+          <div className="font-medium normal-case tracking-normal text-faint">
             <span>{nodesCount} {nodesCount === 1 ? 'node' : 'nodes'}</span>
             <span> · </span>
             <span>{relsCount} {relsCount === 1 ? 'link' : 'links'}</span>
@@ -82,7 +82,7 @@ export default function GraphPanel({
         )}
       </div>
 
-      <div className="relative min-h-0 flex-1 overflow-hidden bg-[#f7f9f8] bg-[radial-gradient(#ccd7d5_1px,transparent_1px)] bg-[length:19px_19px]">
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-[#f7f9f8] bg-[radial-gradient(#ccd7d5_1px,transparent_1px)] bg-size-[19px_19px]">
         {isProcessingFile ? (
           <div className={uploadOverlay}>
             <GraphLoader
@@ -113,7 +113,7 @@ export default function GraphPanel({
       <div className={fileStripBar}>
         <Icon name="file" size={16} />
         {hasGraph && latestSourceFile ? (
-          <div className="flex min-w-0 flex-1 flex-row items-center gap-[5px]">
+          <div className="flex min-w-0 flex-1 flex-row items-center gap-1.25">
             <span className="flex-none whitespace-nowrap">Document graph generated -</span>
             <SourceChip file={latestSourceFile} href={sourceFileUrl} />
           </div>
@@ -126,7 +126,7 @@ export default function GraphPanel({
             <strong className="flex-none whitespace-nowrap text-[10px] font-bold uppercase tracking-[0.04em]">
               {sourceFiles.length} source {sourceFiles.length === 1 ? 'file' : 'files'}
             </strong>
-            <div className="flex min-w-0 flex-1 flex-row items-center gap-[5px]">
+            <div className="flex min-w-0 flex-1 flex-row items-center gap-1.25">
               {sourceFiles.slice(0, 3).map((file, idx) => (
                 <SourceChip
                   key={`${file}-${idx}`}

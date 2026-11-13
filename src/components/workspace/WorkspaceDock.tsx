@@ -30,8 +30,8 @@ export default function WorkspaceDock({ children, modelKey = "workspace", tabs =
         global: {
           tabEnableClose: false,
           tabSetEnableMaximize: true,
-          splitterSize: 5,
-          splitterExtra: 4,
+          // splitterSize: 5,
+          // splitterExtra: 4,
         },
         borders: [],
         layout: {

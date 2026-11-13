@@ -1,4 +1,3 @@
-import React from 'react';
 import Icon from '../common/Icon';
 import { modalCardClass, modalFieldClass, modalSelectClass, modalTextClass, modalTitleClass } from './modalClasses';
 

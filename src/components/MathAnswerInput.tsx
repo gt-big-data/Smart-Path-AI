@@ -70,7 +70,7 @@ function EquationEditor({ initialValue, label, onChange }: {
         }}>More symbols</button>
       </div>
       <div ref={host} />
-      <div ref={keyboard} className="relative h-[320px] empty:hidden" />
+      <div ref={keyboard} className="relative h-80 empty:hidden" />
       <p className="text-xs text-slate-500">Equation edits save automatically. Use arrow keys to move between slots.</p>
     </div>
   );

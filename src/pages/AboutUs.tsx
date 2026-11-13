@@ -3,6 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { Brain, ChevronLeft, Linkedin } from 'lucide-react';
 import Navigation from '../components/Navigation';
 
+// THIS FILE IS DEPRECATED
+// Its for the now deprecated /about endpoint
+// Instead, we display team information on the landing page
+
+
 export interface TeamMember {
   name: string;
   role: string;
@@ -220,13 +225,13 @@ function Avatar({ member, size = 'md' }: { member: TeamMember; size?: 'lg' | 'md
       <img
         src={member.photo}
         alt={member.name}
-        className={`${dims} rounded-full object-cover shadow-lg flex-shrink-0`} style={{ objectPosition: '50% 20%' }}
+        className={`${dims} rounded-full object-cover shadow-lg shrink-0`} style={{ objectPosition: '50% 20%' }}
       />
     );
   }
   return (
     <div
-      className={`${dims} rounded-full bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center text-white font-bold flex-shrink-0 shadow-lg`}
+      className={`${dims} rounded-full bg-linear-to-br from-teal-400 to-teal-600 flex items-center justify-center text-white font-bold shrink-0 shadow-lg`}
     >
       {initials}
     </div>
@@ -237,7 +242,7 @@ const AboutUs: React.FC = () => {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
+    <div className="min-h-screen bg-linear-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
       <Navigation />
 
       <main className="container mx-auto px-6 py-12">
@@ -360,7 +365,7 @@ const AboutUs: React.FC = () => {
                         </a>
                       )}
                       {/* Divider */}
-                      <div className="mt-8 w-16 h-0.5 bg-gradient-to-r from-transparent via-teal-300 to-transparent" />
+                      <div className="mt-8 w-16 h-0.5 bg-linear-to-r from-transparent via-teal-300 to-transparent" />
                     </div>
                   )}
 
@@ -372,7 +377,7 @@ const AboutUs: React.FC = () => {
                         <div key={st.team}>
                           {/* Sub-team label */}
                           <div className="flex items-center gap-3 mb-8">
-                            <div className={`w-1 h-8 rounded-full bg-gradient-to-b ${st.colors.gradient}`} />
+                            <div className={`w-1 h-8 rounded-full bg-linear-to-b ${st.colors.gradient}`} />
                             <div>
                               <h3 className="text-xl font-bold text-slate-700">{st.team}</h3>
                               <p className="text-xs text-slate-400 uppercase tracking-wider">
@@ -417,7 +422,7 @@ const AboutUs: React.FC = () => {
                   </div>
 
                   {/* Call-to-action */}
-                  <div className="mt-16 p-6 bg-gradient-to-r from-teal-50 to-blue-50 rounded-xl border border-teal-100 text-center">
+                  <div className="mt-16 p-6 bg-linear-to-r from-teal-50 to-blue-50 rounded-xl border border-teal-100 text-center">
                     <p className="text-slate-700 font-medium mb-1">Interested in joining the team?</p>
                     <p className="text-sm text-slate-500">
                       SmartPathAI is an ongoing project. Reach out to the team lead to learn how you

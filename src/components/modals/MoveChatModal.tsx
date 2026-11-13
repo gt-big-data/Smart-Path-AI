@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import Icon from '../common/Icon';
 import { Folder } from '../../types/chat';
 import { modalCardClass, modalFieldClass, modalSelectClass, modalTextClass, modalTitleClass } from './modalClasses';

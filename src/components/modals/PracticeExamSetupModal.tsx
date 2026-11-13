@@ -8,7 +8,6 @@ import {
   setupEmptyClass,
   setupErrorClass,
   setupHeaderClass,
-  setupNoteClass,
   setupPagerClass,
   setupSectionClass,
 } from "../practiceExamClasses";
@@ -88,7 +87,7 @@ export default function PracticeExamSetupModal({ chatId, onClose, onOpenExam }: 
       }}
     >
       <div
-        className="modal-card max-h-[min(820px,90vh)] w-[min(650px,100%)] overflow-y-auto p-[29px] max-[600px]:px-[18px] max-[600px]:py-[23px]"
+        className="modal-card max-h-[min(820px,90vh)] w-[min(650px,100%)] overflow-y-auto p-7.25 max-[600px]:px-4.5 max-[600px]:py-5.75"
         role="dialog"
         aria-modal="true"
         aria-labelledby="exam-setup-title"
@@ -107,10 +106,10 @@ export default function PracticeExamSetupModal({ chatId, onClose, onOpenExam }: 
           <BookOpen size={19} aria-hidden="true" />
         </span>
         <span className="modal-kicker -mt-1.5 block">EXAM SETUP</span>
-        <h2 id="exam-setup-title" className="mb-2 mt-[5px] font-heading text-[22px] tracking-[-0.025em] text-[#263330]">
+        <h2 id="exam-setup-title" className="mb-2 mt-1.25 font-heading text-[22px] tracking-tight text-ink">
           Generate from a sample exam
         </h2>
-        <p className="mb-[21px] max-w-[570px] text-[13px] leading-[1.6] text-[#65736f]">
+        <p className="mb-5.25 max-w-142.5 text-[13px] leading-[1.6] text-[#65736f]">
           Upload a sample exam PDF up to 10 MB, or choose one already saved in this chat. SmartPath will use its
           structure with your course material to generate a new practice exam.
         </p>
@@ -130,7 +129,7 @@ export default function PracticeExamSetupModal({ chatId, onClose, onOpenExam }: 
 
         <section className={setupSectionClass} aria-label="Saved exams">
           <header className={setupHeaderClass}>
-            <div className="grid gap-[3px]">
+            <div className="grid gap-0.75">
               <strong className="text-[11px] text-[#34423f]">Saved exams ({total})</strong>
               <span className="text-[9px] text-[#83908d]">Generated exams remain available in this chat.</span>
             </div>
@@ -150,14 +149,14 @@ export default function PracticeExamSetupModal({ chatId, onClose, onOpenExam }: 
               {exams.map((item) => (
                 <div key={item.id} className={savedExamRowClass}>
                   <span className="grid min-w-0 flex-1 gap-0.5">
-                    <strong className="truncate text-[10px] text-[#263330]">{item.title}</strong>
+                    <strong className="truncate text-[10px] text-ink">{item.title}</strong>
                     <small className="text-[8px] text-[#7c8986]">
                       {item.total_points} points · {new Date(item.created_at).toLocaleString()}
                     </small>
                   </span>
                   <button
                     type="button"
-                    className="h-[29px] cursor-pointer border border-teal bg-white px-[9px] text-[9px] font-semibold text-[#0f655e] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="h-7.25 cursor-pointer border border-teal bg-white px-2.25 text-[9px] font-semibold text-teal-dark disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={generating}
                     onClick={() => onOpenExam(item.id)}
                   >
@@ -191,7 +190,7 @@ export default function PracticeExamSetupModal({ chatId, onClose, onOpenExam }: 
           )}
         </section>
 
-        <div className="modal-actions border-t border-[#d9e2e0] pt-[17px]">
+        <div className="modal-actions border-t border-[#d9e2e0] pt-4.25">
           <button type="button" className="modal-button modal-button-ghost" disabled={generating} onClick={close}>
             Cancel
           </button>

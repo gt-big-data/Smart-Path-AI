@@ -20,7 +20,7 @@ export default function QuizReview({ questions, results, error, onDone }: QuizRe
 
       <section className={quizCard}>
         <span className={quizQuestionNumber}>Quiz review</span>
-        <h2 className="mt-[9px] mb-1.5 font-heading text-xl font-semibold text-[#202a29]">Quiz complete</h2>
+        <h2 className="mt-2.25 mb-1.5 font-heading text-xl font-semibold text-[#202a29]">Quiz complete</h2>
         <p className="m-0 text-[11px] leading-[1.55] text-[#687572]">
           {correctCount} of {questions.length} correct. Review your answers and explanations below.
         </p>
@@ -29,14 +29,14 @@ export default function QuizReview({ questions, results, error, onDone }: QuizRe
       {questions.map((item, itemIndex) => {
         const result = results[itemIndex];
         return (
-          <section key={itemIndex} className="border border-[#ccd8d5] bg-paper px-5 py-[18px]">
-            <div className="flex items-center gap-[7px] text-[9px] font-bold uppercase tracking-[0.08em] text-[#52625f]">
+          <section key={itemIndex} className="border border-[#ccd8d5] bg-paper px-5 py-4.5">
+            <div className="flex items-center gap-1.75 text-[9px] font-bold uppercase tracking-[0.08em] text-[#52625f]">
               {result?.isCorrect
                 ? <Check size={13} className="text-teal" aria-label="Correct" />
                 : <X size={13} className="text-[#c4474d]" aria-label="Incorrect" />}
               Question {itemIndex + 1}
             </div>
-            <h3 className="mt-2 mb-3 text-xs font-medium leading-[1.5] whitespace-pre-wrap text-[#202a29]">
+            <h3 className="mt-2 mb-3 text-xs font-medium leading-normal whitespace-pre-wrap text-[#202a29]">
               {splitQuestion(item).prompt}
             </h3>
             <p className="mt-1.5 text-[10px] leading-[1.55] text-[#687572]">

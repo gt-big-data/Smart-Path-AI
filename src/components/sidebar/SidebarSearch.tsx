@@ -1,9 +1,9 @@
-import React, { RefObject } from 'react';
+import { RefObject } from 'react';
 import Icon from '../common/Icon';
 
 interface SidebarSearchProps {
   searchQuery: string;
-  inputRef?: RefObject<HTMLInputElement | null>;
+  inputRef?: RefObject<HTMLInputElement>;
   onChange: (value: string) => void;
   onClear: () => void;
 }

@@ -15,7 +15,7 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
+      <div className="flex h-screen items-center justify-center bg-linear-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
         <div className="relative">
           <div className="h-12 w-12 rounded-full border-4 border-teal-100" />
           <div className="absolute inset-0 h-12 w-12 animate-spin rounded-full border-4 border-transparent border-t-teal-500" />

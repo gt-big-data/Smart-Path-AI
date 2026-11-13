@@ -1,4 +1,3 @@
-import React from 'react';
 import { Brain, LogOut } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -59,7 +58,7 @@ export default function Navigation() {
           {isAuthenticated ? (
             <button
               onClick={handleLogout}
-              className="ml-2 px-5 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all shadow-md shadow-teal-500/20 inline-flex items-center gap-2 text-sm font-medium duration-200 hover:-translate-y-px active:translate-y-0"
+              className="ml-2 px-5 py-2 bg-linear-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all shadow-md shadow-teal-500/20 inline-flex items-center gap-2 text-sm font-medium duration-200 hover:-translate-y-px active:translate-y-0"
             >
               Logout <LogOut className="h-4 w-4" />
             </button>
@@ -73,7 +72,7 @@ export default function Navigation() {
               </Link>
               <Link
                 to="/signup"
-                className="px-5 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all shadow-md shadow-teal-500/20 text-sm font-medium duration-200 hover:-translate-y-px active:translate-y-0"
+                className="px-5 py-2 bg-linear-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all shadow-md shadow-teal-500/20 text-sm font-medium duration-200 hover:-translate-y-px active:translate-y-0"
               >
                 Sign Up
               </Link>

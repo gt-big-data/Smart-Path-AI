@@ -184,10 +184,10 @@ export default function Quiz({ session, onClose, onAskAssistant }: QuizProps) {
 
   return (
     <main className={QUIZ_PAGE}>
-      <header className="grid min-h-[50px] shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3.5 border-b border-[#d6e0de] bg-paper px-[18px] max-[600px]:grid-cols-[auto_1fr] max-[600px]:px-3">
+      <header className="grid min-h-12.5 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3.5 border-b border-[#d6e0de] bg-paper px-4.5 max-[600px]:grid-cols-[auto_1fr] max-[600px]:px-3">
         <button
           type="button"
-          className="inline-flex cursor-pointer items-center justify-self-start gap-1.5 border-0 bg-transparent py-[5px] text-[10px] font-semibold text-teal hover:text-teal-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
+          className="inline-flex cursor-pointer items-center justify-self-start gap-1.5 border-0 bg-transparent py-1.25 text-[10px] font-semibold text-teal hover:text-teal-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
           onClick={onClose}
         >
           <ArrowLeft size={14} aria-hidden="true" />
@@ -215,7 +215,7 @@ export default function Quiz({ session, onClose, onAskAssistant }: QuizProps) {
           <div className={quizStage}>
             <section className={quizCard} aria-label={`Question ${index + 1}`}>
               <span className={quizQuestionNumber}>Question {index + 1}</span>
-              <h2 className="mt-[11px] mb-[22px] max-w-[720px] text-[length:clamp(16px,2vw,20px)] font-medium leading-[1.48] whitespace-pre-wrap text-[#202a29]">
+              <h2 className="mt-2.75 mb-5.5 max-w-180 text-[clamp(16px,2vw,20px)] font-medium leading-[1.48] whitespace-pre-wrap text-[#202a29]">
                 {prompt}
               </h2>
 
@@ -229,7 +229,7 @@ export default function Quiz({ session, onClose, onAskAssistant }: QuizProps) {
                 />
               ) : (
                 <textarea
-                  className="box-border min-h-[120px] w-full resize-y border border-[#d8e0de] bg-white px-3.5 py-3 text-[11px] leading-[1.55] text-[#263331] outline-none focus:border-[#73aaa4] focus:shadow-[0_0_0_2px_rgba(20,125,116,0.15)] disabled:bg-[#f5f7f6]"
+                  className="box-border min-h-30 w-full resize-y border border-[#d8e0de] bg-white px-3.5 py-3 text-[11px] leading-[1.55] text-[#263331] outline-none focus:border-[#73aaa4] focus:shadow-[0_0_0_2px_rgba(20,125,116,0.15)] disabled:bg-[#f5f7f6]"
                   value={result?.answer || draft}
                   onChange={event => setDraft(event.target.value)}
                   disabled={!!result}
@@ -242,11 +242,11 @@ export default function Quiz({ session, onClose, onAskAssistant }: QuizProps) {
               {result && (
                 <div
                   role="status"
-                  className={`mt-5 border p-[15px] ${result.isCorrect
+                  className={`mt-5 border p-3.75 ${result.isCorrect
                     ? 'border-[#a9d9d2] bg-[#edf8f6] text-[#295e58]'
                     : 'border-[#e1b0b3] bg-[#fdf1f1] text-[#7f3a3e]'}`}
                 >
-                  <p className="mt-2 flex items-center gap-[7px] text-[10px] leading-[1.55] font-semibold">
+                  <p className="mt-2 flex items-center gap-1.75 text-[10px] leading-[1.55] font-semibold">
                     {result.isCorrect ? <Check size={15} aria-hidden="true" /> : <X size={15} aria-hidden="true" />}
                     {result.isCorrect ? 'Correct' : result.skipped ? 'Skipped' : 'Not quite'}
                   </p>

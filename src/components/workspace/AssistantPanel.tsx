@@ -12,8 +12,8 @@ interface AssistantPanelProps {
   progressMessage: string;
   selectedFile: File | null;
   focusedConcept: string | null;
-  fileInputRef: RefObject<HTMLInputElement | null>;
-  messagesEndRef: RefObject<HTMLDivElement | null>;
+  fileInputRef: RefObject<HTMLInputElement>;
+  messagesEndRef: RefObject<HTMLDivElement>;
   resumeQuiz?: { answered: number; total: number } | null;
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
@@ -84,15 +84,15 @@ export default function AssistantPanel({
       </div>
 
       <div
-        className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto bg-[#f8faf9] px-[23px] py-[18px] transition-opacity ${
+        className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto bg-[#f8faf9] px-5.75 py-4.5 transition-opacity ${
           isProcessingFile ? 'opacity-[0.72]' : ''
         }`}
       >
         {focusedConcept && (
-          <div className="flex items-center gap-1.5 self-center rounded-full border border-[#d5e4e1] bg-[#eef5f4] px-2.5 py-1.5 text-[11px] text-[#5d6e6a]">
+          <div className="flex items-center gap-1.5 self-center rounded-full border border-[#d5e4e1] bg-teal-hover px-2.5 py-1.5 text-[11px] text-[#5d6e6a]">
             <Icon name="graph" size={14} />
             <span>
-              Focused on: <strong className="font-bold text-[#173e3a]">{focusedConcept}</strong>
+              Focused on: <strong className="font-bold text-ink-strong">{focusedConcept}</strong>
             </span>
             <button
               type="button"
@@ -118,7 +118,7 @@ export default function AssistantPanel({
                 <p className="m-0 whitespace-pre-wrap">{message.content}</p>
                 {message.file && (
                   <a
-                    className="mt-2 flex items-center gap-1.5 text-xs underline [color:inherit]"
+                    className="mt-2 flex items-center gap-1.5 text-xs underline text-inherit"
                     href={message.file.url}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -127,7 +127,7 @@ export default function AssistantPanel({
                     <span>{message.file.name}</span>
                   </a>
                 )}
-                <time className={`${timeBase} ${isUser ? 'text-right text-white/75' : 'text-[#8b9694]'}`}>
+                <time className={`${timeBase} ${isUser ? 'text-right text-white/75' : 'text-faint'}`}>
                   {formatTime(message.timestamp)}
                 </time>
                 {!isUser && message.tone !== 'error' && message.id === lastBotId && !isTyping && (
@@ -159,12 +159,12 @@ export default function AssistantPanel({
               <Icon name="sparkles" size={15} />
             </span>
             <div
-              className={`${bubbleBot} flex min-h-[18px] items-center gap-1`}
+              className={`${bubbleBot} flex min-h-4.5 items-center gap-1`}
               aria-label="Assistant is typing"
             >
-              <i className="h-1.5 w-1.5 rounded-full bg-[#8b9694] animate-typing-bounce" />
-              <i className="h-1.5 w-1.5 rounded-full bg-[#8b9694] animate-typing-bounce [animation-delay:0.15s]" />
-              <i className="h-1.5 w-1.5 rounded-full bg-[#8b9694] animate-typing-bounce [animation-delay:0.3s]" />
+              <i className="h-1.5 w-1.5 rounded-full bg-faint animate-typing-bounce" />
+              <i className="h-1.5 w-1.5 rounded-full bg-faint animate-typing-bounce [animation-delay:0.15s]" />
+              <i className="h-1.5 w-1.5 rounded-full bg-faint animate-typing-bounce [animation-delay:0.3s]" />
             </div>
           </div>
         )}
@@ -172,21 +172,21 @@ export default function AssistantPanel({
       </div>
 
       {resumeQuiz && (
-        <div className="mx-[18px] flex min-h-[64px] flex-none items-center gap-2.5 rounded-t-[26px] border border-b-0 border-[#cbdad7] bg-[#eef5f4] px-3 py-2">
+        <div className="mx-4.5 flex min-h-16 flex-none items-center gap-2.5 rounded-t-[26px] border border-b-0 border-[#cbdad7] bg-teal-hover px-3 py-2">
           <div className="mr-auto flex items-center gap-2">
-            <span className="grid h-[30px] w-[30px] place-items-center rounded-[2px] bg-teal text-white">
+            <span className="grid h-7.5 w-7.5 place-items-center rounded-xs bg-teal text-white">
               <Icon name="book" size={15} />
             </span>
             <div className="flex flex-col">
-              <strong className="text-xs font-bold text-[#173e3a]">Quiz in progress</strong>
-              <small className="text-[10px] text-[#71807d]">
+              <strong className="text-xs font-bold text-ink-strong">Quiz in progress</strong>
+              <small className="text-[10px] text-muted">
                 {resumeQuiz.answered} of {resumeQuiz.total} answered
               </small>
             </div>
           </div>
           <button
             type="button"
-            className="h-[34px] rounded-[2px] border border-teal bg-teal px-[9px] text-[11px] font-semibold text-white"
+            className="h-8.5 rounded-xs border border-teal bg-teal px-2.25 text-[11px] font-semibold text-white"
             onClick={onResumeQuiz}
           >
             Resume quiz
@@ -194,7 +194,7 @@ export default function AssistantPanel({
         </div>
       )}
 
-      <form className="mx-[18px] mb-[17px] rounded-[3px] border border-[#d5dfdd] bg-white px-2.5 pb-2 pt-[9px]" onSubmit={onSubmit}>
+      <form className="mx-4.5 mb-4.25 rounded-[3px] border border-line bg-white px-2.5 pb-2 pt-2.25" onSubmit={onSubmit}>
         {isProcessingFile && (
           <div className="mb-2 mt-1 flex flex-col gap-1.5 text-xs text-[#245f59]">
             <div className="flex items-center justify-between gap-2">
@@ -207,12 +207,12 @@ export default function AssistantPanel({
           </div>
         )}
         {selectedFile && !isProcessingFile && (
-          <div className="mb-2 mt-1 flex items-center justify-between gap-2 border border-[#d5dfdd] bg-[#f7f9f8] px-2 py-1.5 text-xs text-[#245f59]">
+          <div className="mb-2 mt-1 flex items-center justify-between gap-2 border border-line bg-[#f7f9f8] px-2 py-1.5 text-xs text-[#245f59]">
             {fileIcon(selectedFile.type)}
-            <span className="ml-[7px] text-[10px] text-[#8b9694]">{selectedFile.name}</span>
+            <span className="ml-1.75 text-[10px] text-faint">{selectedFile.name}</span>
             <button
               type="button"
-              className="border-0 bg-transparent text-[#71807d]"
+              className="border-0 bg-transparent text-muted"
               aria-label="Remove file"
               onClick={onRemoveFile}
             >
@@ -221,7 +221,7 @@ export default function AssistantPanel({
           </div>
         )}
         <textarea
-          className="block w-full resize-none border-0 bg-transparent px-[3px] py-0.5 text-[13px] text-[#263330] outline-none placeholder:text-[#9aa8a5]"
+          className="block w-full resize-none border-0 bg-transparent px-0.75 py-0.5 text-[13px] text-ink outline-none placeholder:text-[#9aa8a5]"
           aria-label="Message"
           rows={2}
           value={input}
@@ -237,7 +237,7 @@ export default function AssistantPanel({
         <div className="mt-1 flex items-center">
           <button
             type="button"
-            className="grid place-items-center rounded-[4px] border-0 bg-transparent p-1 text-[#71807d] transition-colors hover:bg-[#dde8e5] hover:text-teal disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[#71807d]"
+            className="grid place-items-center rounded-sm border-0 bg-transparent p-1 text-muted transition-colors hover:bg-[#dde8e5] hover:text-teal disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted"
             aria-label="Attach file"
             disabled={isProcessingFile}
             onClick={onAttach}
@@ -251,10 +251,10 @@ export default function AssistantPanel({
             accept=".pdf,.docx,.txt"
             onChange={onFileSelect}
           />
-          <span className="ml-[7px] text-[10px] text-[#8b9694]">SmartPath can make mistakes. Check important info.</span>
+          <span className="ml-1.75 text-[10px] text-faint">SmartPath can make mistakes. Check important info.</span>
           <button
             type="submit"
-            className="ml-auto grid h-[29px] w-[29px] place-items-center rounded-[3px] border-0 bg-teal text-white disabled:opacity-45"
+            className="ml-auto grid h-7.25 w-7.25 place-items-center rounded-[3px] border-0 bg-teal text-white disabled:opacity-45"
             aria-label="Send message"
             disabled={isTyping || (!input.trim() && !selectedFile)}
           >
