@@ -651,8 +651,8 @@ body:has(.smartpath-workspace) {
 	stroke-width: 1.7;
 }
 .sidebar-navigation {
-	min-height: 119px;
-	flex: 0 0 119px;
+	min-height: 85px;
+	flex: 0 0 85px;
 	border-top: 1px solid rgba(255, 255, 255, 0.08);
 	padding: 9px 9px 8px;
 	display: flex;
@@ -699,19 +699,19 @@ body:has(.smartpath-workspace) {
 	font-size: 10px;
 	font-weight: 700;
 }
-.account-footer div:nth-child(2) {
+.account-meta {
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
 }
-.account-footer strong {
+.account-name {
 	font-size: 11px;
 }
-.account-footer span {
+.account-since {
 	color: #858193;
 	font-size: 9px;
 }
-.account-footer button {
+.account-logout {
 	width: 30px;
 	height: 30px;
 	flex: 0 0 30px;
@@ -724,7 +724,7 @@ body:has(.smartpath-workspace) {
 	background: transparent;
 	color: #9bb1ad;
 }
-.account-footer button:hover {
+.account-logout:hover {
 	color: #f1f3f3;
 	background: #303238;
 }

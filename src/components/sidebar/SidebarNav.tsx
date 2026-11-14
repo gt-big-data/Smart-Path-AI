@@ -5,7 +5,6 @@ interface SidebarNavProps {
   isProgressActive: boolean;
   onHome: () => void;
   onProgress: () => void;
-  onSettings: () => void;
 }
 
 export default function SidebarNav({
@@ -13,7 +12,6 @@ export default function SidebarNav({
   isProgressActive,
   onHome,
   onProgress,
-  onSettings,
 }: SidebarNavProps) {
   return (
     <div data-sidebar-navigation className="sidebar-navigation">
@@ -36,15 +34,6 @@ export default function SidebarNav({
       >
         <Icon name="progress" size={17} />
         {!isCollapsed && <span>Progress</span>}
-      </button>
-      <button
-        type="button"
-        onClick={onSettings}
-        title="Settings"
-        aria-label="Settings"
-      >
-        <Icon name="settings" size={17} />
-        {!isCollapsed && <span>Settings</span>}
       </button>
     </div>
   );

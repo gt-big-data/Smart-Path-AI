@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const container = 'mx-auto w-[min(1180px,calc(100%_-_48px))] max-[700px]:w-[calc(100%_-_32px)]';
+const accountPill =
+  "group absolute left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center overflow-hidden whitespace-nowrap rounded-full border border-[#c5dcd8] bg-[#edf7f5] px-3.25 py-1.75 text-sm font-semibold text-[#176860] transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-0.5 hover:border-teal hover:shadow-[0_6px_14px_rgba(20,125,116,0.18)] focus-visible:outline-2 focus-visible:outline-teal max-[700px]:hidden before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-1/2 before:-translate-x-full before:skew-x-[-20deg] before:bg-linear-to-r before:from-transparent before:via-white/80 before:to-transparent before:content-[''] before:transition-transform before:duration-700 before:ease-out hover:before:translate-x-[260%] motion-reduce:transition-none motion-reduce:hover:translate-y-0 motion-reduce:before:hidden";
 const landingButton = 'cursor-pointer border-0 transition-all duration-200 hover:-translate-y-px active:translate-y-0';
 const accountButton = `${landingButton} bg-transparent p-0 text-[13px] font-medium text-[#4f5f5c] hover:text-teal-dark`;
 const accountActionButton = `${landingButton} rounded-[2px] px-[15px] py-[9px] text-[13px] font-medium text-white`;
@@ -288,9 +290,14 @@ export default function Home() {
         <nav className="ml-auto flex items-center gap-6 max-[700px]:gap-3" aria-label="Account navigation">
           {isAuthenticated ? (
             <>
-              <span className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#c5dcd8] bg-[#edf7f5] px-3.25 py-1.75 text-sm font-semibold text-[#176860] max-[700px]:hidden">
-                {userName ? `Hi, ${userName}` : 'Signed in'}
-              </span>
+              <button
+                type="button"
+                className={accountPill}
+                onClick={() => navigate('/profile')}
+                title="Open your profile"
+              >
+                <span className="relative z-10">{userName ? `Hi, ${userName}` : 'Signed in'}</span>
+              </button>
               <button type="button" className={accountButton} onClick={() => navigate('/chat')}>Dashboard</button>
               <button type="button" className={accountButton} onClick={() => navigate('/progress')}>Progress</button>
               <button type="button" className={`${accountActionButton} bg-[#c4474d] hover:bg-[#a9363d]`} onClick={handleLogout}>

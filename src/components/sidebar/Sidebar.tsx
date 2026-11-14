@@ -78,7 +78,7 @@ interface SidebarProps {
   onStartSidebarResize: (e: React.MouseEvent) => void;
   onHome: () => void;
   onProgress: () => void;
-  onSettings: () => void;
+  onOpenProfile: () => void;
   onLogout: () => void;
   isProgressActive?: boolean;
 }
@@ -151,7 +151,7 @@ export default function Sidebar({
   onStartSidebarResize,
   onHome,
   onProgress,
-  onSettings,
+  onOpenProfile,
   onLogout,
   isProgressActive = false,
 }: SidebarProps) {
@@ -346,11 +346,14 @@ export default function Sidebar({
           isProgressActive={isProgressActive}
           onHome={onHome}
           onProgress={onProgress}
-          onSettings={onSettings}
         />
 
         {!isCollapsed && (
-          <SidebarAccount userName={userName} onLogout={onLogout} />
+          <SidebarAccount
+            userName={userName}
+            onOpenProfile={onOpenProfile}
+            onLogout={onLogout}
+          />
         )}
 
         {!isCollapsed && (

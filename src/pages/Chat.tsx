@@ -5,6 +5,7 @@ import { getFolderPath } from '../lib/folderPath';
 import { getSourceFileNames, getSourceFileUrl } from '../lib/sourceFiles';
 import { useAuth } from '../context/AuthContext';
 import Icon from '../components/common/Icon';
+import WorkspaceLoader from '../components/common/WorkspaceLoader';
 import Sidebar from '../components/sidebar/Sidebar';
 import WorkspaceHeader from '../components/workspace/WorkspaceHeader';
 import WorkspaceDock, { type DockTab } from '../components/workspace/WorkspaceDock';
@@ -135,14 +136,7 @@ export default function ChatPage({ view = 'workspace' }: ChatPageProps) {
   };
 
   if (chatsLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-[#fbfaf8]">
-        <div className="text-center space-y-4">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-teal" />
-          <p className="text-slate-500 text-sm">Loading your workspace…</p>
-        </div>
-      </div>
-    );
+    return <WorkspaceLoader />;
   }
 
   return (
@@ -291,7 +285,7 @@ export default function ChatPage({ view = 'workspace' }: ChatPageProps) {
         onHome={() => navigate('/')}
         onProgress={() => navigate('/progress')}
         isProgressActive={view === 'progress'}
-        onSettings={() => navigate('/profile')}
+        onOpenProfile={() => navigate('/profile')}
         onLogout={() => void logout()}
       />
 
