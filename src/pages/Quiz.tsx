@@ -3,6 +3,7 @@ import { ArrowLeft, Bot, Check, ChevronLeft, ChevronRight, X } from 'lucide-reac
 import axios from 'axios';
 import { API_BASE_URL } from '../config/api';
 import { quizKey, readQuiz, type Question, type QuizState, type Result } from '../lib/quizState';
+import { invalidateProgressCache } from '../lib/progressCache';
 import { choiceLetter, displayAnswer, splitQuestion, type RawPair } from '../lib/quizQuestions';
 import QuizProgress from '../components/quiz/QuizProgress';
 import QuizAnswerList from '../components/quiz/QuizAnswerList';
@@ -113,6 +114,7 @@ export default function Quiz({ session, onClose, onAskAssistant }: QuizProps) {
       }
     }
     save({ ...next, completed: true });
+    invalidateProgressCache(chatId);
   };
 
   const retryFinish = async () => {

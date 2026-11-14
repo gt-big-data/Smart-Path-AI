@@ -4,6 +4,7 @@ import axios from 'axios';
 import { API_BASE_URL } from '../config/api';
 import { toneForStoredMessage } from '../lib/chatTone';
 import { generateMessageId } from '../lib/messageId';
+import { invalidateProgressCache } from '../lib/progressCache';
 import type { Chat, Message } from '../types/chat';
 
 export type SetChats = Dispatch<SetStateAction<Chat[]>>;
@@ -213,7 +214,7 @@ export function useChatList({ showErrorToast, flashNewItem }: UseChatListOptions
 
     try {
       await axios.delete(`${API_BASE_URL}/chat/delete/${chatId}`, { withCredentials: true });
-      sessionStorage.removeItem('progressPageCache:v2');
+      invalidateProgressCache(chatId);
     } catch (err) {
       console.error('Error deleting chat:', err);
       showErrorToast('Failed to delete chat.');

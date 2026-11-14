@@ -6,6 +6,7 @@ import './graph/graph-flow.css';
 import PathBar from './graph/PathBar';
 import { buildGraphTree } from '../lib/graphTree';
 import { useCollapse } from '../lib/collapse';
+import { useCollapseDefaults } from '../lib/collapseDefaults';
 import { getPathHighlight } from '../lib/pathHighlight';
 import { buildSearchResultItems } from '../lib/searchResults';
 import { applyGraphStyles, BaseGraph, NodeEdit, PATH_COLOR, resolveConfidenceScores } from '../lib/graphStyles';
@@ -181,6 +182,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   // The search API may return numeric ids; node ids are strings
   const searchHits = useMemo(() => new Set(searchResults.map(String)), [searchResults]);
   const collapse = useCollapse(graphTree, baseGraph?.nodes);
+  const { collapseToCenter, expandAll } = useCollapseDefaults(collapse, graphTree, baseGraph?.nodes.length ?? 0, data?.graph_id);
 
   // Passed to every GraphNode as props: the pencil opens the editor, the badge toggles a branch.
   // Both callbacks are stable, so React Flow keeps the same nodeTypes across renders.
@@ -372,6 +374,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         onZoomIn={() => flowInstance?.zoomIn()}
         onZoomOut={() => flowInstance?.zoomOut()}
         onReset={() => flowInstance?.fitView()}
+        onCollapseToCenter={collapseToCenter}
+        onExpandAll={expandAll}
         minimapLocked={minimapLocked}
         onToggleMinimapLock={() => setMinimapLocked(locked => !locked)}
       />

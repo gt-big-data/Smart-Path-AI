@@ -3,6 +3,7 @@ import axios from 'axios';
 import { API_BASE_URL } from '../config/api';
 import { isPlaceholderGraph } from '../lib/graphPlaceholder';
 import { centerNodeName } from '../lib/graphTree';
+import { PROGRESS_INVALIDATED_EVENT } from '../lib/progressCache';
 import type { Chat, ConceptProgress } from '../types/chat';
 import type { SetChats } from './useChatList';
 
@@ -51,6 +52,16 @@ export function useChatGraph({ currentChatId, currentChat, setChats }: UseChatGr
       setConceptProgress([]);
     }
   }, []);
+
+  // Progress changed elsewhere (quiz finished, chat deleted): reload it if that chat is open
+  useEffect(() => {
+    const handleProgressInvalidated = (event: Event) => {
+      const { chatId } = (event as CustomEvent<{ chatId: string }>).detail;
+      if (chatId === currentChatId) void fetchConceptProgress(chatId);
+    };
+    window.addEventListener(PROGRESS_INVALIDATED_EVENT, handleProgressInvalidated);
+    return () => window.removeEventListener(PROGRESS_INVALIDATED_EVENT, handleProgressInvalidated);
+  }, [currentChatId, fetchConceptProgress]);
 
   // Shows a loaded graph, unless it belongs to a chat that is no longer open
   const showGraph = useCallback(

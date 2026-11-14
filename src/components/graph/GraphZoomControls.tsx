@@ -1,19 +1,23 @@
-import { Crosshair, Lock, Minus, Plus, Unlock } from 'lucide-react';
+import { ChevronsDownUp, ChevronsUpDown, Crosshair, Lock, Minus, Plus, Unlock } from 'lucide-react';
 import { zoomButtonClass, zoomControlsClass } from './graphClasses';
 
 interface GraphZoomControlsProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onReset: () => void;
+  onCollapseToCenter: () => void;
+  onExpandAll: () => void;
   minimapLocked: boolean;
   onToggleMinimapLock: () => void;
 }
 
-/** Stacked zoom, reset, and minimap lock controls, top right of the graph */
+/** Stacked zoom, reset, collapse-all controls, and minimap lock, top right of the graph */
 export default function GraphZoomControls({
   onZoomIn,
   onZoomOut,
   onReset,
+  onCollapseToCenter,
+  onExpandAll,
   minimapLocked,
   onToggleMinimapLock,
 }: GraphZoomControlsProps) {
@@ -27,6 +31,24 @@ export default function GraphZoomControls({
       </button>
       <button type="button" className={zoomButtonClass(false)} aria-label="Reset graph view" onClick={onReset}>
         <Crosshair size={14} />
+      </button>
+      <button
+        type="button"
+        className={zoomButtonClass(false)}
+        aria-label="Collapse to center"
+        title="Collapse to center"
+        onClick={onCollapseToCenter}
+      >
+        <ChevronsDownUp size={14} />
+      </button>
+      <button
+        type="button"
+        className={zoomButtonClass(false)}
+        aria-label="Expand all"
+        title="Expand all"
+        onClick={onExpandAll}
+      >
+        <ChevronsUpDown size={14} />
       </button>
       <button
         type="button"
