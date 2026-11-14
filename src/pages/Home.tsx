@@ -162,20 +162,31 @@ const landingTeams: LandingTeam[] = [
     members: [
       { name: 'Akhil Bejjanki', linkedin: 'https://www.linkedin.com/in/akhil-bejjanki-9b5628366/', photo: '/team/akhil.png' },
       { name: 'Jayan Sirikonda', linkedin: 'https://www.linkedin.com/in/jayan-sirikonda/', photo: '/team/jayan.png' },
-      { name: 'Nidhi Nagumalla' },
+      { name: 'Nidhi Nagumalla', linkedin: 'https://www.linkedin.com/in/nidhi-nagumalla/', photo: '/team/nidhi_nagumalla.png' },
     ],
   },
   {
     name: 'Platform',
-    members: [{ name: 'Amodh Naik', linkedin: 'https://www.linkedin.com/in/amodh-naik/', photo: '/team/amod.jpeg' }],
+    members: [
+      { name: 'Amodh Naik', linkedin: 'https://www.linkedin.com/in/amodh-naik/', photo: '/team/amodh.jpeg' }
+    ],
   },
   {
     name: 'Practice Exam Generation',
-    members: [{ name: 'Aarav Khatri' }, { name: 'Sohil Kadam' }, { name: 'Akshaj Dewan' }],
+    members: [
+      { name: 'Aarav Khatri', linkedin: 'https://www.linkedin.com/in/aarav-khatri-299787101/', photo: '/team/aarav_khatri.png' },
+      { name: 'Sohil Kadam', linkedin: 'https://www.linkedin.com/in/sohil-kadam-629a76292/', photo: '/team/sohil_kadam.jpeg' },
+      { name: 'Akshaj Dewan' }
+    ],
   },
   {
     name: 'Knowledge Graph',
-    members: [{ name: 'Bayan Mardon' }, { name: 'Ronika Medegam' }, { name: 'Ben Doan' }, { name: 'Shreeja Das' }],
+    members: [
+      { name: 'Bayan Mardon' },
+      { name: 'Ronika Medegam' },
+      { name: 'Ben Doan', linkedin: 'https://www.linkedin.com/in/ben--doan/', photo: '/team/ben_doan.png' },
+      { name: 'Shreeja Das' }
+    ],
   },
 ];
 
