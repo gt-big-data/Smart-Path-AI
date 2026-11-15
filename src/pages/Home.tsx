@@ -176,7 +176,7 @@ const landingTeams: LandingTeam[] = [
     members: [
       { name: 'Aarav Khatri', linkedin: 'https://www.linkedin.com/in/aarav-khatri-299787101/', photo: '/team/aarav_khatri.png' },
       { name: 'Sohil Kadam', linkedin: 'https://www.linkedin.com/in/sohil-kadam-629a76292/', photo: '/team/sohil_kadam.jpeg' },
-      { name: 'Akshaj Dewan' }
+      { name: 'Akshaj Dewan', linkedin: 'https://www.linkedin.com/in/akshajdewan/', photo: '/team/akshaj_dewan.png' }
     ],
   },
   {
