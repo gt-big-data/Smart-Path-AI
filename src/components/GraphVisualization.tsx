@@ -54,6 +54,9 @@ const DEFAULT_NODE_SIZE: NodeSize = { width: 200, height: 70 };
 // Rings from the center that the first view zooms to; the rest of the graph is a pan away
 const INITIAL_FOCUS_DEPTH = 2;
 
+// If those rings only fit below this zoom, labels are unreadable: open on the center instead
+const FIRST_VIEW_MIN_ZOOM = 0.2;
+
 // Zoom a clicked search result is shown at, at least, so its label is readable
 const SEARCH_RESULT_MIN_ZOOM = 0.8;
 
@@ -1008,9 +1011,19 @@ useEffect(() => {
   useEffect(() => {
     if (!flowInstance || !baseGraph || fittedBaseRef.current === baseGraph || initialFocusNodes.length === 0) return;
     fittedBaseRef.current = baseGraph;
-    const frame = requestAnimationFrame(() => {
-      flowInstance.fitView({ nodes: initialFocusNodes, padding: 0.2, minZoom: 0.1, maxZoom: 1, duration: 600 });
-    });
+    // fitView does nothing until React Flow has measured the new graph's nodes, so retry for up to ~2s
+    let tries = 120;
+    let frame = 0;
+    const fit = () => {
+      // Fit without animation so the zoom the rings need can be read back right away
+      if (!flowInstance.fitView({ nodes: initialFocusNodes, padding: 0.2, minZoom: 0.1, maxZoom: 1 })) {
+        if (--tries > 0) frame = requestAnimationFrame(fit);
+        return;
+      }
+      // The layout puts the center at the origin
+      if (flowInstance.getZoom() < FIRST_VIEW_MIN_ZOOM) flowInstance.setCenter(0, 0, { zoom: SEARCH_RESULT_MIN_ZOOM });
+    };
+    frame = requestAnimationFrame(fit);
     return () => cancelAnimationFrame(frame);
   }, [flowInstance, baseGraph, initialFocusNodes]);
 
