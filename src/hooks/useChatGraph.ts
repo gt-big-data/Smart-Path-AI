@@ -134,10 +134,12 @@ export function useChatGraph({ currentChatId, currentChat, setChats }: UseChatGr
   useEffect(() => {
     if (switchedChatIdRef.current === currentChatId) return;
     switchedChatIdRef.current = currentChatId;
+    // A focused concept belongs to the graph it came from, so it doesn't carry over to another chat
+    clearFocus();
     setIsChatSwitching(true);
     const timer = window.setTimeout(() => setIsChatSwitching(false), CHAT_SWITCH_LOADER_MS);
     return () => window.clearTimeout(timer);
-  }, [currentChatId]);
+  }, [currentChatId, clearFocus]);
 
   // Load the graph when the open chat (or its graph) changes
   const currentGraphId = currentChat?.graph_id;
