@@ -1,14 +1,14 @@
-import React, { memo, useState } from 'react';
+import React, { CSSProperties, memo, useState } from 'react';
 import { Handle, NodeProps, Position } from 'reactflow';
-import { Pencil } from 'lucide-react';
+import { Pencil, Star } from 'lucide-react';
 import { clamp, NODE_EDIT_POPUP_HEIGHT, NODE_EDIT_POPUP_WIDTH, NodeEditState, VIEWPORT_PADDING } from './nodeEdit';
 import {
   collapseBadgeClass,
-  dotBorderClass,
-  dotsClass,
   faceClass,
   rimEditClass,
   rimPosition,
+  starClass,
+  starsClass,
   stepClass,
   tooltipClass,
 } from './graphClasses';
@@ -19,10 +19,13 @@ interface GraphNodeProps extends NodeProps {
 }
 
 const LABEL_MAX_CHARS = 30;
-const DOT_COUNT = 3;
+const STAR_COUNT = 3;
 
-/** Filled confidence dots (0-3) for a 0-1 score, or null when the concept has no score yet */
-function filledDotsFor(score: number | null | undefined): number | null {
+/** Edges are drawn centre to centre and trimmed to the disc, so the handles sit hidden at the centre */
+const centreHandleStyle: CSSProperties = { top: '50%', left: '50%', opacity: 0, pointerEvents: 'none' };
+
+/** Filled confidence stars (0-3) for a 0-1 score, or null when the concept has no score yet */
+function filledStarsFor(score: number | null | undefined): number | null {
   if (score === null || score === undefined) return null;
   if (score > 0.7) return 3;
   if (score > 0.4) return 2;
@@ -32,12 +35,11 @@ function filledDotsFor(score: number | null | undefined): number | null {
 
 const truncate = (text: string) => (text.length <= LABEL_MAX_CHARS ? text : `${text.substring(0, LABEL_MAX_CHARS)}...`);
 
-/** A graph node: a white disc with its label, confidence dots, path step and edit button */
+/** A graph node: a white disc with its label, confidence stars, path step and edit button */
 export const GraphNode = memo(function GraphNode({ id, data, onEditRequest, onToggleCollapse }: GraphNodeProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   const label: string = data.customLabel || data.label;
-  const filled = filledDotsFor(data.confidenceScore);
-  const dotFill = data.isCenter ? '#ffffff' : '#147d74';
+  const filled = filledStarsFor(data.confidenceScore);
 
   const handleEditClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     // Keep this click from reaching React Flow's onNodeClick (path highlight)
@@ -89,23 +91,29 @@ export const GraphNode = memo(function GraphNode({ id, data, onEditRequest, onTo
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="nodrag nopan" />
+      <Handle type="target" position={Position.Top} isConnectable={false} className="nodrag nopan" style={centreHandleStyle} />
       <div
         className={faceClass(Boolean(data.isCenter))}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
       >
-        <span className={dotsClass} role="img" aria-label={confidenceLabel}>
-          {Array.from({ length: DOT_COUNT }, (_, i) => (
-            <span
-              key={i}
-              className={dotBorderClass(Boolean(data.isCenter), filled === null)}
-              style={{ background: filled !== null && i < filled ? dotFill : 'transparent' }}
-            />
-          ))}
-        </span>
         {data.customLabel || truncate(data.label)}
       </div>
+      <span className={starsClass} role="img" aria-label={confidenceLabel}>
+        {Array.from({ length: STAR_COUNT }, (_, i) => {
+          const isFilled = filled !== null && i < filled;
+          return (
+            <Star
+              key={i}
+              size={9}
+              strokeWidth={1.6}
+              fill={isFilled ? 'currentColor' : 'none'}
+              className={starClass(isFilled)}
+              aria-hidden="true"
+            />
+          );
+        })}
+      </span>
       {/* Rim buttons sit outside the face, which clips to the disc, so they can sit on its border */}
       {data.pathStep != null && (
         <span className={`${stepClass} ${rimPosition.topLeft}`} aria-label={`Path step ${data.pathStep}`}>
@@ -137,7 +145,7 @@ export const GraphNode = memo(function GraphNode({ id, data, onEditRequest, onTo
       {showTooltip && !data.customLabel && data.description && (
         <div className={tooltipClass} role="tooltip">{data.description}</div>
       )}
-      <Handle type="source" position={Position.Bottom} className="nodrag nopan" />
+      <Handle type="source" position={Position.Bottom} isConnectable={false} className="nodrag nopan" style={centreHandleStyle} />
     </>
   );
 });

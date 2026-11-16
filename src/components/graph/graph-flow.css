@@ -37,6 +37,24 @@
 .graph-view .react-flow__node:active {
   cursor: grabbing;
 }
+
+/*
+ * Path edge pulse (GlowEdge.tsx). The dash pattern is 44px blob + 106px gap = 150px, so moving the
+ * pattern by 150px per loop lines up with the next blob. Keep the two in step.
+ */
+.graph-view .graph-edge-pulse {
+  animation: graph-edge-pulse 1.8s linear infinite;
+}
+@keyframes graph-edge-pulse {
+  to {
+    stroke-dashoffset: -150px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-view .graph-edge-pulse {
+    animation: none;
+  }
+}
 .graph-view .react-flow__node:hover {
   filter: drop-shadow(0 0 10px rgba(20, 125, 116, 0.5));
 }

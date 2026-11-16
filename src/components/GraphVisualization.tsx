@@ -9,12 +9,13 @@ import { useCollapse } from '../lib/collapse';
 import { useCollapseDefaults } from '../lib/collapseDefaults';
 import { getPathHighlight } from '../lib/pathHighlight';
 import { buildSearchResultItems } from '../lib/searchResults';
-import { applyGraphStyles, BaseGraph, NodeEdit, PATH_COLOR, resolveConfidenceScores } from '../lib/graphStyles';
+import { applyGraphStyles, BaseGraph, EDGE_WIDTH, NodeEdit, resolveConfidenceScores } from '../lib/graphStyles';
 import { buildBaseGraph, DEFAULT_NODE_SIZE } from '../lib/buildBaseGraph';
 import { getNodeColor } from '../lib/graphPalette';
 import type { GraphData } from '../types/graph';
 import type { ConceptProgress } from '../types/chat';
 import { GraphNode } from './graph/GraphNode';
+import { GlowEdge } from './graph/GlowEdge';
 import { NodeEditState } from './graph/nodeEdit';
 import NodeEditPopup from './graph/NodeEditPopup';
 import GraphSearchBar from './graph/GraphSearchBar';
@@ -38,6 +39,9 @@ const SEARCH_RESULT_MIN_ZOOM = 0.8;
 
 // Opacity of nodes outside the category picked in the legend
 const CATEGORY_DIM_OPACITY = 0.18;
+
+// Stable reference, so React Flow doesn't remount edges on each render
+const edgeTypes = { glow: GlowEdge };
 
 interface GraphVisualizationProps {
   data: GraphData | null;
@@ -114,11 +118,6 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     onFocusChange?.(focusedLabel);
   }, [focusedLabel, onFocusChange]);
 
-  // Category color of the highlighted node: its glow and path edges take it
-  const activePathColor = useMemo(() => {
-    const node = baseGraph?.nodes.find((n) => n.id === activePathTargetId);
-    return typeof node?.data?.color === 'string' ? node.data.color : PATH_COLOR;
-  }, [baseGraph, activePathTargetId]);
 
   // Clicking the highlighted node again clears its path; the center always clears it
   const handleNodeClick = useCallback<NodeMouseHandler>(
@@ -200,7 +199,6 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       searchHits,
       activePath,
       collapse: collapse.layer,
-      pathColor: activePathColor,
     });
     if (!activeCategory) return styled;
     return {
@@ -210,7 +208,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       })),
       edges: styled.edges,
     };
-  }, [baseGraph, confidenceScores, nodeEdits, searchHits, activePath, activePathColor, collapse.layer, activeCategory]);
+  }, [baseGraph, confidenceScores, nodeEdits, searchHits, activePath, collapse.layer, activeCategory]);
 
   // Push the styled graph into React Flow. A new base graph replaces everything; a style-only
   // change keeps what React Flow tracks itself (dragged positions, measured sizes, selection).
@@ -251,7 +249,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
 
     return edges.map(edge => {
       const hovered = edge.id === hoveredEdgeId;
-      if (!hovered || edge.animated) return edge;
+      if (!hovered || edge.data?.onPath) return edge;
 
       const baseEdge = baseEdgesById.get(edge.id);
       return {
@@ -398,14 +396,15 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         onEdgeMouseEnter={(_, edge) => setHoveredEdgeId(edge.id)}
         onEdgeMouseLeave={(_, edge) => setHoveredEdgeId(currentId => (currentId === edge.id ? null : currentId))}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onInit={setFlowInstance}
         minZoom={0.1}
         maxZoom={4}
         defaultViewport={{ x: 0, y: 0, zoom: 0.2 }}
         defaultEdgeOptions={{
-          type: 'smoothstep',
+          type: 'glow',
           animated: false,
-          style: { strokeWidth: 2 },
+          style: { strokeWidth: EDGE_WIDTH },
           labelStyle: { fontSize: 12, fill: '#888' },
         }}
       >

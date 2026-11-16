@@ -2,7 +2,7 @@ import type { Edge, Node } from 'reactflow';
 import { computeNodeSizes } from './nodesizing';
 import type { GraphTree } from './graphTree';
 import { radialLayout, toTopLeft, NodeSize, Point, RadialTreeNode } from './radialLayout';
-import { BaseGraph, ConfidenceKeys, DEFAULT_NODE_BORDER } from './graphStyles';
+import { BaseGraph, ConfidenceKeys, DEFAULT_NODE_BORDER, EDGE_WIDTH } from './graphStyles';
 import { getNodeColor } from './graphPalette';
 import type { GraphData } from '../types/graph';
 
@@ -127,8 +127,9 @@ export function buildBaseGraph(data: GraphData, graphTree: GraphTree): BaseGraph
     source: rel.source,
     target: rel.target,
     label: rel.type.replace(/_/g, ' '),
-    type: 'smoothstep',
-    style: { stroke: '#888', strokeWidth: 2 },
+    // Drawn by GlowEdge (src/components/graph/GlowEdge.tsx): straight, between disc edges
+    type: 'glow',
+    style: { stroke: '#888', strokeWidth: EDGE_WIDTH },
     labelStyle: { fill: '#888', fontSize: 10 },
     animated: false,
     data: { graphEdgeIndex: i },

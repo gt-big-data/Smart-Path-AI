@@ -47,14 +47,12 @@ const FACE_BASE =
 export const faceClass = (isCenter: boolean) =>
   isCenter ? `${FACE_BASE} bg-teal text-[14px] text-white` : `${FACE_BASE} bg-white`;
 
-export const dotsClass = "pointer-events-none absolute left-1/2 top-[9px] flex -translate-x-1/2 gap-[3px]";
+// Sits below the disc, on its bottom edge, so it never covers the label or the rim buttons
+export const starsClass =
+  "pointer-events-none absolute left-1/2 top-full z-[12] mt-[3px] flex -translate-x-1/2 items-center gap-px rounded-full border border-[#d5dfdd] bg-white px-1.5 py-[3px] shadow-[0_1px_3px_rgba(15,23,42,0.12)]";
 
-/** Confidence dot: teal outline, white on the centre disc, dashed grey when the concept has no score */
-export const dotBorderClass = (isCenter: boolean, unscored: boolean) => {
-  const base = "h-1.5 w-1.5 rounded-full border";
-  if (unscored) return `${base} border-dashed border-[#9ebbb7]`;
-  return `${base} ${isCenter ? "border-white" : "border-teal"}`;
-};
+/** Confidence star colour (set as currentColor): gold when filled, grey outline when empty */
+export const starClass = (filled: boolean) => (filled ? "text-[#f2b705]" : "text-[#9ebbb7]");
 
 const RIM_BASE =
   "absolute z-[12] box-border grid h-7 w-7 -translate-x-1/2 -translate-y-1/2 cursor-pointer place-items-center rounded-full border-2 p-0 shadow-[0_2px_6px_rgba(15,23,42,0.18)] pointer-events-auto [transition:all_120ms_ease] hover:scale-[1.08] hover:shadow-[0_3px_10px_rgba(15,23,42,0.28)] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_#ffffff,0_0_0_4px_#0c7f78]";
