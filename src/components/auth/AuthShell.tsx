@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import Icon from '../common/Icon';
+import { Brain } from 'lucide-react';
 import {
   authBrand,
   authBrandMark,
@@ -28,7 +28,7 @@ export default function AuthShell({ eyebrow, title, description, children }: Aut
       <header className={authHeader}>
         <Link to="/" className={authBrand}>
           <span className={authBrandMark}>
-            <Icon name="graph" size={18} />
+            <Brain size={18} />
           </span>
           <span>SmartPath</span>
         </Link>

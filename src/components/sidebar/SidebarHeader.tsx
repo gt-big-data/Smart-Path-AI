@@ -1,4 +1,6 @@
 import Icon from '../common/Icon';
+import { Brain } from 'lucide-react';
+
 
 interface SidebarHeaderProps {
   isCollapsed: boolean;
@@ -20,7 +22,7 @@ export default function SidebarHeader({
           onClick={onHomeClick}
         >
           <span className="brand-mark">
-            <Icon name="graph" size={19} />
+            <Brain size={19} />
           </span>
           <span className="brand-text">SmartPath</span>
         </button>
