@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import ReactFlow, { MiniMap, NodeMouseHandler, NodeProps, ReactFlowInstance, useEdgesState, useNodesState } from 'reactflow';
+import ReactFlow, { MiniMap, NodeDragHandler, NodeMouseHandler, NodeProps, ReactFlowInstance, useEdgesState, useNodesState } from 'reactflow';
 import 'reactflow/dist/style.css';
 import './graph/graph-flow.css';
 import PathBar from './graph/PathBar';
 import { buildGraphTree } from '../lib/graphTree';
 import { useCollapse } from '../lib/collapse';
 import { useCollapseDefaults } from '../lib/collapseDefaults';
+import { loadNodePositions, saveNodePositions } from '../lib/nodePositions';
 import { getPathHighlight } from '../lib/pathHighlight';
 import { buildSearchResultItems } from '../lib/searchResults';
 import { applyGraphStyles, BaseGraph, EDGE_WIDTH, NodeEdit, resolveConfidenceScores } from '../lib/graphStyles';
@@ -213,12 +214,15 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   // Push the styled graph into React Flow. A new base graph replaces everything; a style-only
   // change keeps what React Flow tracks itself (dragged positions, measured sizes, selection).
   const syncedBaseRef = useRef<BaseGraph | null>(null);
+  const graphId = data?.graph_id;
   useEffect(() => {
     if (!styledGraph) return;
 
     if (syncedBaseRef.current !== baseGraph) {
       syncedBaseRef.current = baseGraph;
-      setNodes(styledGraph.nodes);
+      // Nodes the user dragged earlier go back to where they were left
+      const savedPositions = graphId ? loadNodePositions(graphId) : {};
+      setNodes(styledGraph.nodes.map(node => (savedPositions[node.id] ? { ...node, position: savedPositions[node.id] } : node)));
       setEdges(styledGraph.edges);
       return;
     }
@@ -240,7 +244,17 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         return current ? { ...edge, selected: current.selected && !edge.hidden } : edge;
       });
     });
-  }, [baseGraph, styledGraph, setNodes, setEdges]);
+  }, [baseGraph, styledGraph, graphId, setNodes, setEdges]);
+
+  // Remember where the user dropped the dragged nodes, so the layout survives leaving the chat
+  const handleNodeDragStop = useCallback<NodeDragHandler>(
+    (_, __, draggedNodes) => {
+      if (!graphId) return;
+      const positions = Object.fromEntries(draggedNodes.map(node => [node.id, node.position]));
+      saveNodePositions(graphId, positions);
+    },
+    [graphId]
+  );
 
   // Normal relationship labels stay hidden until their edge is hovered. Path edges
   // keep the label and animation supplied by applyGraphStyles.
@@ -392,6 +406,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={handleNodeClick}
+        onNodeDragStop={handleNodeDragStop}
         onPaneClick={clearActivePath}
         onEdgeMouseEnter={(_, edge) => setHoveredEdgeId(edge.id)}
         onEdgeMouseLeave={(_, edge) => setHoveredEdgeId(currentId => (currentId === edge.id ? null : currentId))}
