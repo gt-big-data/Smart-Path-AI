@@ -258,9 +258,11 @@ export default function Home() {
     const timer = window.setInterval(() => {
       const scroller = productScroller.current;
       if (!scroller) return;
-      const next = scroller.scrollLeft + Math.min(738, scroller.clientWidth * 0.82);
+      const maxLeft = scroller.scrollWidth - scroller.clientWidth;
+      const atEnd = scroller.scrollLeft >= maxLeft - 1;
+      const next = Math.min(scroller.scrollLeft + Math.min(738, scroller.clientWidth * 0.82), maxLeft);
       scroller.scrollTo({
-        left: next + scroller.clientWidth >= scroller.scrollWidth ? 0 : next,
+        left: atEnd ? 0 : next,
         behavior: 'smooth',
       });
     }, 3200);
