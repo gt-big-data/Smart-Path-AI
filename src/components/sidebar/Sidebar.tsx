@@ -285,9 +285,9 @@ export default function Sidebar({
             ))}
 
             {normalizedSearch && topLevelFolders.length === 0 && unorganizedChats.length === 0 && (
-              <div className="search-empty">
+              <div className="search-empty text-xs flex items-center gap-2 text-gray-400">
                 <Icon name="search" size={18} />
-                <span>No chats found</span>
+                <span>No chats found...</span>
               </div>
             )}
           </div>
