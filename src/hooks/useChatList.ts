@@ -5,6 +5,7 @@ import { API_BASE_URL } from '../config/api';
 import { toneForStoredMessage } from '../lib/chatTone';
 import { generateMessageId } from '../lib/messageId';
 import { invalidateProgressCache } from '../lib/progressCache';
+import { loadLastChatId, saveLastChatId } from '../lib/lastChat';
 import type { Chat, Message } from '../types/chat';
 
 export type SetChats = Dispatch<SetStateAction<Chat[]>>;
@@ -48,6 +49,11 @@ export function useChatList({ showErrorToast, flashNewItem }: UseChatListOptions
   const deletingChatRef = useRef<string | null>(null);
 
   const currentChat = chats.find((chat) => chat.id === currentChatId) ?? null;
+
+  // Remember the open chat so the workspace reopens it after leaving the page
+  useEffect(() => {
+    if (currentChatId) saveLastChatId(currentChatId);
+  }, [currentChatId]);
 
   // Adds an error bubble to a chat and raises the same message in the toast
   const appendErrorMessage = useCallback(
@@ -138,11 +144,14 @@ export function useChatList({ showErrorToast, flashNewItem }: UseChatListOptions
         }));
 
         setChats(formattedChats);
+        // Reopen the chat that was open last, falling back to the first chat if it no longer exists
+        const lastChatId = loadLastChatId();
         setCurrentChatId((prevId) => {
           if (prevId && formattedChats.some((chat) => chat.id === prevId)) {
             return prevId;
           }
-          return formattedChats[0]?.id ?? prevId;
+          const lastChat = formattedChats.find((chat) => chat.id === lastChatId);
+          return (lastChat ?? formattedChats[0])?.id ?? prevId;
         });
       } catch (err) {
         console.error('Error fetching chats:', err);
