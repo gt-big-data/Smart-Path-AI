@@ -73,7 +73,7 @@ export default function AssistantPanel({
   };
 
   return (
-    <section className={`chat-panel dock-panel-content ${panelSection}`}>
+    <section className={`chat-panel dock-panel-content relative ${panelSection}`}>
       <div className={panelLabel}>
         <span>Conversation</span>
         {/* Conversation options menu: not wired up yet, kept for future use
@@ -83,28 +83,31 @@ export default function AssistantPanel({
         */}
       </div>
 
+      {focusedConcept && (
+        <div className="absolute left-1/2 top-11.5 z-10 flex w-max max-w-[calc(100%-40px)] -translate-x-1/2 items-center gap-1.5 rounded-full border border-[#1a8973] bg-teal-hover px-2.5 py-1.5 text-[11px] text-[#5d6e6a]">
+          <Icon name="graph" size={14} />
+          <span>
+            Focused on: <strong className="font-bold text-ink-strong">{focusedConcept}</strong>
+          </span>
+          <button
+            type="button"
+            className={iconButton}
+            aria-label="Clear focused concept"
+            onClick={onClearFocus}
+          >
+            <Icon name="x" size={13} />
+          </button>
+        </div>
+      )}
+
       <div
-        className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto bg-[#f8faf9] px-5.75 py-4.5 transition-opacity ${
+        role="region"
+        aria-label="Conversation messages"
+        tabIndex={0}
+        className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto bg-[#f8faf9] px-5.75 py-4.5 transition-opacity focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-white ${
           isProcessingFile ? 'opacity-[0.72]' : ''
         }`}
       >
-        {focusedConcept && (
-          <div className="flex items-center gap-1.5 self-center rounded-full border border-[#d5e4e1] bg-teal-hover px-2.5 py-1.5 text-[11px] text-[#5d6e6a]">
-            <Icon name="graph" size={14} />
-            <span>
-              Focused on: <strong className="font-bold text-ink-strong">{focusedConcept}</strong>
-            </span>
-            <button
-              type="button"
-              className={iconButton}
-              aria-label="Clear focused concept"
-              onClick={onClearFocus}
-            >
-              <Icon name="x" size={13} />
-            </button>
-          </div>
-        )}
-
         {messages.map((message) => {
           const isUser = message.sender === 'user';
           return (
