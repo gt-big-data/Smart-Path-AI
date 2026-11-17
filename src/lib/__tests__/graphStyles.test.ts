@@ -9,8 +9,8 @@ import {
   OFF_PATH_EDGE_OPACITY,
   OFF_PATH_NODE_OPACITY,
   OFF_PATH_SEARCH_HIT_OPACITY,
-  PATH_COLOR,
   PATH_NODE_BORDER,
+  pathNodeShadow,
   resolveConfidenceScores,
   SEARCH_HIT_BORDER,
   SEARCH_HIT_RING,
@@ -181,17 +181,34 @@ describe('applyGraphStyles with an active path', () => {
     expect(byId(nodes, 'other').style).toMatchObject({ border: DEFAULT_NODE_BORDER, opacity: OFF_PATH_NODE_OPACITY });
   });
 
+  it('colours each path edge and node by its end vertex, and runs glows from the centre outward', () => {
+    const coloured: BaseGraph = {
+      ...graph,
+      nodes: graph.nodes.map((n) => (n.id === 'second' ? { ...n, data: { ...n.data, color: '#0f0' } } : n)),
+    };
+    const { nodes, edges } = applyGraphStyles(coloured, layers({ activePath: path }));
+
+    // e0 runs centre -> first, already outward
+    expect(edgeById(edges, 'e0').data).toMatchObject({ onPath: true, reversed: false });
+    // e2 is stored second -> first, but the path runs first -> second: second is the end vertex
+    expect(edgeById(edges, 'e2').data).toMatchObject({ onPath: true, reversed: true });
+    expect(edgeById(edges, 'e2').style).toMatchObject({ stroke: '#0f0' });
+    expect(byId(nodes, 'second').style!.boxShadow).toContain(pathNodeShadow('#0f0'));
+    expect(byId(nodes, 'first').style!.boxShadow).not.toContain(pathNodeShadow('#0f0'));
+  });
+
   it('shows labels and animation only on path edges', () => {
     const styled = applyGraphStyles(graph, layers({ activePath: path })).edges;
 
     for (const id of ['e0', 'e2']) {
       const edge = edgeById(styled, id);
-      expect(edge.animated).toBe(true);
+      expect(edge.data?.onPath).toBe(true);
       expect(edge.label).toBe(relationships[Number(id.slice(1))].type);
-      expect(edge.style).toMatchObject({ stroke: PATH_COLOR, opacity: 1 });
+      expect(edge.style).toMatchObject({ stroke: '#111', opacity: 1 });
     }
 
     const offPath = edgeById(styled, 'e1');
+    expect(offPath.data?.onPath).toBe(false);
     expect(offPath.animated).toBe(false);
     expect(offPath.label).toBeUndefined();
     expect(offPath.style!.opacity).toBe(OFF_PATH_EDGE_OPACITY);

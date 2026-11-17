@@ -1,0 +1,58 @@
+/*
+ * React Flow overrides for the knowledge graph. These target markup owned by the library,
+ * so they stay as plain CSS. Scoped under .graph-view, the root of the graph canvas.
+ */
+
+.graph-view .react-flow {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+.graph-view .react-flow__pane,
+.graph-view .react-flow__viewport {
+  background: transparent;
+}
+.graph-view .react-flow__attribution {
+  display: none;
+}
+/* Size is set on the MiniMap style prop (GraphVisualization.tsx) so the SVG matches the panel */
+.graph-view .react-flow__minimap {
+  top: 184px;
+  bottom: auto;
+  left: auto;
+  border: 1px solid #c3cfcd;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+/* Nodes: the React Flow wrapper is the category ring, the face is the disc inside it */
+.graph-view .react-flow__node {
+  border-radius: 50%;
+  padding: 0;
+  cursor: grab;
+  transition: opacity 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+.graph-view .react-flow__node:active {
+  cursor: grabbing;
+}
+
+/*
+ * Path edge pulse (GlowEdge.tsx). The dash pattern is 44px blob + 106px gap = 150px, so moving the
+ * pattern by 150px per loop lines up with the next blob. Keep the two in step.
+ */
+.graph-view .graph-edge-pulse {
+  animation: graph-edge-pulse 1.8s linear infinite;
+}
+@keyframes graph-edge-pulse {
+  to {
+    stroke-dashoffset: -150px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-view .graph-edge-pulse {
+    animation: none;
+  }
+}
+.graph-view .react-flow__node:hover {
+  filter: drop-shadow(0 0 10px rgba(20, 125, 116, 0.5));
+}

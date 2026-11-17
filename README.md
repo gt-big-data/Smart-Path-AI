@@ -9,9 +9,11 @@ The graph itself is built by the sibling repo [`smartpathai-aiserver`](https://g
 ```text
 Smart-Path-AI/
 ├── src/                 # React app
-│   ├── pages/           # Home, Login, Signup, Chat, Progress, Profile, About
-│   ├── components/      # Navigation, GraphVisualization (React Flow)
+│   ├── pages/           # Home, Login, Signup, Chat, ProgressPage, ProfilePage, AboutUs, Quiz
+│   ├── components/      # Sidebar, workspace panels, graph (React Flow), quiz, modals, auth
 │   ├── context/         # Auth + concept progress
+│   ├── lib/             # Graph layout, drag targets, quiz helpers
+│   ├── types/           # Chat, folder, and graph types
 │   └── config/api.ts    # VITE_API_BASE_URL helper
 ├── server/              # Express API (TypeScript)
 │   ├── auth/            # Email/password + Google OAuth
@@ -39,6 +41,8 @@ Bolt originally generated the Vite app, so a few config files sit at the repo ro
 | `/profile` | Required | Display name, logout |
 
 Documents live **per chat** (PDF upload), not as a separate library. There is no courses page yet.
+
+Chat feedback: failed actions appear as red-glow bubbles without the explain buttons, and the same message is raised in a toast that dismisses after 10 seconds. Successful PDF uploads get a green glow. A newly created chat or folder briefly pulses in the sidebar.
 
 **PDF only.** The chat paperclip can show an image icon, but the server rejects non-PDFs (10 MB max). Image *processing* happens inside the AI server when a PDF contains embedded figures — see the AI server README.
 
