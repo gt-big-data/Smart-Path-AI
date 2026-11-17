@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { useAuthFormField } from "../lib/authFormDraft";
+import { clearAuthFormDraft, useAuthFormField } from "../lib/authFormDraft";
 import Icon from "../components/common/Icon";
 import AuthShell from "../components/auth/AuthShell";
 import {
@@ -78,6 +78,7 @@ export default function Signup() {
     if (password !== confirmPassword) return showError("Passwords do not match");
     try {
       await signup(email, password, name);
+      clearAuthFormDraft();
       navigate("/");
     } catch (err: any) {
       showError(err.response?.data?.message || err.message || "An error occurred");

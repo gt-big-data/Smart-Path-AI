@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { API_BASE_URL } from '../config/api';
+import { clearAuthFormDraft } from '../lib/authFormDraft';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -123,7 +124,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const logout = async () => {
-    // Per-tab caches (the Progress page's) must not carry over to whoever signs in next
+    // Per-tab caches (the Progress page's) and typed login details must not carry over to whoever signs in next
+    clearAuthFormDraft();
     try {
       sessionStorage.clear();
     } catch {

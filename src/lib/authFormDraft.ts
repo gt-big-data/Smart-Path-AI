@@ -12,6 +12,13 @@ const authFormDraft: Record<AuthFormField, string> = {
   confirmPassword: '',
 };
 
+/** Forget everything typed, so the next person on this tab does not see the previous user's details */
+export function clearAuthFormDraft() {
+  for (const field of Object.keys(authFormDraft) as AuthFormField[]) {
+    authFormDraft[field] = '';
+  }
+}
+
 export function useAuthFormField(field: AuthFormField) {
   const [value, setValue] = useState(authFormDraft[field]);
 

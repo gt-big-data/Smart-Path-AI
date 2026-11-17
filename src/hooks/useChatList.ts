@@ -55,6 +55,14 @@ export function useChatList({ showErrorToast, flashNewItem }: UseChatListOptions
     if (currentChatId) saveLastChatId(currentChatId);
   }, [currentChatId]);
 
+  // Never leave the workspace on no chat while chats exist (e.g. after deleting the open chat),
+  // otherwise messages and uploads would be sent with an empty chat_id
+  useEffect(() => {
+    if (!currentChatId && chats.length > 0) {
+      setCurrentChatId(chats[0].id);
+    }
+  }, [chats, currentChatId]);
+
   // Adds an error bubble to a chat and raises the same message in the toast
   const appendErrorMessage = useCallback(
     (chatId: string, content: string) => {

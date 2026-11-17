@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { useAuthFormField } from "../lib/authFormDraft";
+import { clearAuthFormDraft, useAuthFormField } from "../lib/authFormDraft";
 import Icon from "../components/common/Icon";
 import AuthShell from "../components/auth/AuthShell";
 import {
@@ -42,6 +42,7 @@ export default function Login() {
     setLoginError("");
     try {
       await login(email, password);
+      clearAuthFormDraft();
       navigate("/");
     } catch (error: any) {
       setLoginError(error.response?.data?.message || error.message || "An error occurred");

@@ -44,7 +44,21 @@ export function useChatMessages({
     return aiMessage;
   };
 
+  // Set synchronously so a second Enter (which bypasses the disabled Send button) or a second
+  // "Ask Study Assistant" click cannot start another request while one is still running
+  const sendingRef = useRef(false);
+
   const handleSendMessage = async (textToSend?: string) => {
+    if (sendingRef.current) return;
+    sendingRef.current = true;
+    try {
+      await sendMessage(textToSend);
+    } finally {
+      sendingRef.current = false;
+    }
+  };
+
+  const sendMessage = async (textToSend?: string) => {
     const trimmedInput = (textToSend ?? input).trim();
     if (!trimmedInput) return;
 

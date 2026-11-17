@@ -76,6 +76,18 @@ export function usePdfUpload({
         setProgressMessage(message);
       });
 
+      // The server can finish without writing anything to the graph (e.g. missing LLM or Neo4j config).
+      // Report that as an error instead of showing the upload as a success.
+      const processedChunks = responseData.processed_chunks;
+      if (typeof processedChunks === 'number' && processedChunks < 1 && responseData.status !== 'cancelled') {
+        const failedChunks = Array.isArray(responseData.failed_chunks) ? responseData.failed_chunks : [];
+        const firstFailure = String((failedChunks[0] as { error?: string } | undefined)?.error || '');
+        throw new Error(
+          firstFailure ||
+            'No concepts were written to the graph (0 chunks processed). On GCP, verify OPENAI_API_KEY / LLM config and Neo4j env on the AI service, and PYTHON_SERVICE_URL on the Node service.',
+        );
+      }
+
       const fileUploadMessage: Message = {
         id: generateMessageId(),
         content: `Uploaded file: ${file.name}`,
