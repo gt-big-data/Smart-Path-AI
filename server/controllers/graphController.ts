@@ -18,6 +18,7 @@ if (!process.env.OPENAI_API_KEY) {
 }
 
 // Helper function to update confidence score
+
 const updateConfidenceScore = async (
   userId: string,
   chatId: string,
@@ -32,10 +33,10 @@ const updateConfidenceScore = async (
   }
 
   const filter = { user: userId, chatId, conceptId };
-  const delta = isCorrect ? (isRetry ? 0.05 : 0.1) : -0.1;
+
   try {
     await ConceptProgress.updateOne(filter, {
-      $setOnInsert: { confidenceScore: 0.5, submissionIds: [] },
+      $setOnInsert: { confidenceScore: 0.2, submissionIds: [] },
     }, { upsert: true });
   } catch (error: any) {
     // Concurrent first submissions can race to create the same uniquely indexed record.
@@ -46,16 +47,54 @@ const updateConfidenceScore = async (
     { ...filter, submissionIds: { $ne: submissionId } },
     [{
       $set: {
-        confidenceScore: { $max: [0, { $min: [1, { $add: [
-          { $max: [0, { $min: [1, { $subtract: [
-            { $ifNull: ['$confidenceScore', 0.5] },
-            { $multiply: [{ $divide: [
-              { $max: [0, { $subtract: [new Date(), { $ifNull: ['$lastAttempted', new Date()] }] }] },
-              2592000000,
-            ] }, 0.05] },
-          ] }] }] },
-          delta,
-        ] }] }] },
+        confidenceScore: {
+          $let: {
+            vars: {
+              // Start from the decayed score (0.05 per 30 days without practice, never below 0),
+              // the same value the Progress page shows, so time away is not erased by answering
+              mastery: { $max: [0, { $subtract: [
+                { $ifNull: ['$confidenceScore', 0.2] },
+                { $multiply: [{ $divide: [
+                  { $max: [0, { $subtract: [new Date(), { $ifNull: ['$lastAttempted', new Date()] }] }] },
+                  2592000000,
+                ] }, 0.05] },
+              ] }] },
+            },
+            in: {
+              $let: {
+                vars: {
+                  posterior: {
+                    $divide: [
+                      { $multiply: ['$$mastery', isCorrect ? 0.9 : 0.1] },
+                      {
+                        $add: [
+                          { $multiply: ['$$mastery', isCorrect ? 0.9 : 0.1] },
+                          {
+                            $multiply: [
+                              { $subtract: [1, '$$mastery'] },
+                              isCorrect ? 0.2 : 0.8,
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+                in: {
+                  $add: [
+                    '$$posterior',
+                    {
+                      $multiply: [
+                        { $subtract: [1, '$$posterior'] },
+                        0.1,
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
         submissionIds: {
           $setUnion: [{ $ifNull: ['$submissionIds', []] }, [submissionId]],
         },
@@ -64,11 +103,14 @@ const updateConfidenceScore = async (
     }],
     { new: true }
   );
+
   const progress = updated || await ConceptProgress.findOne(filter);
   if (!progress) throw new Error('Confidence record could not be created');
+
   console.log(`Updated confidence score for concept ${conceptId} to ${progress.confidenceScore}`);
   return progress;
 };
+
 
 export const viewGraph = async (req: Request, res: Response) => {
   try {
