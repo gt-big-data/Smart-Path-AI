@@ -347,13 +347,12 @@ const generateConversationResponse = (req, res) => __awaiter(void 0, void 0, voi
         if (!graph_id) {
             return res.status(400).json({ error: 'graph_id is required' });
         }
-        console.log(`Generating conversation response for graph ${graph_id}: "${message}"`);
+        // Concept node the student has selected in the graph, if any
+        const focused_concept = req.body.focused_concept;
+        console.log(`Generating conversation response for graph ${graph_id}: "${message}" (focus: ${focused_concept !== null && focused_concept !== void 0 ? focused_concept : 'none'})`);
         // Forward request to Python/FastAPI backend which handles Neo4j and OpenAI
         const response = yield axiosConfig_1.pythonServiceClient.post(`/generate-conversation-response`, {}, {
-            params: {
-                user_input: message,
-                graph_id: graph_id
-            }
+            params: Object.assign({ user_input: message, graph_id: graph_id }, (focused_concept ? { focused_concept } : {}))
         });
         console.log('✅ Conversation response generated successfully');
         // Return the response from Python backend

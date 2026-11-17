@@ -385,6 +385,8 @@ export const generateConversationResponse = async (req: Request, res: Response) 
     // Read from request body (frontend sends as POST body)
     const message = req.body.message as string;
     const graph_id = req.body.graph_id as string;
+    // Concept node the student has selected in the graph, if any
+    const focused_concept = req.body.focused_concept as string | null | undefined;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -394,7 +396,7 @@ export const generateConversationResponse = async (req: Request, res: Response) 
       return res.status(400).json({ error: 'graph_id is required' });
     }
 
-    console.log(`Generating conversation response for graph ${graph_id}: "${message}"`);
+    console.log(`Generating conversation response for graph ${graph_id}: "${message}" (focus: ${focused_concept ?? 'none'})`);
 
     // Forward request to Python/FastAPI backend which handles Neo4j and OpenAI
     const response = await pythonServiceClient.post(
@@ -403,7 +405,9 @@ export const generateConversationResponse = async (req: Request, res: Response) 
       {
         params: {
           user_input: message,
-          graph_id: graph_id
+          graph_id: graph_id,
+          // Omitted when no node is selected, so the backend gets no focus
+          ...(focused_concept ? { focused_concept } : {}),
         }
       }
     );
