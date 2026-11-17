@@ -3,6 +3,7 @@ import { X, FileText, Loader2 } from "lucide-react";
 import { Answer, Attempt, Exam, examApi, errorText, selectedChoices } from "./practiceExamApi";
 import MathText from "./MathText";
 import PracticeExamSamples from "./PracticeExamSamples";
+import PracticeExamDiagram from "./PracticeExamDiagram";
 
 const button =
   "rounded-lg border border-teal-600 px-4 py-2 text-sm font-medium text-teal-800 hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -12,11 +13,13 @@ export default function PracticeExamPanel({
   title,
   open,
   onClose,
+  onGraded,
 }: {
   chatId: string;
   title: string;
   open: boolean;
   onClose: () => void;
+  onGraded?: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [exams, setExams] = useState<Exam[]>([]);
@@ -25,6 +28,9 @@ export default function PracticeExamPanel({
   const [exam, setExam] = useState<Exam>();
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [attempt, setAttempt] = useState<Attempt>();
+  useEffect(() => {
+    if (attempt?.status === 'submitted') onGraded?.();
+  }, [attempt?.id, attempt?.status, onGraded]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -476,6 +482,7 @@ export default function PracticeExamPanel({
                         </p>
                       )}
                       <p><MathText>{q.stem}</MathText></p>
+                      {q.diagram && <PracticeExamDiagram diagram={q.diagram} />}
                       {q.parts.map((p, pi) => {
                         const selected = selectedChoices(answers[p.id]);
                         const grade = attempt?.grading?.results.find(

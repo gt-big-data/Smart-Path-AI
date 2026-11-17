@@ -35,6 +35,7 @@ const PracticeExamAttempt_1 = __importDefault(require("../models/PracticeExamAtt
 const PracticeExamSample_1 = __importDefault(require("../models/PracticeExamSample"));
 const axiosConfig_1 = require("../utils/axiosConfig");
 const practiceExamContract_1 = require("../services/practiceExamContract");
+const confidence_1 = require("../services/confidence");
 const GRADING_LEASE_MS = 10 * 60 * 1000;
 class ApiError extends Error {
     constructor(status, message) {
@@ -352,7 +353,7 @@ function saveDraft(req, res) {
             throw new ApiError(400, error.message);
         }
         const record = yield PracticeExamAttempt_1.default.findOneAndUpdate({ _id: req.params.attemptId, user_id: userId(req),
-            exam_id: exam._id, status: { $in: ['draft', 'grading_failed'] }, revision: rev }, { $set: { answers, status: 'draft' }, $unset: { error: 1 }, $inc: { revision: 1 } }, { new: true });
+            exam_id: exam._id, status: { $in: ['draft', 'grading_failed'] }, revision: rev, grading: { $exists: false } }, { $set: { answers, status: 'draft' }, $unset: { error: 1 }, $inc: { revision: 1 } }, { new: true });
         if (!record)
             throw new ApiError(409, 'Draft changed or is locked; reload the attempt before saving');
         return res.json({ attempt: attemptView(record) });
@@ -373,7 +374,7 @@ function submit(req, res) {
         if (!claimed)
             throw new ApiError(409, 'Attempt changed or is already grading; reload its status');
         try {
-            const response = yield axiosConfig_1.pythonServiceClient.post('/practice-exam/grade', {
+            const response = claimed.grading ? { data: claimed.grading } : yield axiosConfig_1.pythonServiceClient.post('/practice-exam/grade', {
                 exam: exam.exam, answers: claimed.answers.map(a => ({ part_id: a.part_id, user_answer: a.user_answer })),
             }, { headers, timeout: 300000 });
             let grading;
@@ -382,6 +383,20 @@ function submit(req, res) {
             }
             catch (_a) {
                 throw new ApiError(502, 'AI service returned invalid grading; your answers are saved');
+            }
+            // Keep the same grades if a partial progress update needs to be retried.
+            const saved = yield PracticeExamAttempt_1.default.updateOne({ _id: claimed._id, status: 'grading', revision: claimed.revision }, { $set: { grading } });
+            if (!saved.matchedCount)
+                throw new ApiError(409, 'Grading was superseded; reload the attempt');
+            const results = new Map(grading.results.map(result => [result.part_id, result]));
+            for (const section of exam.exam.sections) {
+                for (const question of section.questions.filter(question => !question.error)) {
+                    const earned = question.parts.reduce((sum, part) => sum + results.get(part.id).points_earned, 0);
+                    const possible = question.parts.reduce((sum, part) => sum + part.points, 0);
+                    for (const conceptId of new Set(question.concept_ids)) {
+                        yield (0, confidence_1.updateConfidenceScore)(userId(req), conceptId, earned / possible >= 0.7, false, `${claimed._id}:${question.id}`);
+                    }
+                }
             }
             const record = yield PracticeExamAttempt_1.default.findOneAndUpdate({ _id: claimed._id, status: 'grading', revision: claimed.revision }, { $set: { status: 'submitted', grading, submitted_at: new Date() }, $inc: { revision: 1 } }, { new: true });
             if (!record)

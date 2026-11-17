@@ -2467,6 +2467,7 @@ function App() {
       {Object.keys(examPanels).map(chatId => {
         const chat = chats.find(item => item.id === chatId);
         return chat ? <PracticeExamPanel key={chatId} chatId={chatId} title={chat.title}
+          onGraded={fetchConceptProgress}
           open={!!examPanels[chatId] && currentChatId === chatId}
           onClose={() => setExamPanels(previous => ({...previous, [chatId]: false}))}/> : null;
       })}

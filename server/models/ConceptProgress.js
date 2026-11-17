@@ -8,6 +8,7 @@ const ConceptProgressSchema = new mongoose_1.Schema({
     lastAttempted: { type: Date, default: Date.now },
     // Topic name saved with the score so the Progress page can label it even if the graph changes
     conceptName: { type: String },
+    examProgressUpdates: { type: [String], default: undefined, select: false },
 });
 // Ensure a user has only one progress document per concept
 ConceptProgressSchema.index({ user: 1, conceptId: 1 }, { unique: true });

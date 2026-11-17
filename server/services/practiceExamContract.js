@@ -5,6 +5,8 @@ exports.validateExam = validateExam;
 exports.validateAnswers = validateAnswers;
 exports.publicExam = publicExam;
 exports.validateGrading = validateGrading;
+/** Versioned AI/Express contract. Answer keys never belong in pre-submission responses. */
+const practiceExamDiagram_1 = require("./practiceExamDiagram");
 function examParts(exam) {
     return exam.sections.flatMap(s => s.questions.filter(q => !q.error).flatMap(q => q.parts));
 }
@@ -29,6 +31,8 @@ function validateExam(value) {
         for (const question of section.questions) {
             id(question.id);
             questionCount++;
+            if (question.diagram != null)
+                (0, practiceExamDiagram_1.validateDiagram)(question.diagram);
             if (question.error != null) {
                 if (typeof question.error !== 'string' || !question.error.trim()
                     || typeof question.label !== 'string' || typeof question.stem !== 'string'
@@ -130,7 +134,7 @@ function publicExam(exam) {
         schema_version: exam.schema_version, title: exam.title, instructions: exam.instructions,
         time_limit_minutes: exam.time_limit_minutes, total_points: exam.total_points,
         sections: exam.sections.map(s => ({ name: s.name, instructions: s.instructions,
-            questions: s.questions.map(q => (Object.assign(Object.assign({ id: q.id, label: q.label, stem: q.stem, concept_ids: q.concept_ids }, (q.error ? { error: q.error } : {})), { parts: q.parts.map(p => (Object.assign({ id: p.id, label: p.label, type: p.type, prompt: p.prompt, choices: p.choices, points: p.points, depends_on: p.depends_on }, (p.group_label ? { group_label: p.group_label, group_instructions: p.group_instructions } : {})))) }))) })),
+            questions: s.questions.map(q => (Object.assign(Object.assign(Object.assign({ id: q.id, label: q.label, stem: q.stem, concept_ids: q.concept_ids }, (q.error ? { error: q.error } : {})), (q.diagram ? { diagram: q.diagram } : {})), { parts: q.parts.map(p => (Object.assign({ id: p.id, label: p.label, type: p.type, prompt: p.prompt, choices: p.choices, points: p.points, depends_on: p.depends_on }, (p.group_label ? { group_label: p.group_label, group_instructions: p.group_instructions } : {})))) }))) })),
     };
 }
 function validateGrading(value, exam) {

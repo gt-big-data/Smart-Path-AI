@@ -1,5 +1,6 @@
 import axios from "axios";
 import { API_BASE_URL } from "../config/api";
+import type { ExamDiagram } from '../../server/services/practiceExamDiagram';
 export interface Part {
   id: string;
   label: string;
@@ -24,7 +25,7 @@ export interface Exam {
     sections: {
       name: string;
       instructions?: string;
-      questions: { id: string; label: string; stem: string; parts: Part[]; error?: string }[];
+      questions: { id: string; label: string; stem: string; parts: Part[]; error?: string; diagram?: ExamDiagram | null }[];
     }[];
   };
 }
