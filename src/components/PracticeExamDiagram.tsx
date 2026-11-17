@@ -35,8 +35,8 @@ export default function PracticeExamDiagram({ diagram: d }: { diagram: ExamDiagr
   const titleId = `${id}-title`;
   const x = (v: number) => d.kind === 'plot' ? 85 + (v - d.x_min) / (d.x_max - d.x_min) * 470 : 95 + v * 450;
   const y = (v: number) => d.kind === 'plot' ? 335 - (v - d.y_min) / (d.y_max - d.y_min) * 280 : 90 + v * 240;
-  return <figure className="my-4 max-w-2xl rounded-lg border bg-white p-3">
-    <svg viewBox="0 0 640 420" role="img" aria-labelledby={titleId} className="w-full" style={{ minWidth: 280 }}>
+  return <figure className="m-0 grid min-w-0 max-w-2xl gap-2 border border-[#d8e0de] bg-white p-3">
+    <svg viewBox="0 0 640 420" role="img" aria-labelledby={titleId} className="w-full">
       <title id={titleId}>{d.caption}</title>
       <rect width="640" height="420" fill="white" />
       {d.kind === 'plot' ? <>
@@ -81,8 +81,8 @@ export default function PracticeExamDiagram({ diagram: d }: { diagram: ExamDiagr
         </g>)}
       </>}
     </svg>
-    <figcaption className="text-sm text-slate-700">{d.caption}</figcaption>
-    {d.kind === 'plot' && <ul className="mt-2 flex flex-wrap gap-4 text-sm" aria-label="Data series">
+    <figcaption className="text-[11px] text-[#4b5956]">{d.caption}</figcaption>
+    {d.kind === 'plot' && <ul className="m-0 flex list-none flex-wrap gap-3 p-0 text-[11px]" aria-label="Data series">
       {d.series.map((s, i) => <li key={i} style={{ color: colors[i] }}>{i + 1}. {s.label}</li>)}
     </ul>}
   </figure>;

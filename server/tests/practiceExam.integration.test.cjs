@@ -151,8 +151,8 @@ test('owned exam lifecycle, private keys, draft conflicts, idempotent submission
   assert.equal(submitted.data.attempt.grading.score, 4);
   assert.equal(submitted.data.attempt.grading.results[0].correct_answer, '2 mol');
   assert.equal((await request(prefix + '/submit', { method: 'POST', body: { revision: 1 } })).status, 200);
-  const progress = await Progress.findOne({ user: owner, conceptId: 'topic-molarity' });
-  assert.ok(Math.abs(progress.confidenceScore - 0.6) < 0.00001);
+  const progress = await Progress.findOne({ user: owner, chatId: 'chat-local', conceptId: 'topic-molarity' });
+  assert.ok(Math.abs(progress.confidenceScore - 0.57647) < 0.00001);
   assert.equal(grades, 1);
   assert.equal((await request(prefix, { method: 'PATCH', body: { revision: 3, answers } })).status, 409);
   const another = await request(`/${examId}/attempts`, { method: 'POST', body: { request_id: randomUUID() } });
@@ -166,7 +166,7 @@ test('owned exam lifecycle, private keys, draft conflicts, idempotent submission
   assert.equal((await request(`/${examId}/attempts`)).data.attempts.length, 2);
   assert.equal(await mongoose.connection.collection('quizhistories').countDocuments(), 0);
   assert.equal(await Progress.countDocuments(), 1);
-  assert.ok(Math.abs((await Progress.findById(progress._id)).confidenceScore - 0.7) < 0.00001);
+  assert.ok(Math.abs((await Progress.findById(progress._id)).confidenceScore - 0.87368) < 0.00001);
 });
 
 test('sample PDFs persist independently, remain private and generate fresh exams without reuploading', async () => {

@@ -1,10 +1,45 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { User, LogOut, ChevronLeft, Shield } from 'lucide-react';
-import Navigation from '../components/Navigation';
+import type { ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ArrowRight, Brain, ChevronLeft, LogOut, Shield, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { STUDYING_SINCE } from '../config/profile';
 
-const ProfilePage: React.FC = () => {
+const header = 'mx-auto flex h-19 w-[min(1180px,calc(100%_-_48px))] items-center border-b border-[#cfd9d7] max-[700px]:w-[calc(100%_-_32px)]';
+const content = 'mx-auto w-[min(1040px,calc(100%_-_48px))] max-[700px]:w-[calc(100%_-_32px)]';
+const navLink = 'text-[13px] font-medium text-[#4f5f5c] no-underline transition-colors hover:text-teal-dark';
+const logoutButton =
+  'inline-flex h-9 cursor-pointer items-center rounded-xs border-0 bg-[#c4474d] px-[15px] text-[13px] font-medium text-white transition-colors hover:bg-[#a9363d]';
+const backButton =
+  'inline-flex h-9 items-center gap-[7px] rounded-xs border border-[#b9c7c4] bg-white px-3 text-[13px] font-semibold text-[#4f5e5b] no-underline transition-colors hover:border-[#9fc7c1] hover:bg-teal-pale hover:text-teal-dark';
+const statusPill =
+  'inline-flex h-[26px] items-center rounded-full bg-teal px-3 text-xs font-semibold text-white';
+const signOutButton =
+  'inline-flex h-9 cursor-pointer items-center gap-2 rounded-xs border border-[#c4474d] bg-white px-3.5 text-[13px] font-semibold text-[#c4474d] transition-colors hover:bg-[#fbeaec] hover:text-[#a9363d]';
+const sectionTitle = 'mb-3 mt-0 text-base font-semibold text-[#172321]';
+
+function AccountRow({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
+  return (
+    <div className="grid min-h-14 grid-cols-[20px_150px_minmax(0,1fr)] items-center gap-3 border-b border-[#e3e9e8] text-sm text-[#263330]">
+      <span className="text-teal">{icon}</span>
+      <span className="text-[13px] text-muted">{label}</span>
+      <span className="font-medium">{children}</span>
+    </div>
+  );
+}
+
+function QuickLink({ to, label }: { to: string; label: string }) {
+  return (
+    <Link
+      to={to}
+      className="flex min-h-14 items-center justify-between border-b border-[#e3e9e8] px-2.5 text-sm font-medium text-[#172321] no-underline transition-colors hover:bg-teal-pale hover:text-teal-dark focus-visible:bg-teal-pale focus-visible:text-teal-dark focus-visible:outline-none"
+    >
+      {label}
+      <ArrowRight size={18} className="text-teal" aria-hidden="true" />
+    </Link>
+  );
+}
+
+export default function ProfilePage() {
   const { isAuthenticated, userName, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -19,119 +54,95 @@ const ProfilePage: React.FC = () => {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
-        <Navigation />
-        <div className="flex items-center justify-center h-[calc(100vh-80px)]">
-          <div className="text-center">
-            <p className="text-lg text-slate-600 mb-4">Please log in to view your profile.</p>
-            <button
-              onClick={() => navigate('/login')}
-              className="px-6 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg hover:from-teal-600 hover:to-teal-700 transition-all shadow-md shadow-teal-500/20 btn-lift"
-            >
-              Go to Login
-            </button>
-          </div>
-        </div>
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f7f9f8] font-brand text-[#172321]">
+        <p className="m-0 text-base text-muted">Please log in to view your profile.</p>
+        <Link
+          to="/login"
+          className="inline-flex h-9 items-center rounded-xs bg-teal px-4 text-[13px] font-medium text-white no-underline transition-colors hover:bg-teal-dark"
+        >
+          Log in
+        </Link>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-teal-50/50 via-slate-50 to-blue-50/50">
-      <Navigation />
+    <div className="min-h-screen bg-[#f7f9f8] font-brand text-[#172321]">
+      <header className={header}>
+        <Link to="/" className="inline-flex items-center gap-2.5 text-lg font-bold text-[#172321] no-underline">
+          <span className="grid h-7.5 w-7.5 place-items-center rounded-xs bg-teal text-white">
+            <Brain size={17} aria-hidden="true" />
+          </span>
+          <span>SmartPath</span>
+        </Link>
+        <nav className="ml-auto flex items-center gap-6" aria-label="Account navigation">
+          <Link to="/chat" className={navLink}>
+            Dashboard
+          </Link>
+          <Link to="/progress" className={navLink}>
+            Progress
+          </Link>
+          <button type="button" className={logoutButton} onClick={handleLogout}>
+            Log out
+          </button>
+        </nav>
+      </header>
 
-      <main className="container mx-auto px-6 py-12">
-        <div className="max-w-2xl mx-auto">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-800">Your Profile</h1>
-              <p className="text-slate-500 mt-1">Manage your account settings</p>
-            </div>
-            <button
-              onClick={() => navigate('/')}
-              className="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm text-slate-700 border border-slate-200/60 rounded-lg hover:bg-white transition-all shadow-sm"
-            >
-              <ChevronLeft className="w-5 h-5" />
-              Home
-            </button>
-          </div>
-
-          {/* Profile Card */}
-          <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-slate-200/60 shadow-sm overflow-hidden">
-            {/* Avatar & Name Header */}
-            <div className="bg-gradient-to-r from-teal-500 to-teal-600 px-8 py-10">
-              <div className="flex items-center gap-5">
-                <div className="w-20 h-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center border-2 border-white/30">
-                  <User className="w-10 h-10 text-white" />
-                </div>
-                <div>
-                  <h2 className="text-2xl font-bold text-white">{userName || 'User'}</h2>
-                  <p className="text-teal-100 text-sm mt-1">SmartPathAI Member</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Account Details */}
-            <div className="p-8 space-y-6">
-              <div>
-                <h3 className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">Account Information</h3>
-                <div className="space-y-4">
-                  <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-lg">
-                    <User className="w-5 h-5 text-slate-400" />
-                    <div>
-                      <p className="text-xs text-slate-400 font-medium">Display Name</p>
-                      <p className="text-slate-800 font-medium">{userName || 'Not set'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-lg">
-                    <Shield className="w-5 h-5 text-slate-400" />
-                    <div>
-                      <p className="text-xs text-slate-400 font-medium">Account Status</p>
-                      <p className="text-green-600 font-medium">Active</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Quick Links */}
-              <div>
-                <h3 className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">Quick Links</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => navigate('/chat')}
-                    className="p-3 text-left bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors border border-teal-100"
-                  >
-                    <p className="text-sm font-medium text-teal-700">Dashboard</p>
-                    <p className="text-xs text-teal-500 mt-0.5">Chat & explore</p>
-                  </button>
-                  <button
-                    onClick={() => navigate('/progress')}
-                    className="p-3 text-left bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors border border-blue-100"
-                  >
-                    <p className="text-sm font-medium text-blue-700">Progress</p>
-                    <p className="text-xs text-blue-500 mt-0.5">View scores</p>
-                  </button>
-                </div>
-              </div>
-
-              {/* Logout */}
-              <div className="pt-4 border-t border-slate-200">
-                <button
-                  onClick={handleLogout}
-                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-all border border-red-100 font-medium"
-                >
-                  <LogOut className="w-5 h-5" />
-                  Sign Out
-                </button>
-              </div>
-            </div>
-          </div>
+      <main className={`${content} pb-24 pt-14`}>
+        <div className="flex items-center justify-between">
+          <h1 className="m-0 text-[30px] font-semibold tracking-[-0.02em] text-[#172321]">Profile</h1>
+          <Link to="/" className={backButton}>
+            <ChevronLeft size={18} aria-hidden="true" />
+            Home
+          </Link>
         </div>
+
+        <section
+          aria-label="Profile details"
+          className="mt-6 grid min-h-[480px] grid-cols-[280px_minmax(0,1fr)] rounded-[4px] border border-[#cbd7d4] bg-[#fbfcfc] max-[700px]:grid-cols-1"
+        >
+          <aside aria-label="Profile summary" className="flex flex-col border-r border-[#bfd9d4] bg-teal-pale p-6 max-[700px]:border-r-0 max-[700px]:border-b">
+            <div className="mb-5 grid h-16 w-16 place-items-center rounded-full bg-teal text-white">
+              <User size={28} aria-hidden="true" />
+            </div>
+            <p className="m-0 text-[22px] font-bold tracking-[-0.02em] text-[#172321]">{userName || 'User'}</p>
+            <p className="mb-0 mt-1.5 text-[13px] text-muted">SmartPathAI member</p>
+            <div className="mt-auto border-t border-line pt-5">
+              <span className="block text-xs text-muted">Studying since</span>
+              <strong className="mt-1 block text-sm font-semibold text-[#172321]">{STUDYING_SINCE}</strong>
+            </div>
+          </aside>
+
+          <div className="flex flex-col p-6 px-7">
+            <section aria-labelledby="account-info-title">
+              <h2 id="account-info-title" className={sectionTitle}>
+                Account information
+              </h2>
+              <AccountRow icon={<User size={18} aria-hidden="true" />} label="Display name">
+                {userName || 'Not set'}
+              </AccountRow>
+              <AccountRow icon={<Shield size={18} aria-hidden="true" />} label="Account status">
+                <span className={statusPill}>Active</span>
+              </AccountRow>
+            </section>
+
+            <section aria-labelledby="quick-links-title" className="mt-8">
+              <h2 id="quick-links-title" className={sectionTitle}>
+                Quick links
+              </h2>
+              <QuickLink to="/chat" label="Dashboard" />
+              <QuickLink to="/progress" label="Progress" />
+            </section>
+
+            <footer className="mt-auto flex h-[61px] items-end justify-end border-t border-line">
+              <button type="button" className={signOutButton} onClick={handleLogout}>
+                <LogOut size={18} aria-hidden="true" />
+                Sign out
+              </button>
+            </footer>
+          </div>
+        </section>
       </main>
     </div>
   );
-};
-
-export default ProfilePage;
-
+}

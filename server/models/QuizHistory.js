@@ -14,6 +14,7 @@ const questionSchema = new mongoose_1.Schema({
 }, { _id: false });
 const QuizHistorySchema = new mongoose_1.Schema({
     userID: { type: String, required: true },
+    chatID: { type: String, required: true },
     concepts: [conceptSchema],
     questions: [questionSchema],
     createdAt: { type: Date, default: Date.now },

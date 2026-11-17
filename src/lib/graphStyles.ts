@@ -61,7 +61,21 @@ export const SEARCH_HIT_RING = '0 0 0 3px #fbbf24';
 export const PATH_COLOR = '#d4581c';
 export const PATH_NODE_BORDER = `3px solid ${PATH_COLOR}`;
 export const PATH_NODE_SHADOW = '0 0 16px rgba(212, 88, 28, 0.58)';
-export const DEFAULT_EDGE_COLOR = '#888';
+export const DEFAULT_EDGE_COLOR = '#9ebbb7';
+/** Edge thickness, in px. Path edges are twice as thick as the rest. */
+export const EDGE_WIDTH = 2.5;
+export const PATH_EDGE_WIDTH = 5;
+
+/** Glow for a path node, in that node's own category color */
+export const pathNodeShadow = (color: string) => `0 0 16px ${withAlpha(color, 0.58)}`;
+
+/** Converts a #rrggbb color to rgba() with the given alpha; other formats are returned unchanged */
+function withAlpha(color: string, alpha: number): string {
+  const match = /^#([0-9a-f]{6})$/i.exec(color);
+  if (!match) return color;
+  const value = parseInt(match[1], 16);
+  return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
+}
 
 /** Opacity of everything off the path while a path is shown. Search hits stay easier to see. */
 export const OFF_PATH_NODE_OPACITY = 0.18;
@@ -122,6 +136,11 @@ export function applyGraphStyles(base: BaseGraph, layers: GraphLayers): { nodes:
   const { confidenceScores, nodeEdits, searchHits, activePath, collapse } = layers;
   const hasPath = activePath !== null && activePath.nodeIds.length > 0;
 
+  // Each node's own colour, after edits; path edges take their end vertex's colour
+  const colorById = new Map<string, string>(
+    base.nodes.map((node): [string, string] => [node.id, nodeEdits[node.id]?.color ?? node.data.color])
+  );
+
   const nodes = base.nodes.map((node) => {
     const edit = nodeEdits[node.id];
     const isSearchHit = searchHits.has(node.id);
@@ -142,7 +161,8 @@ export function applyGraphStyles(base: BaseGraph, layers: GraphLayers): { nodes:
       if (hasPath) shadows.push(SEARCH_HIT_RING);
       shadows.push(SEARCH_HIT_SHADOW);
     }
-    if (onPath) shadows.push(PATH_NODE_SHADOW);
+    // Each path node glows in its own colour
+    if (onPath) shadows.push(pathNodeShadow(color));
 
     return {
       ...node,
@@ -154,6 +174,7 @@ export function applyGraphStyles(base: BaseGraph, layers: GraphLayers): { nodes:
         color,
         pathStep,
         hiddenCount: collapse.hiddenCounts.get(String(node.id)) ?? 0,
+        collapsible: collapse.collapsibleIds.has(String(node.id)),
       },
       style: {
         ...node.style,
@@ -166,27 +187,36 @@ export function applyGraphStyles(base: BaseGraph, layers: GraphLayers): { nodes:
     };
   });
 
-  // Edge labels and animation show only along the path
+  // Edge labels, glow and direction show only along the path. A path edge takes the colour of its
+  // end vertex (the node one level further from the centre), and its glow runs from the centre outward.
+  const steps = activePath?.nodeSteps;
   const edges = base.edges.map((edge) => {
     const edgeIndex = edge.data?.graphEdgeIndex;
     const onPath = hasPath && typeof edgeIndex === 'number' && activePath.edgeIndices.has(edgeIndex);
+    const sourceId = String(edge.source);
+    const targetId = String(edge.target);
+    // Stored direction can point inward; the glow is drawn from the centre side instead
+    const reversed = onPath && (steps?.get(sourceId) ?? 0) > (steps?.get(targetId) ?? 0);
+    const endColor = colorById.get(reversed ? sourceId : targetId) ?? PATH_COLOR;
 
     return {
       ...edge,
       // Covers cross-links too: an edge into a collapsed branch hides with it
-      hidden: collapse.hiddenIds.has(String(edge.source)) || collapse.hiddenIds.has(String(edge.target)),
-      animated: onPath,
+      hidden: collapse.hiddenIds.has(sourceId) || collapse.hiddenIds.has(targetId),
+      // The built-in animated class draws a dotted line, so the glow is drawn by GlowEdge instead
+      animated: false,
+      data: { ...edge.data, onPath, reversed },
       label: onPath ? edge.label : undefined,
       style: {
         ...edge.style,
-        stroke: onPath ? PATH_COLOR : DEFAULT_EDGE_COLOR,
-        strokeWidth: onPath ? 4 : 1.5,
+        stroke: onPath ? endColor : DEFAULT_EDGE_COLOR,
+        strokeWidth: onPath ? PATH_EDGE_WIDTH : EDGE_WIDTH,
         opacity: hasPath && !onPath ? OFF_PATH_EDGE_OPACITY : 1,
         transition: EDGE_TRANSITION,
       },
       labelStyle: {
         ...edge.labelStyle,
-        fill: onPath ? PATH_COLOR : 'transparent',
+        fill: onPath ? endColor : 'transparent',
         fontWeight: onPath ? 700 : 400,
       },
       zIndex: onPath ? 1 : 0,

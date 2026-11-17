@@ -2,6 +2,7 @@
 import { Request, Response } from 'express';
 import OpenAI from 'openai';
 import ConceptProgress from '../models/ConceptProgress';
+import User from '../models/User';
 import { pythonServiceClient } from '../utils/axiosConfig';
 import { calculateDecayedConfidence } from '../utils/confidenceDecay';
 
@@ -17,48 +18,97 @@ if (!process.env.OPENAI_API_KEY) {
 }
 
 // Helper function to update confidence score
-const updateConfidenceScore = async (userId: string, conceptId: string, isCorrect: boolean, isRetry: boolean) => {
-  if (!userId || !conceptId) {
-    console.log('Skipping confidence score update: missing userId or conceptId.');
-    return;
-  }
 
-  let progress = await ConceptProgress.findOne({ user: userId, conceptId });
-
-  if (!progress) {
-    progress = new ConceptProgress({ user: userId, conceptId, confidenceScore: 0.5 });
-  }
-
-  const now = new Date();
-  progress.confidenceScore = calculateDecayedConfidence(
-    progress.confidenceScore, progress.lastAttempted, now.getTime(),
-  );
-  if (isCorrect) {
-    progress.confidenceScore += isRetry ? 0.05 : 0.1;
-  } else {
-    progress.confidenceScore -= 0.1;
-  }
-
-  // Clamp the score between 0 and 1
-  progress.confidenceScore = Math.max(0, Math.min(1, progress.confidenceScore));
-  progress.lastAttempted = now;
-
-  await progress.save();
-  console.log(`Updated confidence score for concept ${conceptId} to ${progress.confidenceScore}`);
-};
-
-const updateConfidenceScoreSafe = async (
-  userId: string | undefined,
-  conceptId: string | undefined,
+const updateConfidenceScore = async (
+  userId: string,
+  chatId: string,
+  conceptId: string,
   isCorrect: boolean,
-  isRetry: boolean
+  isRetry: boolean,
+  submissionId: string
 ) => {
-  if (!userId || !conceptId) return;
-  try {
-    await updateConfidenceScore(userId, conceptId, isCorrect, isRetry);
-  } catch (err) {
-    console.error('Non-fatal confidence update error:', err);
+  if (!userId || !chatId || !conceptId) {
+    console.log('Skipping confidence score update: missing userId, chatId, or conceptId.');
+    throw new Error('Confidence score update requires userId, chatId, and conceptId');
   }
+
+  const filter = { user: userId, chatId, conceptId };
+
+  try {
+    await ConceptProgress.updateOne(filter, {
+      $setOnInsert: { confidenceScore: 0.2, submissionIds: [] },
+    }, { upsert: true });
+  } catch (error: any) {
+    // Concurrent first submissions can race to create the same uniquely indexed record.
+    if (error.code !== 11000) throw error;
+  }
+
+  const updated = await ConceptProgress.findOneAndUpdate(
+    { ...filter, submissionIds: { $ne: submissionId } },
+    [{
+      $set: {
+        confidenceScore: {
+          $let: {
+            vars: {
+              // Start from the decayed score (0.05 per 30 days without practice, never below 0),
+              // the same value the Progress page shows, so time away is not erased by answering
+              mastery: { $max: [0, { $subtract: [
+                { $ifNull: ['$confidenceScore', 0.2] },
+                { $multiply: [{ $divide: [
+                  { $max: [0, { $subtract: [new Date(), { $ifNull: ['$lastAttempted', new Date()] }] }] },
+                  2592000000,
+                ] }, 0.05] },
+              ] }] },
+            },
+            in: {
+              $let: {
+                vars: {
+                  posterior: {
+                    $divide: [
+                      { $multiply: ['$$mastery', isCorrect ? 0.9 : 0.1] },
+                      {
+                        $add: [
+                          { $multiply: ['$$mastery', isCorrect ? 0.9 : 0.1] },
+                          {
+                            $multiply: [
+                              { $subtract: [1, '$$mastery'] },
+                              isCorrect ? 0.2 : 0.8,
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+                in: {
+                  $add: [
+                    '$$posterior',
+                    {
+                      $multiply: [
+                        { $subtract: [1, '$$posterior'] },
+                        0.1,
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        submissionIds: {
+          $setUnion: [{ $ifNull: ['$submissionIds', []] }, [submissionId]],
+        },
+        lastAttempted: new Date(),
+      },
+    }],
+    { new: true }
+  );
+
+  const progress = updated || await ConceptProgress.findOne(filter);
+  if (!progress) throw new Error('Confidence record could not be created');
+
+  console.log(`Updated confidence score for concept ${conceptId} to ${progress.confidenceScore}`);
+  return progress;
 };
 
 
@@ -88,6 +138,7 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
   try {
     const graph_id = req.query.graph_id;
     const userId = (req.session as any)?.passport?.user;
+    const chatId = req.query.chat_id;
     const rawLength = req.query.length as string | undefined;
     const parsedLength = Number(rawLength);
     const allowed = [5, 10, 15];
@@ -110,12 +161,33 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
       return res.status(401).json({ error: 'User not authenticated. Cannot generate personalized questions.' });
     }
 
+    if (typeof chatId !== 'string' || !chatId.trim()) {
+      return res.status(400).json({ error: 'chat_id is required' });
+    }
+
+    const chatOwner = await User.exists({
+      _id: userId,
+      chats: { $elemMatch: { chat_id: chatId, graph_id: String(graph_id) } },
+    });
+    if (!chatOwner) {
+      return res.status(404).json({ error: 'Chat not found' });
+    }
+
+    const progress = await ConceptProgress.find({ user: userId, chatId })
+      .select({ conceptId: 1, confidenceScore: 1, _id: 0 })
+      .lean();
     const id = encodeURIComponent(String(graph_id));
-    const url = `/questions/${id}?user_id=${userId}&length=${length}&format=${questionFormat}`;
+    const url = `/questions/${id}?user_id=${encodeURIComponent(String(userId))}&length=${length}&format=${questionFormat}`;
+    const mongoProgress = progress.reduce<Record<string, number>>((scores, item) => {
+      scores[item.conceptId] = item.confidenceScore;
+      return scores;
+    }, {});
 
     console.log(`Requesting questions from AI server: ${url}`);
 
-    const response = await pythonServiceClient.post(url, {});
+    const response = await pythonServiceClient.post(url, {
+      mongo_progress: mongoProgress,
+    });
 
     // The AI server returns { questions: [ { text, correct_answer, topic_id }, ... ] }
     const questions = response.data?.questions;
@@ -173,6 +245,8 @@ interface VerifyAnswerRequest {
   correctAnswer: string;
   conceptId?: string;
   isRetry?: boolean;
+  chat_id?: string;
+  graph_id?: string;
 }
 
 const normalizeAnswer = (value: string = ''): string =>
@@ -231,11 +305,31 @@ export const verifyAnswer = async (req: Request, res: Response) => {
   }
 
   try {
-    const { question, userAnswer, correctAnswer, conceptId, isRetry }: VerifyAnswerRequest = req.body;
+    const { question, userAnswer, correctAnswer, conceptId, isRetry, chat_id: chatId, graph_id: graphId } = req.body as VerifyAnswerRequest;
+    if (typeof chatId !== 'string' || !chatId.trim()) {
+      return res.status(400).json({ error: 'chat_id is required' });
+    }
+    if (typeof conceptId !== 'string' || !conceptId.trim()) {
+      return res.status(400).json({ error: 'conceptId is required' });
+    }
+    const submissionId = req.body.submission_id;
+    if (typeof submissionId !== 'string' || !submissionId.trim()) {
+      return res.status(400).json({ error: 'submission_id is required' });
+    }
+    const chatOwner = await User.exists({
+      _id: userId,
+      ...(graphId
+        ? { chats: { $elemMatch: { chat_id: chatId, graph_id: graphId } } }
+        : { 'chats.chat_id': chatId }),
+    });
+    if (!chatOwner) {
+      return res.status(404).json({ error: 'Chat not found' });
+    }
+    const normalizedConceptId = conceptId.trim();
 
     // Handle skipped questions - treat as incorrect
     if (userAnswer === 'SKIPPED' || userAnswer.trim().toUpperCase() === 'SKIP') {
-      await updateConfidenceScoreSafe(userId, conceptId, false, false);
+      await updateConfidenceScore(userId, chatId, normalizedConceptId, false, false, submissionId);
       return res.json({
         isCorrect: false,
         feedback: `You skipped this question. Skipped questions are counted as incorrect for confidence tracking.`,
@@ -277,6 +371,7 @@ Provide feedback in this JSON format:
   "thinkingPrompt": "A question to help the student think deeper about the topic"
 }`;
 
+    let response: { isCorrect: boolean; feedback: string; followUpQuestion: string };
     try {
       // Prefer LLM conceptual grading, but keep a deterministic fallback if formatting/service fails.
       const completion = await openai.chat.completions.create({
@@ -303,31 +398,22 @@ Provide feedback in this JSON format:
       const result = JSON.parse(cleaned);
       const isCorrect = exact ?? result.score >= 70;
 
-      // Update confidence score
-      await updateConfidenceScoreSafe(userId, conceptId, isCorrect, isRetry || false);
-
-      // Transform the result to match the expected frontend format while preserving the new evaluation approach
-      const transformedResult = {
+      response = {
         isCorrect, // Consider answers with 70% or higher understanding as correct
         feedback: result.feedback,
         followUpQuestion: isCorrect
           ? result.thinkingPrompt
           : `Hint: ${result.conceptualHint}`
       };
-      res.json(transformedResult);
     } catch (llmError) {
       console.error('LLM verify fallback engaged:', llmError);
-      const fallback = evaluateAnswerFallback(userAnswer, correctAnswer || '');
-      await updateConfidenceScoreSafe(userId, conceptId, fallback.isCorrect, isRetry || false);
-      res.json(fallback);
+      response = evaluateAnswerFallback(userAnswer, correctAnswer || '');
     }
-
+    await updateConfidenceScore(userId, chatId, normalizedConceptId, response.isCorrect, isRetry || false, submissionId);
+    return res.json(response);
   } catch (error) {
     console.error('Error verifying answer:', error);
-    const { userAnswer, correctAnswer, conceptId, isRetry }: VerifyAnswerRequest = req.body || {};
-    const fallback = evaluateAnswerFallback(String(userAnswer || ''), String(correctAnswer || ''));
-    await updateConfidenceScoreSafe(userId, conceptId, fallback.isCorrect, Boolean(isRetry));
-    res.json(fallback);
+    return res.status(500).json({ error: 'Failed to verify answer or save progress' });
   }
 };
 
@@ -341,6 +427,8 @@ export const generateConversationResponse = async (req: Request, res: Response) 
     // Read from request body (frontend sends as POST body)
     const message = req.body.message as string;
     const graph_id = req.body.graph_id as string;
+    // Concept node the student has selected in the graph, if any
+    const focused_concept = req.body.focused_concept as string | null | undefined;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -350,7 +438,7 @@ export const generateConversationResponse = async (req: Request, res: Response) 
       return res.status(400).json({ error: 'graph_id is required' });
     }
 
-    console.log(`Generating conversation response for graph ${graph_id}: "${message}"`);
+    console.log(`Generating conversation response for graph ${graph_id}: "${message}" (focus: ${focused_concept ?? 'none'})`);
 
     // Forward request to Python/FastAPI backend which handles Neo4j and OpenAI
     const response = await pythonServiceClient.post(
@@ -359,7 +447,9 @@ export const generateConversationResponse = async (req: Request, res: Response) 
       {
         params: {
           user_input: message,
-          graph_id: graph_id
+          graph_id: graph_id,
+          // Omitted when no node is selected, so the backend gets no focus
+          ...(focused_concept ? { focused_concept } : {}),
         }
       }
     );

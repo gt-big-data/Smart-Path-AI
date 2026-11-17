@@ -12,6 +12,7 @@ export type Question = {
 export type Result = { answer: string; isCorrect: boolean; feedback: string; skipped: boolean };
 export type ClarifyMessage = { sender: 'user' | 'ai'; text: string };
 export type QuizState = {
+  attemptId: string;
   qaData: Question[];
   currentQuestionIndex: number;
   results: (Result | null)[];
@@ -27,7 +28,12 @@ export function readQuiz(chatId: string): QuizState | null {
     if (!raw) return null;
     const saved = JSON.parse(raw);
     if (!Array.isArray(saved.qaData) || !saved.qaData.length) return null;
+    const attemptId = saved.attemptId || crypto.randomUUID();
+    if (!saved.attemptId) {
+      localStorage.setItem(quizKey(chatId), JSON.stringify({ ...saved, attemptId }));
+    }
     return {
+      attemptId,
       qaData: saved.qaData,
       currentQuestionIndex: Math.min(saved.currentQuestionIndex || 0, saved.qaData.length - 1),
       results: Array.isArray(saved.results) ? saved.results : saved.qaData.map((_: Question, index: number) => {

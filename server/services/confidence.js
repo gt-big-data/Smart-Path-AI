@@ -16,21 +16,26 @@ exports.updateConfidenceScore = updateConfidenceScore;
 const mongoose_1 = require("mongoose");
 const ConceptProgress_1 = __importDefault(require("../models/ConceptProgress"));
 const confidenceDecay_1 = require("../utils/confidenceDecay");
-/** Quiz scoring rules, kept separate while the quiz implementation is changing. */
-function updateConfidenceScore(userId_1, conceptId_1, isCorrect_1) {
-    return __awaiter(this, arguments, void 0, function* (userId, conceptId, isCorrect, isRetry = false, updateId) {
-        var _a, _b;
+const bayesianKnowledgeTracing_1 = require("../utils/bayesianKnowledgeTracing");
+/** Apply a graded exam question once per concept in its chat. */
+function updateConfidenceScore(userId, chatId, conceptId, isCorrect, updateId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a;
+        const key = { user: userId, chatId, conceptId };
         for (;;) {
-            const progress = yield ConceptProgress_1.default.findOne({ user: userId, conceptId }).select('+examProgressUpdates');
-            if (updateId && ((_a = progress === null || progress === void 0 ? void 0 : progress.examProgressUpdates) === null || _a === void 0 ? void 0 : _a.includes(updateId)))
+            const progress = yield ConceptProgress_1.default.findOne(key).select('+examProgressUpdates');
+            if ((_a = progress === null || progress === void 0 ? void 0 : progress.examProgressUpdates) === null || _a === void 0 ? void 0 : _a.includes(updateId))
                 return progress;
             const now = new Date();
-            const score = (0, confidenceDecay_1.calculateDecayedConfidence)((_b = progress === null || progress === void 0 ? void 0 : progress.confidenceScore) !== null && _b !== void 0 ? _b : 0.5, progress === null || progress === void 0 ? void 0 : progress.lastAttempted, now.getTime());
-            const delta = isCorrect ? (isRetry ? 0.05 : 0.1) : -0.1;
+            const score = progress && (0, confidenceDecay_1.calculateDecayedConfidence)(progress.confidenceScore, progress.lastAttempted, now.getTime());
+            const confidenceScore = (0, bayesianKnowledgeTracing_1.calculateBayesianConfidence)(score !== null && score !== void 0 ? score : undefined, isCorrect);
             try {
                 // Compare the previous score/time so concurrent updates cannot overwrite each other.
-                const updated = yield ConceptProgress_1.default.findOneAndUpdate(Object.assign(Object.assign({ user: userId, conceptId }, (progress ? { _id: progress._id, confidenceScore: progress.confidenceScore,
-                    lastAttempted: progress.lastAttempted } : { _id: new mongoose_1.Types.ObjectId() })), (updateId ? { examProgressUpdates: { $ne: updateId } } : {})), Object.assign({ $set: { confidenceScore: Math.max(0, Math.min(1, score + delta)), lastAttempted: now } }, (updateId ? { $addToSet: { examProgressUpdates: updateId } } : {})), { new: true, upsert: !progress });
+                const updated = yield ConceptProgress_1.default.findOneAndUpdate(Object.assign(Object.assign(Object.assign({}, key), (progress ? { _id: progress._id, confidenceScore: progress.confidenceScore,
+                    lastAttempted: progress.lastAttempted } : { _id: new mongoose_1.Types.ObjectId() })), { examProgressUpdates: { $ne: updateId } }), {
+                    $set: { confidenceScore, lastAttempted: now },
+                    $addToSet: { examProgressUpdates: updateId },
+                }, { new: true, upsert: !progress });
                 if (updated)
                     return updated;
             }

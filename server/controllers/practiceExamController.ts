@@ -287,7 +287,7 @@ export async function submit(req: Request, res: Response) {
         const earned = question.parts.reduce((sum, part) => sum + results.get(part.id)!.points_earned, 0);
         const possible = question.parts.reduce((sum, part) => sum + part.points, 0);
         for (const conceptId of new Set(question.concept_ids)) {
-          await updateConfidenceScore(userId(req), conceptId, earned / possible >= 0.7, false,
+          await updateConfidenceScore(userId(req), exam.chat_id, conceptId, earned / possible >= 0.7,
             `${claimed._id}:${question.id}`);
         }
       }

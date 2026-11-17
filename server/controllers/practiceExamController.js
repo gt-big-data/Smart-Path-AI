@@ -394,7 +394,7 @@ function submit(req, res) {
                     const earned = question.parts.reduce((sum, part) => sum + results.get(part.id).points_earned, 0);
                     const possible = question.parts.reduce((sum, part) => sum + part.points, 0);
                     for (const conceptId of new Set(question.concept_ids)) {
-                        yield (0, confidence_1.updateConfidenceScore)(userId(req), conceptId, earned / possible >= 0.7, false, `${claimed._id}:${question.id}`);
+                        yield (0, confidence_1.updateConfidenceScore)(userId(req), exam.chat_id, conceptId, earned / possible >= 0.7, `${claimed._id}:${question.id}`);
                     }
                 }
             }

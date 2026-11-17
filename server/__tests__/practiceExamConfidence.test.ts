@@ -40,8 +40,8 @@ test.each([[7, true], [6, false]])('question score %s/10 produces correct=%s for
     results: [{ ...grading.results[0], points_earned: score as number - 5 }, grading.results[1]] } });
   await submit(req as any, { json: vi.fn() } as any);
   expect(updateConfidenceScore).toHaveBeenCalledTimes(2);
-  expect(updateConfidenceScore).toHaveBeenCalledWith('user1', 'topic1', correct, false, `${attemptId}:q1`);
-  expect(updateConfidenceScore).toHaveBeenCalledWith('user1', 'topic2', correct, false, `${attemptId}:q1`);
+  expect(updateConfidenceScore).toHaveBeenCalledWith('user1', 'chat1', 'topic1', correct, `${attemptId}:q1`);
+  expect(updateConfidenceScore).toHaveBeenCalledWith('user1', 'chat1', 'topic2', correct, `${attemptId}:q1`);
 });
 
 test('an already submitted attempt does not update progress or grade again', async () => {
