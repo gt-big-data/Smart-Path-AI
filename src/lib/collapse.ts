@@ -4,8 +4,8 @@ import { ancestorsOf, GraphTree } from './graphTree';
 /**
  * Expand and collapse state for the graph view (task C1).
  *
- * Collapsing a node hides its whole subtree in the tree from the center.
- * The collapsed node itself stays visible and reports how many nodes it hides.
+ * Collapsing a node hides its whole subtree in the tree from the center, except kept nodes (Focus keeps
+ * the path open, P2b). The collapsed node itself stays visible and reports how many nodes it hides.
  * Nothing here moves a node: hiding is done with React Flow's hidden flag,
  * applied in applyGraphStyles, so positions stay where the layout put them.
  *
@@ -25,10 +25,10 @@ export interface CollapseLayer {
 
 const NO_IDS: ReadonlySet<string> = new Set();
 
-/** How many drawn nodes are below nodeId in the tree. 0 for leaves and unknown ids. */
-export function countBelow(tree: GraphTree, nodeId: string, drawn?: ReadonlySet<string>): number {
+/** How many drawn nodes are below nodeId in the tree, not counting kept nodes or what is below them. 0 for leaves and unknown ids. */
+export function countBelow(tree: GraphTree, nodeId: string, drawn?: ReadonlySet<string>, keptIds: ReadonlySet<string> = NO_IDS): number {
   let count = 0;
-  const stack = [...(tree.nodes.get(nodeId)?.children ?? [])];
+  const stack = (tree.nodes.get(nodeId)?.children ?? []).filter(id => !keptIds.has(id));
   while (stack.length > 0) {
     const id = stack.pop()!;
     if (!drawn || drawn.has(id)) count++;
@@ -38,7 +38,9 @@ export function countBelow(tree: GraphTree, nodeId: string, drawn?: ReadonlySet<
 }
 
 /** Which nodes the collapsed set hides, how many drawn nodes each collapsed node hides, and which nodes can collapse */
-export function collapseLayer(tree: GraphTree, collapsedIds: ReadonlySet<string>, drawn?: ReadonlySet<string>): CollapseLayer {
+export function collapseLayer(
+  tree: GraphTree, collapsedIds: ReadonlySet<string>, drawn?: ReadonlySet<string>, keptIds: ReadonlySet<string> = NO_IDS
+): CollapseLayer {
   const hiddenIds = new Set<string>();
   const hiddenCounts = new Map<string, number>();
   const collapsibleIds = new Set<string>();
@@ -52,7 +54,7 @@ export function collapseLayer(tree: GraphTree, collapsedIds: ReadonlySet<string>
 
   // A node with nothing drawn below it has nothing to hide
   for (const id of collapsedIds) {
-    const count = countBelow(tree, id, drawn);
+    const count = countBelow(tree, id, drawn, keptIds);
     if (count > 0) hiddenCounts.set(id, count);
   }
   if (hiddenCounts.size === 0) return { hiddenIds, hiddenCounts, collapsibleIds };
@@ -60,7 +62,7 @@ export function collapseLayer(tree: GraphTree, collapsedIds: ReadonlySet<string>
   // Parents come before children in tree.order, so one pass reaches every node under a collapsed one
   for (const id of tree.order) {
     const parentId = tree.nodes.get(id)!.parentId;
-    if (parentId !== null && (hiddenCounts.has(parentId) || hiddenIds.has(parentId))) hiddenIds.add(id);
+    if (parentId !== null && !keptIds.has(id) && (hiddenCounts.has(parentId) || hiddenIds.has(parentId))) hiddenIds.add(id);
   }
 
   return { hiddenIds, hiddenCounts, collapsibleIds };
@@ -81,7 +83,8 @@ export function expandTo(tree: GraphTree, collapsedIds: ReadonlySet<string>, nod
  * confidence updates, edits and search don't touch it.
  *
  * - toggleCollapsed: collapse or expand one node (the C2 badge)
- * - setCollapsed: replace the whole set (C3 controls, P2b Focus and Clear)
+ * - setCollapsed: replace the whole set (C3 controls, P2b Focus and Clear). Focus also passes the path as kept ids,
+ *   which stay open under collapsed nodes until the next setCollapsed.
  * - expandTo: open every collapsed ancestor of a node (P2b, P3)
  *
  * The three actions never change identity and always act on the graph currently shown,
@@ -89,27 +92,29 @@ export function expandTo(tree: GraphTree, collapsedIds: ReadonlySet<string>, nod
  */
 export function useCollapse(tree: GraphTree, drawnNodes?: readonly { id: string }[]) {
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(NO_IDS);
+  const [keptIds, setKeptIds] = useState<ReadonlySet<string>>(NO_IDS);
 
   // A new graph starts fully expanded (React's "adjust state when a prop changes" pattern)
   const [shownTree, setShownTree] = useState(tree);
   if (shownTree !== tree) {
     setShownTree(tree);
     setCollapsedIds(NO_IDS);
+    setKeptIds(NO_IDS);
   }
 
   // Tree ids are always strings
   const drawn = useMemo(() => (drawnNodes ? new Set(drawnNodes.map(node => String(node.id))) : undefined), [drawnNodes]);
 
   // Read by the actions, so they never act on an earlier graph
-  const latest = useRef({ tree, drawn });
+  const latest = useRef({ tree, drawn, keptIds });
   useLayoutEffect(() => {
-    latest.current = { tree, drawn };
+    latest.current = { tree, drawn, keptIds };
   });
 
   // Each action reads the graph once, when it is called, so React can rerun the updater safely
   const toggleCollapsed = useCallback((nodeId: string) => {
-    const { tree: current, drawn: shown } = latest.current;
-    const canCollapse = countBelow(current, nodeId, shown) > 0;
+    const { tree: current, drawn: shown, keptIds: kept } = latest.current;
+    const canCollapse = countBelow(current, nodeId, shown, kept) > 0;
     setCollapsedIds(ids => {
       if (ids.has(nodeId)) {
         const next = new Set(ids);
@@ -120,9 +125,10 @@ export function useCollapse(tree: GraphTree, drawnNodes?: readonly { id: string 
     });
   }, []);
 
-  const setCollapsed = useCallback((nodeIds: Iterable<string>) => {
+  const setCollapsed = useCallback((nodeIds: Iterable<string>, kept: ReadonlySet<string> = NO_IDS) => {
     const { tree: current, drawn: shown } = latest.current;
-    setCollapsedIds(new Set([...nodeIds].filter(id => countBelow(current, id, shown) > 0)));
+    setKeptIds(kept);
+    setCollapsedIds(new Set([...nodeIds].filter(id => countBelow(current, id, shown, kept) > 0)));
   }, []);
 
   const expandToNode = useCallback((nodeId: string) => {
@@ -131,7 +137,8 @@ export function useCollapse(tree: GraphTree, drawnNodes?: readonly { id: string 
   }, []);
 
   const shownIds = shownTree === tree ? collapsedIds : NO_IDS;
-  const layer = useMemo(() => collapseLayer(tree, shownIds, drawn), [tree, shownIds, drawn]);
+  const shownKept = shownTree === tree ? keptIds : NO_IDS;
+  const layer = useMemo(() => collapseLayer(tree, shownIds, drawn, shownKept), [tree, shownIds, drawn, shownKept]);
 
   return { collapsedIds: shownIds, layer, toggleCollapsed, setCollapsed, expandTo: expandToNode };
 }
