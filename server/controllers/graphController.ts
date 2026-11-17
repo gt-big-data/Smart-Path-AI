@@ -50,7 +50,15 @@ const updateConfidenceScore = async (
         confidenceScore: {
           $let: {
             vars: {
-              mastery: { $ifNull: ['$confidenceScore', 0.2] },
+              // Start from the decayed score (0.05 per 30 days without practice, never below 0),
+              // the same value the Progress page shows, so time away is not erased by answering
+              mastery: { $max: [0, { $subtract: [
+                { $ifNull: ['$confidenceScore', 0.2] },
+                { $multiply: [{ $divide: [
+                  { $max: [0, { $subtract: [new Date(), { $ifNull: ['$lastAttempted', new Date()] }] }] },
+                  2592000000,
+                ] }, 0.05] },
+              ] }] },
             },
             in: {
               $let: {

@@ -98,11 +98,12 @@ test('progress reads decay scores without changing the stored score or practice 
   expect(next).not.toHaveBeenCalled();
 });
 
+// The stored 0.9 was last practised 30 days ago, so the update starts from the decayed 0.85
 test.each([
-  [true, false, 0.978313253],
-  [true, true, 0.978313253],
-  [false, false, 0.576470588],
-])('progress applies Bayesian update for correct=%s retry=%s', async (isCorrect, isRetry, expected) => {
+  [true, false, 0.966037736],
+  [true, true, 0.966037736],
+  [false, false, 0.473170732],
+])('progress applies decay, then the Bayesian update, for correct=%s retry=%s', async (isCorrect, isRetry, expected) => {
   const record = progress();
   model.findOne.mockResolvedValue(record);
   const res = response();
@@ -116,12 +117,13 @@ test.each([
   expect(next).not.toHaveBeenCalled();
 });
 
-test('a correct answer after 30 days applies decay before clamping at one', async () => {
+test('a correct answer after 30 days starts from the decayed score, not the stored 1', async () => {
   const record = progress(1);
   model.findOne.mockResolvedValue(record);
   const next = vi.fn();
   await updateConceptProgress(request({ conceptId: 'topic1', isCorrect: true, isRetry: false }), response(), next);
-  expect(record.confidenceScore).toBe(1);
+  // 1 decays to 0.95 over 30 days before the update is applied
+  expect(record.confidenceScore).toBeCloseTo(0.989595376);
   expect(next).not.toHaveBeenCalled();
 });
 

@@ -19,10 +19,11 @@ const updateConfidenceScore = async (userId: string, chatId: string, conceptId: 
   }
 
   const now = new Date();
-  progress.confidenceScore = calculateBayesianConfidence(
-  progress.confidenceScore,
-  isCorrect
-);
+  // Start from the decayed score, the same value the Progress page shows
+  const decayedScore = calculateDecayedConfidence(
+    progress.confidenceScore, progress.lastAttempted, now.getTime(),
+  );
+  progress.confidenceScore = calculateBayesianConfidence(decayedScore, isCorrect);
 
   // Clamp the score between 0 and 1
   progress.confidenceScore = Math.max(0, Math.min(1, progress.confidenceScore));
