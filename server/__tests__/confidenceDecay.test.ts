@@ -6,6 +6,7 @@ import { getConceptProgress, updateConceptProgress } from '../controllers/progre
 import { verifyAnswer } from '../controllers/graphController.ts';
 import { saveQuizHistory, processAllQuizHistory } from '../controllers/quizHistoryController.ts';
 import { calculateDecayedConfidence } from '../utils/confidenceDecay';
+import User from '../models/User';
 
 vi.mock('../models/ConceptProgress', () => ({ __esModule: true, default: vi.fn() }));
 vi.mock('../models/QuizHistory', () => ({ __esModule: true, default: vi.fn() }));
@@ -15,10 +16,16 @@ vi.mock('openai', () => ({ __esModule: true, default: vi.fn(function () { return
   } }] }) } },
 }; }) }));
 vi.mock('../utils/axiosConfig', () => ({ pythonServiceClient: {} }));
+vi.mock('../models/User', () => ({ __esModule: true, default: { exists: vi.fn() } }));
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = new Date('2026-11-01T12:00:00Z');
-const model = ConceptProgress as unknown as Mock & { find: Mock; findOne: Mock };
+const model = ConceptProgress as unknown as Mock & {
+  find: Mock;
+  findOne: Mock;
+  updateOne: Mock;
+  findOneAndUpdate: Mock;
+};
 const historyModel = QuizHistory as unknown as Mock & { find: Mock };
 
 function progress(score = 0.9, daysAgo = 30) {
@@ -33,7 +40,11 @@ function progress(score = 0.9, daysAgo = 30) {
 }
 
 function request(body: object = {}) {
-  return { session: { passport: { user: 'user1' } }, body } as unknown as Request;
+  return {
+    session: { passport: { user: 'user1' } },
+    body: { chat_id: 'chat1', submission_id: 'test-submission-1', ...body },
+    query: { chat_id: 'chat1' },
+  } as unknown as Request;
 }
 
 function response() {
@@ -47,9 +58,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   model.find = vi.fn();
   model.findOne = vi.fn();
+  model.updateOne = vi.fn().mockResolvedValue({});
+  model.findOneAndUpdate = vi.fn();
   historyModel.find = vi.fn();
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
+  vi.mocked(User.exists).mockResolvedValue({ _id: 'user1' } as any);
 });
 
 afterEach(() => {
@@ -85,8 +99,10 @@ test('progress reads decay scores without changing the stored score or practice 
 });
 
 test.each([
-  [true, false, 0.95], [true, true, 0.9], [false, false, 0.75],
-])('progress updates decay before applying correct=%s retry=%s', async (isCorrect, isRetry, expected) => {
+  [true, false, 0.978313253],
+  [true, true, 0.978313253],
+  [false, false, 0.576470588],
+])('progress applies Bayesian update for correct=%s retry=%s', async (isCorrect, isRetry, expected) => {
   const record = progress();
   model.findOne.mockResolvedValue(record);
   const res = response();
@@ -109,35 +125,54 @@ test('a correct answer after 30 days applies decay before clamping at one', asyn
   expect(next).not.toHaveBeenCalled();
 });
 
-test('new concepts retain the neutral starting score before their first answer', async () => {
-  const record = progress(0.5, 0);
+test('new concepts start with Bayesian initial mastery of 0.2', async () => {
+  const record = progress(0.2, 0);
   model.findOne.mockResolvedValue(null);
   model.mockImplementationOnce(function () { return record; });
   const next = vi.fn();
 
   await updateConceptProgress(request({ conceptId: 'topic1', isCorrect: true, isRetry: false }), response(), next);
 
-  expect(record.confidenceScore).toBeCloseTo(0.6);
+  expect(record.confidenceScore).toBeCloseTo(0.576470588);
   expect(record.lastAttempted).toEqual(NOW);
   expect(record.save).toHaveBeenCalledTimes(1);
   expect(next).not.toHaveBeenCalled();
 });
 
-test.each(['A', 'SKIPPED'])('website verification updates decayed MongoDB progress for %s', async userAnswer => {
+test.each(['A', 'SKIPPED'])('website verification uses atomic Bayesian update for %s', async userAnswer => {
   const record = progress();
   model.findOne.mockResolvedValue(record);
+  model.findOneAndUpdate.mockResolvedValue(record);
   const res = response();
 
-  await verifyAnswer(request({ question: 'Pick A', userAnswer, correctAnswer: 'A',
-    conceptId: 'topic1', isRetry: false }), res);
+  await verifyAnswer(request({
+    question: 'Pick A',
+    userAnswer,
+    correctAnswer: 'A',
+    conceptId: 'topic1',
+    isRetry: false,
+  }), res);
 
-  expect(record.confidenceScore).toBeCloseTo(userAnswer === 'A' ? 0.95 : 0.75);
-  expect(record.lastAttempted).toEqual(NOW);
-  expect(record.save).toHaveBeenCalledTimes(1);
+  expect(model.updateOne).toHaveBeenCalledTimes(1);
+  expect(model.findOneAndUpdate).toHaveBeenCalledTimes(1);
+
+  const [filter, pipeline] = model.findOneAndUpdate.mock.calls[0];
+
+  expect(filter.submissionIds).toEqual({ $ne: 'test-submission-1' });
+  expect(pipeline[0].$set.submissionIds).toEqual({
+    $setUnion: [
+      { $ifNull: ['$submissionIds', []] },
+      ['test-submission-1'],
+    ],
+  });
+  expect(pipeline[0].$set.confidenceScore).toBeDefined();
+  expect(pipeline[0].$set.lastAttempted).toEqual(NOW);
+
+  expect(record.save).not.toHaveBeenCalled();
   expect(res.json).toHaveBeenCalled();
 });
 
-test('quiz-history saves preserve accrued decay when resetting the practice timestamp', async () => {
+test('saving quiz history does not change confidence or practice timestamp', async () => {
   const record = progress();
   model.findOne.mockResolvedValue(record);
   historyModel.mockImplementationOnce(function () { return { save: vi.fn().mockResolvedValue({ _id: 'quiz1' }) }; });
@@ -147,9 +182,13 @@ test('quiz-history saves preserve accrued decay when resetting the practice time
     questions: [{ questionText: 'Pick A', userAnswer: 'A', correctAnswer: 'A', explanation: 'A' }],
   }), response(), next);
 
-  expect(record.confidenceScore).toBeCloseTo(0.85);
-  expect(record.lastAttempted).toEqual(NOW);
-  expect(record.save).toHaveBeenCalledTimes(1);
+  expect(record.confidenceScore).toBeCloseTo(0.9);
+  expect(record.lastAttempted).toEqual(new Date(NOW.getTime() - 30 * DAY));
+  expect(record.save).not.toHaveBeenCalled();
+  expect(model.updateOne).toHaveBeenCalledWith(
+  { user: 'user1', chatId: 'chat1', conceptId: 'topic1' },
+  { $set: { conceptName: 'Polynomial' } }
+);
   expect(next).not.toHaveBeenCalled();
 });
 
@@ -168,13 +207,15 @@ test('saving quiz history after grading does not award points or apply decay twi
   const res = response();
   await getConceptProgress(request(), res, next);
 
-  expect(record.confidenceScore).toBeCloseTo(0.95);
-  expect((res.json as Mock).mock.calls[0][0][0].confidenceScore).toBeCloseTo(0.95);
-  expect(record.lastAttempted).toEqual(NOW);
+  expect(record.confidenceScore).toBeCloseTo(0.9);
+  expect((res.json as Mock).mock.calls[0][0][0].confidenceScore).toBeCloseTo(0.85);
+  expect(record.lastAttempted).toEqual(new Date(NOW.getTime() - 30 * DAY));
+  expect(record.save).not.toHaveBeenCalled();
+  expect(model.findOneAndUpdate).toHaveBeenCalledTimes(1);
   expect(next).not.toHaveBeenCalled();
 });
 
-test('history backfills apply decay at the original practice date', async () => {
+test('processing quiz history does not replay old answers', async () => {
   const record = progress(0.9, 60);
   const practicedAt = new Date(NOW.getTime() - 30 * DAY);
   model.findOne.mockResolvedValue(record);
@@ -185,8 +226,10 @@ test('history backfills apply decay at the original practice date', async () => 
 
   await processAllQuizHistory(request(), response(), next);
 
-  expect(record.confidenceScore).toBeCloseTo(0.95);
-  expect(record.lastAttempted).toEqual(practicedAt);
+  expect(record.confidenceScore).toBeCloseTo(0.9);
+  expect(record.lastAttempted).toEqual(new Date(NOW.getTime() - 60 * DAY));
+  expect(record.save).not.toHaveBeenCalled();
+  expect(model.findOneAndUpdate).not.toHaveBeenCalled();
   expect(next).not.toHaveBeenCalled();
 });
 

@@ -3,6 +3,8 @@ import { Request, Response, NextFunction } from 'express';
 import ConceptProgress from '../models/ConceptProgress';
 import User from '../models/User';
 import { calculateDecayedConfidence } from '../utils/confidenceDecay';
+import { calculateBayesianConfidence } from '../utils/bayesianKnowledgeTracing';
+
 
 const updateConfidenceScore = async (userId: string, chatId: string, conceptId: string, isCorrect: boolean, isRetry: boolean) => {
   let progress = await ConceptProgress.findOne({ user: userId, chatId, conceptId });
@@ -12,19 +14,15 @@ const updateConfidenceScore = async (userId: string, chatId: string, conceptId: 
       user: userId,
       chatId,
       conceptId,
-      confidenceScore: 0.5, // Starting confidence score
+      confidenceScore: 0.2, // Starting confidence score
     });
   }
 
   const now = new Date();
-  progress.confidenceScore = calculateDecayedConfidence(
-    progress.confidenceScore, progress.lastAttempted, now.getTime(),
-  );
-  if (isCorrect) {
-    progress.confidenceScore += isRetry ? 0.05 : 0.1;
-  } else {
-    progress.confidenceScore -= 0.1;
-  }
+  progress.confidenceScore = calculateBayesianConfidence(
+  progress.confidenceScore,
+  isCorrect
+);
 
   // Clamp the score between 0 and 1
   progress.confidenceScore = Math.max(0, Math.min(1, progress.confidenceScore));
