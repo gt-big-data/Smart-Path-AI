@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import ReactFlow, { MiniMap, NodeDragHandler, NodeMouseHandler, NodeProps, ReactFlowInstance, useEdgesState, useNodesState } from 'reactflow';
+import ReactFlow, { MiniMap, NodeDragHandler, NodeMouseHandler, NodeProps, Panel, ReactFlowInstance, useEdgesState, useNodesState, useReactFlow } from 'reactflow';
 import 'reactflow/dist/style.css';
 import './graph/graph-flow.css';
-import PathBar from './graph/PathBar';
-import { buildGraphTree } from '../lib/graphTree';
-import { useCollapse } from '../lib/collapse';
+import PathBar, { type PathStep } from './graph/PathBar';
+import { buildGraphTree, type GraphTree } from '../lib/graphTree';
+import { expandTo, useCollapse } from '../lib/collapse';
 import { useCollapseDefaults } from '../lib/collapseDefaults';
 import { loadNodePositions, saveNodePositions } from '../lib/nodePositions';
 import { getPathHighlight } from '../lib/pathHighlight';
@@ -27,10 +27,6 @@ import GraphLoader from './graph/GraphLoader';
 import GraphEmptyState from './graph/GraphEmptyState';
 import { useGraphSearch } from './graph/useGraphSearch';
 import { graphView } from './graph/graphClasses';
-
-// Path bar preview with hardcoded steps; wired up in P2b. Keep hidden until it is wired
-// to the loaded graph and active path.
-const SHOW_PATH_BAR = false;
 
 // Rings from the center that the first view zooms to; the rest of the graph is a pan away
 const INITIAL_FOCUS_DEPTH = 2;
@@ -60,6 +56,36 @@ interface GraphVisualizationProps {
  * Structure lives in buildBaseGraph; styling layers (confidence, edits, search, path, collapse,
  * category) are combined by applyGraphStyles, so a restyle never moves nodes.
  */
+/** Pans to a node, keeping the current zoom unless it's too far out to read */
+function panTo(flow: ReactFlowInstance, nodeId: string) {
+  requestAnimationFrame(() => {
+    const node = flow.getNode(nodeId);
+    if (!node) return;
+    const position = node.positionAbsolute ?? node.position;
+    const width = node.width ?? DEFAULT_NODE_SIZE.width;
+    const height = node.height ?? DEFAULT_NODE_SIZE.height;
+    flow.setCenter(position.x + width / 2, position.y + height / 2, {
+      zoom: Math.max(flow.getZoom(), SEARCH_RESULT_MIN_ZOOM),
+      duration: 600,
+    });
+  });
+}
+
+/** The path bar (P2b), under the search box. Mounted inside <ReactFlow> so a step click can pan with useReactFlow. */
+function PathBarPanel({ steps, onRevealStep, onFocus, onClear }: {
+  steps: PathStep[]; onRevealStep: (nodeId: string) => void; onFocus: () => void; onClear: () => void;
+}) {
+  const flow = useReactFlow();
+  return (
+    <Panel position="top-left" style={{ margin: 0, top: 64, left: 14, width: 'min(340px, calc(100% - 230px))' }}>
+      <PathBar steps={steps} onStepClick={nodeId => {
+        onRevealStep(nodeId);
+        panTo(flow, nodeId);
+      }} onFocus={onFocus} onClear={onClear} />
+    </Panel>
+  );
+}
+
 const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   data,
   conceptProgress,
@@ -185,7 +211,27 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   // The search API may return numeric ids; node ids are strings
   const searchHits = useMemo(() => new Set(searchResults.map(String)), [searchResults]);
   const collapse = useCollapse(graphTree, baseGraph?.nodes);
-  const { collapseToCenter, expandAll } = useCollapseDefaults(collapse, graphTree, baseGraph?.nodes.length ?? 0, data?.graph_id);
+
+  // Focus (P2b) collapses everything off the path (C1): every path node is collapsed with the path kept open, so only
+  // the path is on screen and each path node's badge counts what is collapsed under it. It lasts as long as that path
+  // does: when the path changes or clears, by any route, the collapse state from before Focus comes back.
+  const [focus, setFocus] = useState<{ tree: GraphTree; targetId: string; collapsedBefore: ReadonlySet<string> } | null>(null);
+  const focused = focus?.tree === graphTree;
+  const { collapsedIds, setCollapsed } = collapse;
+  const focusPath = useCallback(() => {
+    if (!activePath || !activePathTargetId || focused) return;
+    setFocus({ tree: graphTree, targetId: activePathTargetId, collapsedBefore: collapsedIds });
+    setCollapsed(activePath.nodeIds, new Set(activePath.nodeIds));
+  }, [activePath, activePathTargetId, focused, graphTree, collapsedIds, setCollapsed]);
+  useEffect(() => {
+    if (!focus || (focused && focus.targetId === activePathTargetId)) return;
+    // A new path's target stays in view even if its branch was collapsed before Focus. A new graph keeps its own state.
+    if (focused) setCollapsed(activePathTargetId ? expandTo(graphTree, focus.collapsedBefore, activePathTargetId) : focus.collapsedBefore);
+    setFocus(null);
+  }, [focus, focused, activePathTargetId, graphTree, setCollapsed]);
+
+  // No graph id while focused, so a reload never opens the graph in the Focus view
+  const { collapseToCenter, expandAll } = useCollapseDefaults(collapse, graphTree, baseGraph?.nodes.length ?? 0, focused ? undefined : data?.graph_id);
 
   // Passed to every GraphNode as props: the pencil opens the editor, the badge toggles a branch.
   // Both callbacks are stable, so React Flow keeps the same nodeTypes across renders.
@@ -284,25 +330,21 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     [searchResults, styledGraph, graphTree]
   );
 
-  // Open a search result: show its path and pan to it, keeping the current zoom unless it's too far out to read.
-  // TODO(C1): call expandTo(nodeId) first so a result inside a collapsed branch is shown.
+  // Open a search result: show its path, open any collapsed branch that hides it, and pan to it
+  const { expandTo: expandToNode } = collapse;
   const handleSearchResultClick = useCallback((nodeId: string) => {
     if (nodeId === graphTree.centerId) clearActivePath();
     else setActivePathTargetId(nodeId);
 
-    if (!flowInstance) return;
-    requestAnimationFrame(() => {
-      const node = flowInstance.getNode(nodeId);
-      if (!node) return;
-      const position = node.positionAbsolute ?? node.position;
-      const width = node.width ?? DEFAULT_NODE_SIZE.width;
-      const height = node.height ?? DEFAULT_NODE_SIZE.height;
-      flowInstance.setCenter(position.x + width / 2, position.y + height / 2, {
-        zoom: Math.max(flowInstance.getZoom(), SEARCH_RESULT_MIN_ZOOM),
-        duration: 600,
-      });
-    });
-  }, [clearActivePath, flowInstance, graphTree.centerId]);
+    expandToNode(nodeId);
+    if (flowInstance) panTo(flowInstance, nodeId);
+  }, [clearActivePath, expandToNode, flowInstance, graphTree.centerId]);
+
+  // The path bar's steps, center first. Built like the search rows, so custom labels show.
+  const pathSteps = useMemo(
+    () => (activePath ? buildSearchResultItems(activePath.nodeIds, styledGraph?.nodes ?? [], graphTree) : []),
+    [activePath, styledGraph, graphTree]
+  );
 
   const handleSearchSubmit = () => {
     if (!hasCurrentSearchResponse) setPendingSearchNavigation(searchContext);
@@ -380,21 +422,6 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         onResultClick={handleSearchResultClick}
       />
 
-      {SHOW_PATH_BAR && (
-        <div style={{ position: 'absolute', top: 64, left: 14, zIndex: 30, width: 'min(340px, calc(100% - 230px))' }}>
-          <PathBar
-            steps={[
-              { id: 'linear-algebra', label: 'Linear Algebra' },
-              { id: 'vector-spaces', label: 'Vector spaces' },
-              { id: 'eigenvalues', label: 'Eigenvalues' },
-            ]}
-            onStepClick={() => {}}
-            onFocus={() => {}}
-            onClear={() => {}}
-          />
-        </div>
-      )}
-
       <GraphZoomControls
         onZoomIn={() => flowInstance?.zoomIn()}
         onZoomOut={() => flowInstance?.zoomOut()}
@@ -442,6 +469,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           pannable={!minimapLocked}
           maskColor="rgba(0, 0, 0, 0.2)"
         />
+        {pathSteps.length > 0 && <PathBarPanel steps={pathSteps} onRevealStep={expandToNode} onFocus={focusPath} onClear={clearActivePath} />}
       </ReactFlow>
     </div>
   );

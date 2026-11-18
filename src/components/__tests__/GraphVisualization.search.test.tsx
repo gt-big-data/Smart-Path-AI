@@ -1,19 +1,22 @@
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from 'reactflow';
+import type { ReactNode } from 'react';
 import GraphVisualization from '../GraphVisualization';
 
-const flow = vi.hoisted(() => ({ getNode: vi.fn(), setCenter: vi.fn(), fitView: vi.fn() }));
+const flow = vi.hoisted(() => ({ getNode: vi.fn(), setCenter: vi.fn(), fitView: vi.fn(), nodes: [] as Node[] }));
 
 vi.mock('reactflow', async () => {
   const React = await import('react');
+  const FlowContext = React.createContext<unknown>(null);
   const useNodesState = (initial: Node[]) => {
     const [nodes, setNodes] = React.useState(initial);
     return [nodes, setNodes, () => {}];
   };
-  function Flow({ nodes, onInit }: { nodes: Node[]; onInit: (instance: unknown) => void }) {
+  function Flow({ nodes, onInit, children }: { nodes: Node[]; onInit: (instance: unknown) => void; children?: ReactNode }) {
     const current = React.useRef(nodes);
     current.current = nodes;
+    flow.nodes = nodes;
     const instance = React.useRef({
       getNode: (id: string) => {
         flow.getNode(id);
@@ -24,10 +27,12 @@ vi.mock('reactflow', async () => {
       fitView: flow.fitView,
     });
     React.useEffect(() => { onInit(instance.current); }, [onInit]);
-    return null;
+    return <FlowContext.Provider value={instance.current}>{children}</FlowContext.Provider>;
   }
   return {
     default: Flow, useNodesState, useEdgesState: useNodesState,
+    useReactFlow: () => React.useContext(FlowContext),
+    Panel: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
     Background: () => null, Controls: () => null, MiniMap: () => null,
     Handle: () => null, Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
   };
@@ -88,6 +93,55 @@ afterEach(async () => {
 });
 
 describe('graph search navigation', () => {
+  it.each(['click', 'Enter'])('closes results after %s navigation while retaining the query and allowing reopening', async (navigation) => {
+    fetchMock.mockResolvedValue(response(['alpha']));
+    await query('alpha');
+    await debounce();
+    expect(view.root.findAllByType('ul')).toHaveLength(1);
+
+    if (navigation === 'Enter') await enter();
+    else {
+      const result = view.root.findAllByType('button').find(button => button.props.title === 'center › alpha')!;
+      await act(async () => { result.props.onClick(); });
+    }
+
+    expect(view.root.findAllByType('ul')).toHaveLength(0);
+    expect(view.root.findByType('input').props.value).toBe('alpha');
+    expect(view.root.findAllByType('button').some(button => button.children.includes('Focus'))).toBe(true);
+
+    await act(async () => { view.root.findByType('input').props.onFocus(); });
+    expect(view.root.findAllByType('ul')).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reveals a collapsed path step before panning without changing the selected path', async () => {
+    const nested = {
+      ...data,
+      graph: {
+        nodes: [...data.graph.nodes, { id: 'gamma', labels: ['Topic'], properties: { name: 'gamma', isCenter: false } }],
+        relationships: [...data.graph.relationships, { source: 'alpha', target: 'gamma', type: 'HAS_TOPIC' }],
+      },
+    };
+    await act(async () => { view.update(<GraphVisualization data={nested} conceptProgress={progress} />); });
+    fetchMock.mockResolvedValue(response(['gamma']));
+    await query('gamma');
+    await debounce();
+    await enter();
+
+    const collapse = view.root.findAllByType('button').find(button => button.props['aria-label'] === 'Collapse to center')!;
+    await act(async () => { collapse.props.onClick(); });
+    expect(flow.nodes.find(node => node.id === 'gamma')?.hidden).toBe(true);
+    flow.getNode.mockClear();
+    flow.setCenter.mockClear();
+
+    const step = view.root.findAllByType('button').find(button => button.children.includes('gamma'))!;
+    await act(async () => { step.props.onClick(); });
+    expect(flow.nodes.find(node => node.id === 'gamma')?.hidden).toBe(false);
+    expect(flow.getNode).toHaveBeenCalledExactlyOnceWith('gamma');
+    expect(flow.setCenter).toHaveBeenCalledTimes(1);
+    expect(flow.nodes.find(node => node.id === 'gamma')?.data.pathStep).toBe(3);
+  });
+
   it('waits for the current query when Enter is pressed during the debounce', async () => {
     fetchMock.mockResolvedValueOnce(response(['alpha'])).mockResolvedValueOnce(response(['beta']));
     await query('alpha');
