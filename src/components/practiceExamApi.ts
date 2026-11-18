@@ -47,6 +47,7 @@ export function selectedChoices(answer = ""): string[] {
   } catch { return []; }
 }
 export interface Attempt {
+  answers_locked?: boolean;
   id: string;
   status: "draft" | "grading" | "submitted" | "grading_failed";
   revision: number;

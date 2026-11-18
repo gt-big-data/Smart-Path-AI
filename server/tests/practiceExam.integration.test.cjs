@@ -9,6 +9,7 @@ const Exam = require('../models/PracticeExam').default;
 const Attempt = require('../models/PracticeExamAttempt').default;
 const Sample = require('../models/PracticeExamSample').default;
 const Progress = require('../models/ConceptProgress').default;
+const confidence = require('../services/confidence');
 const client = require('../utils/axiosConfig').pythonServiceClient;
 const router = require('../routes/practiceExamRoutes').default;
 const { randomUUID } = require('node:crypto');
@@ -161,12 +162,43 @@ test('owned exam lifecycle, private keys, draft conflicts, idempotent submission
   assert.equal((await request(second + '/submit', { method: 'POST', body: { revision: 0 } })).status, 500);
   const failed = (await request(second)).data.attempt;
   assert.equal(failed.status, 'grading_failed'); assert.equal(failed.revision, 2);
+  assert.equal(failed.answers_locked, false);
   failGrade = false;
   assert.equal((await request(second + '/submit', { method: 'POST', body: { revision: 2 } })).data.attempt.status, 'submitted');
   assert.equal((await request(`/${examId}/attempts`)).data.attempts.length, 2);
   assert.equal(await mongoose.connection.collection('quizhistories').countDocuments(), 0);
   assert.equal(await Progress.countDocuments(), 1);
   assert.ok(Math.abs((await Progress.findById(progress._id)).confidenceScore - 0.87368) < 0.00001);
+});
+
+test('saved grading locks failed answers and retries submission without grading again', async () => {
+  const exam = await Exam.create({ user_id: owner, chat_id: 'chat-local', graph_id: 'graph-local',
+    schema_version: 2, title: definition.title, total_points: definition.total_points,
+    sample_filename: 'sample.pdf', exam: structuredClone(definition), blueprint: { title: 'Blueprint' } });
+  const created = await request(`/${exam._id}/attempts`, { method: 'POST', body: { request_id: randomUUID() } });
+  const prefix = `/${exam._id}/attempts/${created.data.attempt.id}`;
+  const originalUpdate = confidence.updateConfidenceScore;
+  const gradesBefore = grades;
+  let failed;
+  try {
+    confidence.updateConfidenceScore = async () => { throw new Error('Simulated progress failure'); };
+    assert.equal((await request(prefix + '/submit', { method: 'POST', body: { revision: 0 } })).status, 500);
+    failed = (await request(prefix)).data.attempt;
+    assert.equal(failed.status, 'grading_failed');
+    assert.equal(failed.answers_locked, true);
+    assert.equal(failed.grading, undefined);
+    assert.ok((await Attempt.findById(failed.id)).grading);
+    assert.equal((await request(prefix, { method: 'PATCH', body: { revision: failed.revision,
+      answers: [{ part_id: 'q1-a', user_answer: 'changed answer' }] } })).status, 409);
+  } finally {
+    confidence.updateConfidenceScore = originalUpdate;
+  }
+  const retried = await request(prefix + '/submit', { method: 'POST', body: { revision: failed.revision } });
+  assert.equal(retried.status, 200);
+  assert.equal(retried.data.attempt.status, 'submitted');
+  assert.equal(retried.data.attempt.answers_locked, true);
+  assert.equal(retried.data.attempt.grading.score, 4);
+  assert.equal(grades, gradesBefore + 1);
 });
 
 test('sample PDFs persist independently, remain private and generate fresh exams without reuploading', async () => {

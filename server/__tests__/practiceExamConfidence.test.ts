@@ -4,7 +4,7 @@ import Exam from '../models/PracticeExam';
 import Attempt from '../models/PracticeExamAttempt';
 import { pythonServiceClient } from '../utils/axiosConfig';
 import { updateConfidenceScore } from '../services/confidence';
-import { submit } from '../controllers/practiceExamController.ts';
+import { getAttempt, submit } from '../controllers/practiceExamController.ts';
 
 vi.mock('../services/confidence', () => ({ updateConfidenceScore: vi.fn() }));
 const examId = '111111111111111111111111';
@@ -34,6 +34,14 @@ beforeEach(() => {
   vi.mocked(updateConfidenceScore).mockResolvedValue({} as any);
 });
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllEnvs(); });
+
+test.each([[undefined, false], [grading, true]])('failed attempts expose their answer lock without exposing saved grading (%s)', async (savedGrading, locked) => {
+  vi.mocked(Attempt.findOne).mockResolvedValueOnce({ ...attempt, status: 'grading_failed', grading: savedGrading } as any);
+  const json = vi.fn();
+  await getAttempt(req as any, { json } as any);
+  expect(json.mock.calls[0][0].attempt.answers_locked).toBe(locked);
+  expect(json.mock.calls[0][0].attempt.grading).toBeUndefined();
+});
 
 test.each([[7, true], [6, false]])('question score %s/10 produces correct=%s for each linked concept', async (score, correct) => {
   vi.mocked(pythonServiceClient.post).mockResolvedValueOnce({ data: { ...grading, score,

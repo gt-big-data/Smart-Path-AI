@@ -243,8 +243,10 @@ export default function PracticeExamPanel({
       void flush().catch(() => {});
     }, 700);
   };
+  const retrySubmission = attempt?.status === "grading_failed" && attempt.answers_locked === true;
   const editable =
     attempt &&
+    !attempt.answers_locked &&
     ["draft", "grading_failed"].includes(attempt.status) &&
     !busy &&
     !blocked;
@@ -264,9 +266,11 @@ export default function PracticeExamPanel({
   };
   const submitForGrading = () =>
     askConfirm({
-      title: "Submit for grading?",
-      message: "Submit the saved answers for grading? Unanswered parts receive zero points.",
-      confirmLabel: "Submit for grading",
+      title: retrySubmission ? "Retry submission?" : "Submit for grading?",
+      message: retrySubmission
+        ? "Your grades are saved and your answers are locked. Retry submission to finish updating your progress."
+        : "Submit the saved answers for grading? Unanswered parts receive zero points.",
+      confirmLabel: retrySubmission ? "Retry submission" : "Submit for grading",
       tone: "submit",
       run: () =>
         void act("Saving answers and grading…", async () => {
@@ -332,7 +336,7 @@ export default function PracticeExamPanel({
             disabled={!!busy || blocked}
             onClick={submitForGrading}
           >
-            {attempt?.status === "grading" ? "Retry grading" : "Submit exam"}
+            {retrySubmission ? "Retry submission" : attempt?.status === "grading" ? "Retry grading" : "Submit exam"}
           </button>
         ) : (
           <span aria-hidden="true" />
@@ -448,7 +452,9 @@ export default function PracticeExamPanel({
                 <p role="status" className="m-0 text-[10px] leading-[1.55] text-[#687572]">
                   {attempt.status === "grading"
                     ? "Grading in progress. Results refresh automatically. If interrupted, retry after ten minutes."
-                    : saveStatus}
+                    : retrySubmission
+                      ? "Your grades are saved and your answers are locked. Retry submission to finish updating your progress."
+                      : saveStatus}
                 </p>
                 {attempt.error && (
                   <p className="m-0 border border-[#e1b0b3] bg-[#fdf1f1] px-3.5 py-3 text-[10px] leading-[1.55] text-[#7f3a3e]">
@@ -614,7 +620,7 @@ export default function PracticeExamPanel({
                   disabled={!!busy || blocked}
                   onClick={submitForGrading}
                 >
-                  {attempt.status === "grading" ? "Retry interrupted grading" : "Submit for grading"}
+                  {retrySubmission ? "Retry submission" : attempt.status === "grading" ? "Retry interrupted grading" : "Submit for grading"}
                 </button>
               </footer>
             )}

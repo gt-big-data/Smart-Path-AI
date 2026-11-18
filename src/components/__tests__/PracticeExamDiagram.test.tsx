@@ -15,6 +15,32 @@ const network: NodeLinkDiagram = {
 };
 
 describe('practice exam diagrams', () => {
+  it.each([[100000, 100004], [-100004, -100000], [0.0001, 0.000100004]])(
+    'keeps both axes readable across the narrow interval %s to %s', (min, max) => {
+      const value: PlotDiagram = { ...plot, x_min: min, x_max: max, y_min: min, y_max: max,
+        series: [{ ...plot.series[0], points: [{ x: min, y: min }, { x: max, y: max }] }] };
+      const html = renderToStaticMarkup(<PracticeExamDiagram diagram={value} />);
+      const xLabels = [...html.matchAll(/<text x="[^"]+" y="355" text-anchor="middle">([^<]+)<\/text>/g)].map(match => match[1]);
+      const yLabels = [...html.matchAll(/<text x="77" y="[^"]+" text-anchor="end">([^<]+)<\/text>/g)].map(match => match[1]);
+      for (const labels of [xLabels, yLabels]) {
+        expect(labels.length).toBeGreaterThan(1);
+        expect(new Set(labels).size).toBe(labels.length);
+        expect(Number(labels[0])).toBeCloseTo(min, 12);
+        expect(Number(labels[labels.length - 1])).toBeCloseTo(max, 12);
+      }
+    },
+  );
+
+  it('omits floating point noise from fractional tick labels', () => {
+    const value: PlotDiagram = { ...plot, x_max: 0.4,
+      series: [{ ...plot.series[0], points: [{ x: 0, y: 2 }, { x: 0.4, y: 6 }] }] };
+    const html = renderToStaticMarkup(<PracticeExamDiagram diagram={value} />);
+    const labels = [...html.matchAll(/<text x="[^"]+" y="355" text-anchor="middle">([^<]+)<\/text>/g)].map(match => match[1]);
+    expect(labels).toContain('0.15');
+    expect(labels).toContain('0.3');
+    expect(labels).not.toContain('0.15000000000000002');
+  });
+
   it('renders correct coordinate transforms, axis units and series labels', () => {
     const html = renderToStaticMarkup(<PracticeExamDiagram diagram={plot} />);
     expect(html).toContain('points="85,279 555,167"');

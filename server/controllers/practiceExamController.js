@@ -175,6 +175,7 @@ function getSampleFile(req, res) {
 function attemptView(record) {
     return { id: String(record._id), exam_id: String(record.exam_id), status: record.status,
         revision: record.revision, answers: record.answers.map((a) => ({ part_id: a.part_id, user_answer: a.user_answer })),
+        answers_locked: record.status === 'grading' || record.status === 'submitted' || !!record.grading,
         grading: record.status === 'submitted' ? record.grading : undefined,
         error: record.error, submitted_at: record.submitted_at,
         created_at: record.createdAt, updated_at: record.updatedAt };

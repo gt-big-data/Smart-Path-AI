@@ -2,12 +2,16 @@ import { useId } from 'react';
 import type { ExamDiagram } from '../../server/services/practiceExamDiagram';
 
 const colors = ['#0f766e', '#b45309', '#4338ca', '#be123c', '#0369a1', '#4d7c0f'];
-const tick = (n: number) => Number(n.toPrecision(5)).toString();
 function ticks(min: number, max: number) {
   const unit = 10 ** Math.floor(Math.log10((max - min) / 8));
   const step = [1, 2, 2.5, 5, 10].find(n => n * unit >= (max - min) / 8)! * unit;
   const first = Math.ceil(min / step) * step;
-  return Array.from({ length: Math.floor((max - first) / step + 1e-9) + 1 }, (_, i) => first + i * step);
+  const precision = Math.min(17, Math.max(1,
+    Math.floor(Math.log10(Math.max(Math.abs(min), Math.abs(max)))) - Math.floor(Math.log10(step)) + 2));
+  return Array.from({ length: Math.floor((max - first) / step + 1e-9) + 1 }, (_, i) => {
+    const value = first + i * step;
+    return { value, label: Number(value.toPrecision(precision)).toString() };
+  });
 }
 
 function edgeGeometry(sx: number, sy: number, tx: number, ty: number, curved: boolean) {
@@ -40,13 +44,13 @@ export default function PracticeExamDiagram({ diagram: d }: { diagram: ExamDiagr
       <title id={titleId}>{d.caption}</title>
       <rect width="640" height="420" fill="white" />
       {d.kind === 'plot' ? <>
-        {ticks(d.x_min, d.x_max).map((v, i) => <g key={`x${i}`} fontSize="12" fill="#334155">
+        {ticks(d.x_min, d.x_max).map(({ value: v, label }, i) => <g key={`x${i}`} fontSize="12" fill="#334155">
           <path d={`M ${x(v)} 55 V 335`} stroke="#e2e8f0" />
-          <text x={x(v)} y="355" textAnchor="middle">{tick(v)}</text>
+          <text x={x(v)} y="355" textAnchor="middle">{label}</text>
         </g>)}
-        {ticks(d.y_min, d.y_max).map((v, i) => <g key={`y${i}`} fontSize="12" fill="#334155">
+        {ticks(d.y_min, d.y_max).map(({ value: v, label }, i) => <g key={`y${i}`} fontSize="12" fill="#334155">
           <path d={`M 85 ${y(v)} H 555`} stroke="#e2e8f0" />
-          <text x="77" y={y(v) + 4} textAnchor="end">{tick(v)}</text>
+          <text x="77" y={y(v) + 4} textAnchor="end">{label}</text>
         </g>)}
         <path d="M 85 55 V 335 H 555" fill="none" stroke="#334155" strokeWidth="2" />
         {d.x_min < 0 && d.x_max > 0 && <path d={`M ${x(0)} 55 V 335`} stroke="#64748b" />}
