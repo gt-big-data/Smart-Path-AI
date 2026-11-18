@@ -9,6 +9,7 @@ import Attempt from '../models/PracticeExamAttempt';
 import SamplePdf from '../models/PracticeExamSample';
 import { pythonServiceClient } from '../utils/axiosConfig';
 import { publicExam, validateExam, validateAnswers, validateGrading } from '../services/practiceExamContract';
+import { updateConfidenceScore } from '../services/confidence';
 
 const GRADING_LEASE_MS = 10 * 60 * 1000;
 class ApiError extends Error {
@@ -123,6 +124,7 @@ export async function getSampleFile(req: Request, res: Response) {
 function attemptView(record: any) {
   return { id: String(record._id), exam_id: String(record.exam_id), status: record.status,
     revision: record.revision, answers: record.answers.map((a: any) => ({ part_id: a.part_id, user_answer: a.user_answer })),
+    answers_locked: record.status === 'grading' || record.status === 'submitted' || !!record.grading,
     grading: record.status === 'submitted' ? record.grading : undefined,
     error: record.error, submitted_at: record.submitted_at,
     created_at: record.createdAt, updated_at: record.updatedAt };
@@ -252,7 +254,7 @@ export async function saveDraft(req: Request, res: Response) {
   try { answers = validateAnswers(req.body.answers, exam.exam); }
   catch (error: any) { throw new ApiError(400, error.message); }
   const record = await Attempt.findOneAndUpdate({ _id: req.params.attemptId, user_id: userId(req),
-    exam_id: exam._id, status: { $in: ['draft', 'grading_failed'] }, revision: rev },
+    exam_id: exam._id, status: { $in: ['draft', 'grading_failed'] }, revision: rev, grading: { $exists: false } },
     { $set: { answers, status: 'draft' }, $unset: { error: 1 }, $inc: { revision: 1 } }, { new: true });
   if (!record) throw new ApiError(409, 'Draft changed or is locked; reload the attempt before saving');
   return res.json({ attempt: attemptView(record) });
@@ -270,12 +272,27 @@ export async function submit(req: Request, res: Response) {
     { $set: { status: 'grading', grading_started_at: now }, $unset: { error: 1 }, $inc: { revision: 1 } }, { new: true });
   if (!claimed) throw new ApiError(409, 'Attempt changed or is already grading; reload its status');
   try {
-    const response = await pythonServiceClient.post('/practice-exam/grade', {
+    const response = claimed.grading ? { data: claimed.grading } : await pythonServiceClient.post('/practice-exam/grade', {
       exam: exam.exam, answers: claimed.answers.map(a => ({ part_id: a.part_id, user_answer: a.user_answer })),
     }, { headers, timeout: 300000 });
     let grading;
     try { grading = validateGrading(response.data, exam.exam); }
     catch { throw new ApiError(502, 'AI service returned invalid grading; your answers are saved'); }
+    // Keep the same grades if a partial progress update needs to be retried.
+    const saved = await Attempt.updateOne({ _id: claimed._id, status: 'grading', revision: claimed.revision },
+      { $set: { grading } });
+    if (!saved.matchedCount) throw new ApiError(409, 'Grading was superseded; reload the attempt');
+    const results = new Map(grading.results.map(result => [result.part_id, result]));
+    for (const section of exam.exam.sections) {
+      for (const question of section.questions.filter(question => !question.error)) {
+        const earned = question.parts.reduce((sum, part) => sum + results.get(part.id)!.points_earned, 0);
+        const possible = question.parts.reduce((sum, part) => sum + part.points, 0);
+        for (const conceptId of new Set(question.concept_ids)) {
+          await updateConfidenceScore(userId(req), exam.chat_id, conceptId, earned / possible >= 0.7,
+            `${claimed._id}:${question.id}`);
+        }
+      }
+    }
     const record = await Attempt.findOneAndUpdate({ _id: claimed._id, status: 'grading', revision: claimed.revision },
       { $set: { status: 'submitted', grading, submitted_at: new Date() }, $inc: { revision: 1 } }, { new: true });
     if (!record) throw new ApiError(409, 'Grading was superseded; reload the attempt');

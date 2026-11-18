@@ -93,3 +93,56 @@ test('unverified questions stay visible but cannot be answered or scored', () =>
   assert.deepEqual(validateGrading({ score: 0, total: 0, results: [] }, value).results, []);
   assert.throws(() => validateExam({ ...value, total_points: 5 }));
 });
+
+const plot = {
+  kind: 'plot', caption: 'Position over time', x_label: 'Time (s)', y_label: 'Position (m)',
+  x_min: 0, x_max: 4, y_min: 0, y_max: 10,
+  series: [{ label: 'Object A', style: 'line', points: [{ x: 0, y: 2 }, { x: 4, y: 6 }] }],
+};
+const network = {
+  kind: 'node_link', caption: 'Weighted network',
+  nodes: [{ id: 'a', label: 'A', x: 0, y: 0 }, { id: 'b', label: 'B', x: 1, y: 1 }],
+  edges: [{ source: 'a', target: 'b', label: '4', directed: true }],
+};
+test('diagrams survive storage and public projection without exposing solutions', () => {
+  for (const diagram of [plot, network]) {
+    const saved = structuredClone(exam);
+    saved.sections[0].questions[0].diagram = diagram;
+    const loaded = JSON.parse(JSON.stringify(saved));
+    validateExam(loaded);
+    const shown = publicExam(loaded).sections[0].questions[0];
+    assert.deepEqual(shown.diagram, diagram);
+    assert.equal('answer' in shown.parts[0], false);
+    assert.deepEqual(validateAnswers([{ part_id: 'q1-a', user_answer: '2' }], loaded), [{ part_id: 'q1-a', user_answer: '2' }]);
+  }
+});
+test('rejects malformed, oversized and executable diagram payloads before persistence', () => {
+  for (const diagram of [
+    { ...plot, x_max: 0 }, { ...plot, y_min: NaN }, { ...plot, series: [] },
+    { ...plot, series: [{ ...plot.series[0], points: [{ x: 100, y: 0 }] }] },
+    { ...plot, series: [{ ...plot.series[0], points: Array(201).fill({ x: 0, y: 0 }) }] },
+    { ...plot, svg: '<script>bad</script>' }, { ...plot, answer: 'secret' },
+    { ...network, nodes: [network.nodes[0], network.nodes[0]] },
+    { ...network, edges: [{ ...network.edges[0], target: 'unknown' }] },
+    { ...network, edges: [network.edges[0], network.edges[0]] },
+    { ...network, nodes: [network.nodes[0], { ...network.nodes[1], x: 0, y: 0 }] },
+    { kind: 'svg', caption: 'Bad', data: '<svg />' },
+  ]) {
+    const value = structuredClone(exam);
+    value.sections[0].questions[0].diagram = diagram;
+    assert.throws(() => validateExam(value), /invalid exam diagram/);
+  }
+});
+
+test('Markov diagrams retain self-loops and both directions in saved exams', () => {
+  const value = structuredClone(exam);
+  const diagram = { ...network, edges: [
+    { source: 'a', target: 'a', label: '0.3', directed: true },
+    { source: 'a', target: 'b', label: '0.7', directed: true },
+    { source: 'b', target: 'a', label: '0.6', directed: true },
+    { source: 'b', target: 'b', label: '0.4', directed: true },
+  ] };
+  value.sections[0].questions[0].diagram = diagram;
+  validateExam(value);
+  assert.deepEqual(publicExam(value).sections[0].questions[0].diagram, diagram);
+});

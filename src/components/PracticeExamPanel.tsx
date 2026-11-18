@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Check, Loader2, X } from "lucide-react";
+import { invalidateProgressCache } from "../lib/progressCache";
 import { Answer, Attempt, Exam, examApi, errorText, selectedChoices } from "./practiceExamApi";
 import MathText from "./MathText";
+import PracticeExamDiagram from "./PracticeExamDiagram";
 import { examButtonClass, examFieldClass } from "./practiceExamClasses";
 
 type PendingConfirm = {
@@ -61,6 +63,10 @@ export default function PracticeExamPanel({
   const [exam, setExam] = useState<Exam>();
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [attempt, setAttempt] = useState<Attempt>();
+  const submittedAttemptId = attempt?.status === "submitted" ? attempt.id : undefined;
+  useEffect(() => {
+    if (submittedAttemptId) invalidateProgressCache(chatId);
+  }, [chatId, submittedAttemptId]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -237,8 +243,10 @@ export default function PracticeExamPanel({
       void flush().catch(() => {});
     }, 700);
   };
+  const retrySubmission = attempt?.status === "grading_failed" && attempt.answers_locked === true;
   const editable =
     attempt &&
+    !attempt.answers_locked &&
     ["draft", "grading_failed"].includes(attempt.status) &&
     !busy &&
     !blocked;
@@ -258,9 +266,11 @@ export default function PracticeExamPanel({
   };
   const submitForGrading = () =>
     askConfirm({
-      title: "Submit for grading?",
-      message: "Submit the saved answers for grading? Unanswered parts receive zero points.",
-      confirmLabel: "Submit for grading",
+      title: retrySubmission ? "Retry submission?" : "Submit for grading?",
+      message: retrySubmission
+        ? "Your grades are saved and your answers are locked. Retry submission to finish updating your progress."
+        : "Submit the saved answers for grading? Unanswered parts receive zero points.",
+      confirmLabel: retrySubmission ? "Retry submission" : "Submit for grading",
       tone: "submit",
       run: () =>
         void act("Saving answers and grading…", async () => {
@@ -326,7 +336,7 @@ export default function PracticeExamPanel({
             disabled={!!busy || blocked}
             onClick={submitForGrading}
           >
-            {attempt?.status === "grading" ? "Retry grading" : "Submit exam"}
+            {retrySubmission ? "Retry submission" : attempt?.status === "grading" ? "Retry grading" : "Submit exam"}
           </button>
         ) : (
           <span aria-hidden="true" />
@@ -442,7 +452,9 @@ export default function PracticeExamPanel({
                 <p role="status" className="m-0 text-[10px] leading-[1.55] text-[#687572]">
                   {attempt.status === "grading"
                     ? "Grading in progress. Results refresh automatically. If interrupted, retry after ten minutes."
-                    : saveStatus}
+                    : retrySubmission
+                      ? "Your grades are saved and your answers are locked. Retry submission to finish updating your progress."
+                      : saveStatus}
                 </p>
                 {attempt.error && (
                   <p className="m-0 border border-[#e1b0b3] bg-[#fdf1f1] px-3.5 py-3 text-[10px] leading-[1.55] text-[#7f3a3e]">
@@ -487,6 +499,7 @@ export default function PracticeExamPanel({
                     <p className="m-0 whitespace-pre-wrap text-[13px] font-medium leading-normal text-[#202a29]">
                       <MathText>{q.stem}</MathText>
                     </p>
+                    {q.diagram && <PracticeExamDiagram diagram={q.diagram} />}
                     {q.parts.map((p, pi) => {
                       const selected = selectedChoices(answers[p.id]);
                       const grade = attempt?.grading?.results.find((r) => r.part_id === p.id);
@@ -607,7 +620,7 @@ export default function PracticeExamPanel({
                   disabled={!!busy || blocked}
                   onClick={submitForGrading}
                 >
-                  {attempt.status === "grading" ? "Retry interrupted grading" : "Submit for grading"}
+                  {retrySubmission ? "Retry submission" : attempt.status === "grading" ? "Retry interrupted grading" : "Submit for grading"}
                 </button>
               </footer>
             )}

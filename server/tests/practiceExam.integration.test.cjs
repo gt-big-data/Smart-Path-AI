@@ -8,6 +8,8 @@ const User = require('../models/User').default;
 const Exam = require('../models/PracticeExam').default;
 const Attempt = require('../models/PracticeExamAttempt').default;
 const Sample = require('../models/PracticeExamSample').default;
+const Progress = require('../models/ConceptProgress').default;
+const confidence = require('../services/confidence');
 const client = require('../utils/axiosConfig').pythonServiceClient;
 const router = require('../routes/practiceExamRoutes').default;
 const { randomUUID } = require('node:crypto');
@@ -19,6 +21,9 @@ if (!uri || !/^mongodb:\/\/127\.0\.0\.1:27028\/smartpath_exam_test_[a-z0-9]+$/.t
 const definition = {
   schema_version: 2, title: 'Solutions', instructions: 'Show work', time_limit_minutes: 30, total_points: 5,
   sections: [{ name: 'Part I', instructions: null, questions: [{ id: 'q1', label: '1', stem: 'Shared scenario',
+    diagram: { kind: 'plot', caption: 'Amount versus volume', x_label: 'Volume (L)', y_label: 'Amount (mol)',
+      x_min: 0, x_max: 2, y_min: 0, y_max: 4,
+      series: [{ label: 'Solution', style: 'line', points: [{ x: 0, y: 0 }, { x: 2, y: 4 }] }] },
     concept_ids: ['topic-molarity'], parts: [
       { id: 'q1-a', label: '(i)', group_label: '(a)', group_instructions: 'Calculate each value.', type: 'numeric', prompt: 'Moles?', choices: null, answer: '2 mol',
         explanation: 'Given', rubric: 'Method and answer', points: 2, depends_on: [] },
@@ -45,6 +50,7 @@ client.post = async (path, data) => {
   grades++;
   assert.equal(data.exam.total_points, 5);
   assert.equal(data.exam.sections[0].questions[0].parts[0].answer, '2 mol');
+  assert.deepEqual(data.exam.sections[0].questions[0].diagram, definition.sections[0].questions[0].diagram);
   if (holdGrade) await new Promise(resolve => { releaseGrade = resolve; });
   if (failGrade) throw new Error('Simulated upstream failure');
   return { data: { score: 4, total: 5, results: [
@@ -58,7 +64,7 @@ before(async () => {
     throw new Error('Refusing to use or delete an existing database; choose a fresh test suffix');
   }
   ownsDatabase = true;
-  await Promise.all([User, Exam, Attempt, Sample].map(async model => {
+  await Promise.all([User, Exam, Attempt, Sample, Progress].map(async model => {
     await model.createCollection(); await model.createIndexes();
   }));
   owner = String((await User.create({ email: 'owner@local.test', chats: [
@@ -102,6 +108,7 @@ test('owned exam lifecycle, private keys, draft conflicts, idempotent submission
   assert.equal((await request('', { method: 'POST', body: upload('chat-empty'), multipart: true })).status, 409);
   const generated = await request('', { method: 'POST', body: upload(), multipart: true });
   assert.equal(generated.status, 201);
+  assert.deepEqual(generated.data.exam.sections[0].questions[0].diagram, definition.sections[0].questions[0].diagram);
   const examId = generated.data.id;
   assert.equal(generated.data.graph_id, 'graph-local');
   const publicPart = generated.data.exam.sections[0].questions[0].parts[0];
@@ -117,6 +124,8 @@ test('owned exam lifecycle, private keys, draft conflicts, idempotent submission
   // Changing the active graph must not change the saved exam or its answer key.
   await User.updateOne({ _id: owner, 'chats.chat_id': 'chat-local' }, { $set: { 'chats.$.graph_id': 'replacement-graph' } });
   assert.equal((await request(`/${examId}`)).data.graph_id, 'graph-local');
+  assert.deepEqual((await request(`/${examId}`)).data.exam.sections[0].questions[0].diagram,
+    definition.sections[0].questions[0].diagram);
   const requestId = randomUUID();
   const created = await request(`/${examId}/attempts`, { method: 'POST', body: { request_id: requestId } });
   assert.equal(created.status, 201);
@@ -143,6 +152,8 @@ test('owned exam lifecycle, private keys, draft conflicts, idempotent submission
   assert.equal(submitted.data.attempt.grading.score, 4);
   assert.equal(submitted.data.attempt.grading.results[0].correct_answer, '2 mol');
   assert.equal((await request(prefix + '/submit', { method: 'POST', body: { revision: 1 } })).status, 200);
+  const progress = await Progress.findOne({ user: owner, chatId: 'chat-local', conceptId: 'topic-molarity' });
+  assert.ok(Math.abs(progress.confidenceScore - 0.57647) < 0.00001);
   assert.equal(grades, 1);
   assert.equal((await request(prefix, { method: 'PATCH', body: { revision: 3, answers } })).status, 409);
   const another = await request(`/${examId}/attempts`, { method: 'POST', body: { request_id: randomUUID() } });
@@ -151,11 +162,43 @@ test('owned exam lifecycle, private keys, draft conflicts, idempotent submission
   assert.equal((await request(second + '/submit', { method: 'POST', body: { revision: 0 } })).status, 500);
   const failed = (await request(second)).data.attempt;
   assert.equal(failed.status, 'grading_failed'); assert.equal(failed.revision, 2);
+  assert.equal(failed.answers_locked, false);
   failGrade = false;
   assert.equal((await request(second + '/submit', { method: 'POST', body: { revision: 2 } })).data.attempt.status, 'submitted');
   assert.equal((await request(`/${examId}/attempts`)).data.attempts.length, 2);
   assert.equal(await mongoose.connection.collection('quizhistories').countDocuments(), 0);
-  assert.equal(await mongoose.connection.collection('conceptprogresses').countDocuments(), 0);
+  assert.equal(await Progress.countDocuments(), 1);
+  assert.ok(Math.abs((await Progress.findById(progress._id)).confidenceScore - 0.87368) < 0.00001);
+});
+
+test('saved grading locks failed answers and retries submission without grading again', async () => {
+  const exam = await Exam.create({ user_id: owner, chat_id: 'chat-local', graph_id: 'graph-local',
+    schema_version: 2, title: definition.title, total_points: definition.total_points,
+    sample_filename: 'sample.pdf', exam: structuredClone(definition), blueprint: { title: 'Blueprint' } });
+  const created = await request(`/${exam._id}/attempts`, { method: 'POST', body: { request_id: randomUUID() } });
+  const prefix = `/${exam._id}/attempts/${created.data.attempt.id}`;
+  const originalUpdate = confidence.updateConfidenceScore;
+  const gradesBefore = grades;
+  let failed;
+  try {
+    confidence.updateConfidenceScore = async () => { throw new Error('Simulated progress failure'); };
+    assert.equal((await request(prefix + '/submit', { method: 'POST', body: { revision: 0 } })).status, 500);
+    failed = (await request(prefix)).data.attempt;
+    assert.equal(failed.status, 'grading_failed');
+    assert.equal(failed.answers_locked, true);
+    assert.equal(failed.grading, undefined);
+    assert.ok((await Attempt.findById(failed.id)).grading);
+    assert.equal((await request(prefix, { method: 'PATCH', body: { revision: failed.revision,
+      answers: [{ part_id: 'q1-a', user_answer: 'changed answer' }] } })).status, 409);
+  } finally {
+    confidence.updateConfidenceScore = originalUpdate;
+  }
+  const retried = await request(prefix + '/submit', { method: 'POST', body: { revision: failed.revision } });
+  assert.equal(retried.status, 200);
+  assert.equal(retried.data.attempt.status, 'submitted');
+  assert.equal(retried.data.attempt.answers_locked, true);
+  assert.equal(retried.data.attempt.grading.score, 4);
+  assert.equal(grades, gradesBefore + 1);
 });
 
 test('sample PDFs persist independently, remain private and generate fresh exams without reuploading', async () => {

@@ -1,4 +1,5 @@
 /** Versioned AI/Express contract. Answer keys never belong in pre-submission responses. */
+import { ExamDiagram, validateDiagram } from './practiceExamDiagram';
 export interface ExamPart {
   id: string; label: string; type: 'mcq' | 'tf' | 'binary' | 'multi_select' | 'short_answer' | 'long_answer' | 'numeric';
   prompt: string; choices: string[] | null; answer: string; explanation: string; rubric: string;
@@ -8,6 +9,7 @@ export interface ExamPart {
 export interface ExamQuestion {
   id: string; label: string; stem: string; concept_ids: string[]; parts: ExamPart[];
   error?: string | null;
+  diagram?: ExamDiagram | null;
 }
 export interface ExamSection { name: string; instructions: string | null; questions: ExamQuestion[] }
 export interface ExamDefinition {
@@ -42,6 +44,7 @@ export function validateExam(value: unknown): asserts value is ExamDefinition {
     if (typeof section.name !== 'string' || !Array.isArray(section.questions) || !section.questions.length) return fail();
     for (const question of section.questions) {
       id(question.id); questionCount++;
+      if (question.diagram != null) validateDiagram(question.diagram);
       if (question.error != null) {
         if (typeof question.error !== 'string' || !question.error.trim()
             || typeof question.label !== 'string' || typeof question.stem !== 'string'
@@ -121,6 +124,7 @@ export function publicExam(exam: ExamDefinition) {
     sections: exam.sections.map(s => ({ name: s.name, instructions: s.instructions,
       questions: s.questions.map(q => ({ id: q.id, label: q.label, stem: q.stem, concept_ids: q.concept_ids,
         ...(q.error ? { error: q.error } : {}),
+        ...(q.diagram ? { diagram: q.diagram } : {}),
         parts: q.parts.map(p => ({ id: p.id, label: p.label, type: p.type, prompt: p.prompt,
           choices: p.choices, points: p.points, depends_on: p.depends_on,
           ...(p.group_label ? { group_label: p.group_label, group_instructions: p.group_instructions } : {}) })) })) })),
