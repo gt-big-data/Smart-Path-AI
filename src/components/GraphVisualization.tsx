@@ -72,11 +72,16 @@ function panTo(flow: ReactFlowInstance, nodeId: string) {
 }
 
 /** The path bar (P2b), under the search box. Mounted inside <ReactFlow> so a step click can pan with useReactFlow. */
-function PathBarPanel({ steps, onFocus, onClear }: { steps: PathStep[]; onFocus: () => void; onClear: () => void }) {
+function PathBarPanel({ steps, onRevealStep, onFocus, onClear }: {
+  steps: PathStep[]; onRevealStep: (nodeId: string) => void; onFocus: () => void; onClear: () => void;
+}) {
   const flow = useReactFlow();
   return (
     <Panel position="top-left" style={{ margin: 0, top: 64, left: 14, width: 'min(340px, calc(100% - 230px))' }}>
-      <PathBar steps={steps} onStepClick={nodeId => panTo(flow, nodeId)} onFocus={onFocus} onClear={onClear} />
+      <PathBar steps={steps} onStepClick={nodeId => {
+        onRevealStep(nodeId);
+        panTo(flow, nodeId);
+      }} onFocus={onFocus} onClear={onClear} />
     </Panel>
   );
 }
@@ -464,7 +469,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
           pannable={!minimapLocked}
           maskColor="rgba(0, 0, 0, 0.2)"
         />
-        {pathSteps.length > 0 && <PathBarPanel steps={pathSteps} onFocus={focusPath} onClear={clearActivePath} />}
+        {pathSteps.length > 0 && <PathBarPanel steps={pathSteps} onRevealStep={expandToNode} onFocus={focusPath} onClear={clearActivePath} />}
       </ReactFlow>
     </div>
   );

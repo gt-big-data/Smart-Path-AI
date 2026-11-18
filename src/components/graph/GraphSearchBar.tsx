@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Search, X } from 'lucide-react';
 import type { SearchResultItem } from '../../lib/searchResults';
 import type { SearchMode } from './useGraphSearch';
@@ -49,6 +50,8 @@ export default function GraphSearchBar({
   onSubmit,
   onResultClick,
 }: GraphSearchBarProps) {
+  const [resultsOpen, setResultsOpen] = useState(true);
+
   return (
     <div className={searchClass}>
       <div className={searchBarClass}>
@@ -59,10 +62,15 @@ export default function GraphSearchBar({
           placeholder="Search topics, concepts, definitions..."
           value={query}
           className={searchInput}
-          onChange={(e) => onQueryChange(e.target.value)}
+          onFocus={() => setResultsOpen(true)}
+          onChange={(e) => {
+            setResultsOpen(true);
+            onQueryChange(e.target.value);
+          }}
           onKeyDown={(e) => {
             if (e.key !== 'Enter' || !query.trim()) return;
             e.preventDefault();
+            setResultsOpen(false);
             onSubmit();
           }}
         />
@@ -81,7 +89,10 @@ export default function GraphSearchBar({
                 type="button"
                 aria-pressed={active}
                 className={modeClass(active)}
-                onClick={() => onModeChange(option.value)}
+                onClick={() => {
+                  setResultsOpen(true);
+                  onModeChange(option.value);
+                }}
               >
                 {option.label}
               </button>
@@ -90,7 +101,7 @@ export default function GraphSearchBar({
         </div>
       </div>
 
-      {results.length > 0 && (
+      {resultsOpen && results.length > 0 && (
         <div className={searchResultsClass}>
           <div className={searchCount}>
             Found {results.length} matching node{results.length !== 1 ? 's' : ''}
@@ -104,7 +115,10 @@ export default function GraphSearchBar({
                     type="button"
                     className={resultClass(active)}
                     title={item.trail.length > 0 ? [...item.trail, item.label].join(' › ') : item.label}
-                    onClick={() => onResultClick(item.id)}
+                    onClick={() => {
+                      setResultsOpen(false);
+                      onResultClick(item.id);
+                    }}
                   >
                     <span className={resultDot} style={{ background: item.color }} />
                     <span className={resultCopy}>
