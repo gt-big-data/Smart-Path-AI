@@ -96,6 +96,9 @@ const ProgressPage: React.FC = () => {
   const navigate = useNavigate();
   const [chatTitleMap, setChatTitleMap] = useState<Map<string, string>>(new Map(cached?.chatTitles ?? []));
   const [studyChats, setStudyChats] = useState<StudyChat[]>(cached?.studyChats || []);
+  const lastChats = useRef<StudyChat[]>(cached?.studyChats || []);
+  const lastChatTitles = useRef<Map<string, string>>(new Map(cached?.chatTitles ?? []));
+  const [chatListError, setChatListError] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
   // Chat groups the user collapsed; every group starts open
   const [collapsedChats, setCollapsedChats] = useState<Set<string>>(() => new Set());
@@ -147,22 +150,38 @@ const ProgressPage: React.FC = () => {
         }
 
         // Fetch chat titles to label accordion sections
-        const localChatTitleMap = new Map<string, string>();
+        let localChatTitleMap = new Map<string, string>();
         let localStudyChats: StudyChat[] = [];
         try {
           const userRes = await axios.get(`${API_BASE_URL}/chat/user`, { withCredentials: true });
           const userId = userRes.data;
           if (userId) {
             const chatsRes = await axios.get(`${API_BASE_URL}/chat/${userId}/chats`, { withCredentials: true });
-            const chats = Array.isArray(chatsRes.data) ? chatsRes.data : [];
+            if (!Array.isArray(chatsRes.data)) throw new Error('Invalid chat list response');
+            const chats = chatsRes.data;
             localStudyChats = chats.filter((chat: any) => chat.chat_id).map((chat: any) => ({ id: chat.chat_id, title: chat.title || 'Untitled chat', graphId: chat.graph_id }));
             chats.forEach((chat: any) => {
               if (chat.chat_id) localChatTitleMap.set(chat.chat_id, chat.title || 'Untitled Chat');
               if (chat.graph_id) localChatTitleMap.set(chat.graph_id, chat.title || 'Untitled Chat');
             });
+          } else {
+            throw new Error('Could not identify the signed-in user');
           }
+          if (!active) return;
+          lastChats.current = localStudyChats;
+          lastChatTitles.current = localChatTitleMap;
+          setChatListError(false);
         } catch (err) {
           console.warn('Could not fetch chat titles:', err);
+          if (!active) return;
+          localChatTitleMap = new Map(lastChatTitles.current);
+          // The progress endpoint already filters records to the user's current chats.
+          const ids = new Set<string>(progressList.map((p: any) => p.chatId || p.chat_id).filter(Boolean));
+          localStudyChats = [...lastChats.current];
+          for (const id of ids) {
+            if (!localStudyChats.some(chat => chat.id === id)) localStudyChats.push({ id, title: 'Untitled chat' });
+          }
+          setChatListError(true);
         }
         if (!active) return;
         setChatTitleMap(localChatTitleMap);
@@ -652,6 +671,11 @@ const ProgressPage: React.FC = () => {
           Couldn't refresh your progress, so this is the last saved copy. {error}
         </p>
       )}
+
+      {chatListError && <p role="alert" className="mb-0 mt-5 border border-[#f0d58a] bg-[#fff8e1] px-3 py-2 text-[10px] text-[#8a6512]">
+        Could not refresh your chats. Showing available saved activity.{' '}
+        <button type="button" className="cursor-pointer underline" onClick={() => setRefreshVersion(version => version + 1)}>Retry</button>
+      </p>}
 
       <div className="grid items-start gap-5 pt-[26px] grid-cols-[minmax(250px,330px)_minmax(0,1fr)] max-[900px]:grid-cols-1">
         <section className="border border-[#cbd7d4] bg-[#fbfcfc] p-[22px]" aria-labelledby="progress-review-title">

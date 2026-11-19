@@ -53,7 +53,12 @@ export async function listAssessments(req: Request, res: Response, next: NextFun
     }
     return res.json({ items: records.map(r => {
       const history = byExam.get(String(r._id)) || [];
-      const graded = history.find(a => a.status === 'submitted' && a.grading);
+      const graded = history.filter(a => a.status === 'submitted' && a.grading)
+        .reduce<typeof history[number] | undefined>((latest, attempt) => {
+          const submitted = new Date(attempt.submitted_at || attempt.createdAt).getTime();
+          const latestSubmitted = latest && new Date(latest.submitted_at || latest.createdAt).getTime();
+          return !latest || submitted > latestSubmitted! ? attempt : latest;
+        }, undefined);
       return { id: String(r._id), kind: 'exam', title: r.title, createdAt: r.createdAt,
         status: history[0]?.status || 'not_started', score: graded?.grading?.score ?? null,
         total: graded?.grading?.total ?? r.total_points,

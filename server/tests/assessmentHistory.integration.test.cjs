@@ -149,10 +149,10 @@ test('exam summaries include unattempted exams, all attempt scores, and zero-poi
     total_points: 5, sample_filename: 'sample.pdf', exam: definition, blueprint: {} });
   let response = await api('/api/progress/assessments?chat_id=exam-only&kind=exam');
   assert.equal(response.data.items[0].status, 'not_started'); assert.equal(response.data.items[0].score, null);
-  await Attempt.create({ user_id: owner, exam_id: exam._id, request_id: randomUUID(), status: 'submitted', grading: { score: 2, total: 5, results: [] }, createdAt: new Date('2026-11-17') });
-  await Attempt.create({ user_id: owner, exam_id: exam._id, request_id: randomUUID(), status: 'submitted', grading: { score: 4, total: 5, results: [] } });
+  await Attempt.create({ user_id: owner, exam_id: exam._id, request_id: randomUUID(), status: 'submitted', grading: { score: 2, total: 5, results: [] }, createdAt: new Date('2026-11-17'), submitted_at: new Date('2026-11-20') });
+  await Attempt.create({ user_id: owner, exam_id: exam._id, request_id: randomUUID(), status: 'submitted', grading: { score: 4, total: 5, results: [] }, createdAt: new Date('2026-11-18'), submitted_at: new Date('2026-11-19') });
   response = await api('/api/progress/assessments?chat_id=exam-only&kind=exam');
-  assert.equal(response.data.items[0].score, 4); assert.equal(response.data.items[0].attempts.length, 2);
+  assert.equal(response.data.items[0].score, 2); assert.equal(response.data.items[0].attempts.length, 2);
   assert.deepEqual(response.data.items[0].attempts.map(a => a.score), [4,2]);
   assert.equal(JSON.stringify(response.data).includes('Expected A'), false);
   await Exam.create({ user_id: owner, chat_id: 'exam-only', graph_id: 'graph-only', title: 'Unscorable',
