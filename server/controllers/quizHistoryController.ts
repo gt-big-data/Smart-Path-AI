@@ -99,7 +99,10 @@ export const getUserQuizHistories = async (req: Request, res: Response, next: Ne
   }
 
   try {
-    const quizHistories = await QuizHistory.find({ userID: userId })
+    const user = await User.findById(userId).select('chats.chat_id');
+    const chatIds = user?.chats.map(chat => chat.chat_id) || [];
+    const quizHistories = await QuizHistory.find({ userID: userId, chatID: { $in: chatIds },
+      $or: [{ schemaVersion: { $ne: 2 } }, { status: 'completed' }] })
       .sort({ createdAt: -1 }) // Most recent first
       .exec();
 

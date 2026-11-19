@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Bot, Check, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import axios from 'axios';
 import { API_BASE_URL } from '../config/api';
-import { quizKey, readQuiz, type Question, type QuizState, type Result } from '../lib/quizState';
+import { quizKey, readQuiz, type QuizState, type Result } from '../lib/quizState';
 import { invalidateProgressCache } from '../lib/progressCache';
-import { choiceLetter, displayAnswer, splitQuestion, type RawPair } from '../lib/quizQuestions';
+import { choiceLetter, displayAnswer, splitQuestion } from '../lib/quizQuestions';
 import QuizProgress from '../components/quiz/QuizProgress';
 import QuizAnswerList from '../components/quiz/QuizAnswerList';
 import QuizReview from '../components/quiz/QuizReview';
@@ -18,8 +18,9 @@ import {
   quizStatus,
 } from '../components/quiz/quizClasses';
 
-/** One quiz run opened from the chat workspace. Progress itself is kept in localStorage per chat. */
+/** One quiz run; quizId opens a durable server snapshot, including legacy read-only reviews. */
 export interface QuizSession {
+  quizId?: string;
   id: string;
   chatId: string;
   graphId: string;
@@ -40,41 +41,41 @@ const QUIZ_PAGE =
 /** Quiz dock tab: generates or resumes a quiz, checks answers and saves history */
 export default function Quiz({ session, onClose, onAskAssistant }: QuizProps) {
   const { chatId, graphId, title, length, format } = session;
-  const [quiz, setQuiz] = useState<QuizState | null>(() => readQuiz(chatId));
+  const [quiz, setQuiz] = useState<QuizState | null>(() => session.quizId ? null : readQuiz(chatId));
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(() => !readQuiz(chatId));
+  const [loading, setLoading] = useState(() => !!session.quizId || !readQuiz(chatId));
   const [error, setError] = useState('');
-  const started = useRef(false);
+  const [loadVersion, setLoadVersion] = useState(0);
+  const started = useRef<Promise<QuizState>>();
 
   useEffect(() => {
-    if (quiz || started.current) return;
+    if (quiz) return;
     if (!chatId || !graphId) {
       setLoading(false);
       setError('This quiz is missing its document. Close it and start again.');
       return;
     }
-    started.current = true;
-    axios.get(`${API_BASE_URL}/api/generate-questions-with-answers`, {
-      params: { graph_id: graphId, chat_id: chatId, length, format }, withCredentials: true,
-    }).then(response => {
-      const pairs = response.data?.qa_pairs;
-      if (response.data?.status !== 'success' || !Array.isArray(pairs) || !pairs.length) {
-        throw new Error('No questions were generated for this document.');
-      }
-      const qaData: Question[] = pairs.map((pair: RawPair) => ({
-        question: pair.question || '',
-        answer: pair.answer === 'T' ? 'True' : pair.answer === 'F' ? 'False' : String(pair.answer || ''),
-        conceptId: String(pair.conceptId || pair.concept_id || pair.topicId || pair.topic_id || pair.id || ''),
-        conceptName: pair.conceptName || undefined,
-        explanation: pair.explanation,
-        format: pair.format,
-      }));
-      const next = { attemptId: crypto.randomUUID(), qaData, currentQuestionIndex: 0, results: qaData.map(() => null), completed: false };
-      localStorage.setItem(quizKey(chatId), JSON.stringify(next));
+    let active = true;
+    if (!started.current) started.current = (session.quizId
+      ? axios.get(`${API_BASE_URL}/api/quiz-history/runs/${session.quizId}`, { withCredentials: true })
+      : axios.get(`${API_BASE_URL}/api/generate-questions-with-answers`, {
+        params: { graph_id: graphId, chat_id: chatId, length, format, persist: true, attempt_id: session.id },
+        withCredentials: true,
+      })).then(response => {
+        if (response.data?.quiz) return response.data.quiz as QuizState;
+        throw new Error('Could not load the saved quiz. Please retry.');
+      });
+    started.current.then(next => {
+      if (!active) return;
+      if (!session.quizId || !next.completed) localStorage.setItem(quizKey(chatId), JSON.stringify(next));
+      setLoading(false);
       setQuiz(next);
-    }).catch(err => setError(err.message || 'Could not generate the quiz.')).finally(() => setLoading(false));
-  }, [chatId, graphId, length, format, quiz]);
+      if (!session.quizId) invalidateProgressCache(chatId);
+    }).catch(err => { if (active) setError(err.response?.data?.error || err.message || 'Could not load the quiz.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [chatId, graphId, length, format, quiz, session.id, session.quizId, loadVersion]);
 
   const save = (next: QuizState) => {
     localStorage.setItem(quizKey(chatId), JSON.stringify(next));
@@ -89,6 +90,17 @@ export default function Quiz({ session, onClose, onAskAssistant }: QuizProps) {
   };
 
   const finish = async (next: QuizState) => {
+    if (next.quizId) {
+      try {
+        const response = await axios.post(`${API_BASE_URL}/api/quiz-history/runs/${next.quizId}/complete`, {}, { withCredentials: true });
+        save(response.data.quiz);
+        invalidateProgressCache(chatId);
+      } catch (err) {
+        console.error('Could not complete saved quiz', err);
+        setError('Your answers are saved, but completion failed. Please retry.');
+      }
+      return;
+    }
     const valid = next.qaData
       .map((question, index) => ({ question, result: next.results[index], index }))
       .filter(item => item.question.conceptId.trim());
@@ -138,6 +150,7 @@ export default function Quiz({ session, onClose, onAskAssistant }: QuizProps) {
     setError('');
     try {
       const response = await axios.post(`${API_BASE_URL}/api/verify-answer`, {
+        ...(quiz.quizId ? { quiz_id: quiz.quizId, question_index: index } : {}),
         question: question.question,
         userAnswer: answer,
         correctAnswer: question.answer,
@@ -151,12 +164,15 @@ export default function Quiz({ session, onClose, onAskAssistant }: QuizProps) {
         answer,
         isCorrect: !skip && response.data?.isCorrect === true,
         feedback: response.data?.feedback || '',
-        skipped: skip,
+        skipped: response.data?.skipped ?? skip,
       };
       const results = [...quiz.results];
       results[index] = result;
+      const qaData = [...quiz.qaData];
+      if (quiz.quizId) qaData[index] = { ...question, answer: response.data.correctAnswer || '',
+        explanation: response.data.explanation || question.explanation };
       // Stay on this question so the student sees whether they got it right; Next / See results moves on.
-      save({ ...quiz, results });
+      save({ ...quiz, qaData, results });
     } catch (err) {
       console.error('Could not verify answer', err);
       setError('Could not submit this answer. Please try again.');
@@ -170,6 +186,9 @@ export default function Quiz({ session, onClose, onAskAssistant }: QuizProps) {
     <main className={QUIZ_PAGE}>
       <div className={quizStatus}>
         <p role="alert">{error}</p>
+        <button type="button" className={quizButtonClass('primary')} onClick={() => {
+          started.current = undefined; setError(''); setLoading(true); setLoadVersion(v => v + 1);
+        }}>Retry</button>
         <button type="button" className={quizButtonClass('primary')} onClick={onClose}>Close quiz</button>
       </div>
     </main>
@@ -205,6 +224,7 @@ export default function Quiz({ session, onClose, onAskAssistant }: QuizProps) {
 
       {quiz.completed ? (
         <QuizReview
+            scoreAvailable={quiz.scoreAvailable !== false}
           questions={quiz.qaData}
           results={quiz.results}
           error={error}

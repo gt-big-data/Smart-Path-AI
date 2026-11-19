@@ -733,12 +733,17 @@ body:has(.smartpath-workspace) {
 	flex-shrink: 0;
 }
 .app-sidebar > .library {
-	flex: 0 1 auto;
+	flex: 1 1 0;
 	min-height: 0;
-	flex-shrink: 1;
+	display: flex;
+	flex-direction: column;
+	overscroll-behavior-y: contain;
 }
-/* Unorganized drop area: fills the library height between the folder list and Home */
-.app-sidebar > .root-drop-zone {
+/* Keep the root drop area available below folders, including an empty library. */
+.library > * {
+	flex-shrink: 0;
+}
+.library > .root-drop-zone {
 	flex: 1 0 auto;
 	display: flex;
 	flex-direction: column;

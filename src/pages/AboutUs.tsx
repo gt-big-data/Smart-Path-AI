@@ -36,7 +36,7 @@ export const teamMembers: TeamMember[] = [
     isLead: true,
     description: 'Overall project lead for SmartPathAI.',
     linkedin: 'https://www.linkedin.com/in/vinh-t-pham/',
-    photo: '/team/vihn.png',
+    photo: '/team/vinh.jpg',
   },
   {
     name: 'Anvi Bejjanki',

@@ -3,6 +3,8 @@ import { Request, Response } from 'express';
 import OpenAI from 'openai';
 import ConceptProgress from '../models/ConceptProgress';
 import User from '../models/User';
+import QuizHistory from '../models/QuizHistory';
+import { applyQuizResult, createQuizRun, ownedQuizRun, quizRunView, storeQuizResult, QuizRunError } from '../services/quizRuns';
 import { pythonServiceClient } from '../utils/axiosConfig';
 import { calculateDecayedConfidence } from '../utils/confidenceDecay';
 
@@ -173,6 +175,16 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
       return res.status(404).json({ error: 'Chat not found' });
     }
 
+    const persist = req.query.persist === 'true';
+    const attemptId = req.query.attempt_id;
+    if (persist) {
+      if (typeof attemptId !== 'string' || !/^[\w-]{8,100}$/.test(attemptId)) {
+        return res.status(400).json({ error: 'A stable quiz attempt ID is required' });
+      }
+      const existing = await QuizHistory.findOne({ userID: String(userId), chatID: chatId, attemptId })
+        .select('+definition +results');
+      if (existing) return res.json({ status: 'success', quiz: quizRunView(existing) });
+    }
     const progress = await ConceptProgress.find({ user: userId, chatId })
       .select({ conceptId: 1, confidenceScore: 1, _id: 0 })
       .lean();
@@ -226,9 +238,16 @@ export const generateQuestionsWithAnswers = async (req: Request, res: Response) 
       };
     });
 
+    if (persist) {
+      const run = await createQuizRun(String(userId), chatId, String(graph_id), String(attemptId),
+        qa_pairs.map(q => ({ ...q, answer: q.answer === 'T' ? 'True' : q.answer === 'F' ? 'False' : String(q.answer),
+          conceptId: String(q.conceptId), question: String(q.question) })), questionFormat);
+      return res.json({ status: 'success', quiz: quizRunView(run) });
+    }
     res.json({ status: 'success', qa_pairs, graph_id: graph_id, requested_length: length, actual_length: qa_pairs.length });
   } catch (error: any) {
     console.error('Error generating questions and answers:', error.message);
+    if (error instanceof QuizRunError) return res.status(error.status).json({ error: error.message });
     if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
       return res.status(503).json({ 
         error: 'AI service is currently unavailable',
@@ -305,20 +324,39 @@ export const verifyAnswer = async (req: Request, res: Response) => {
   }
 
   try {
-    const { question, userAnswer, correctAnswer, conceptId, isRetry, chat_id: chatId, graph_id: graphId } = req.body as VerifyAnswerRequest;
+    let { question, userAnswer, correctAnswer, conceptId, isRetry, chat_id: chatId, graph_id: graphId } = req.body as VerifyAnswerRequest;
+    if (typeof userAnswer !== 'string' || !userAnswer.trim()) {
+      return res.status(400).json({ error: 'An answer or SKIPPED is required' });
+    }
+    const run = req.body.quiz_id ? await ownedQuizRun(String(userId), String(req.body.quiz_id)) : undefined;
+    const questionIndex = req.body.question_index;
+    if (run) {
+      if (run.schemaVersion !== 2 || !Number.isInteger(questionIndex) || questionIndex < 0 ||
+          !run.definition?.[questionIndex]) return res.status(400).json({ error: 'Invalid quiz question' });
+      const source = run.definition[questionIndex];
+      question = source.question; correctAnswer = source.answer; conceptId = source.conceptId;
+      chatId = run.chatID; graphId = run.graphId; isRetry = false;
+      const previous = run.results?.[questionIndex];
+      if (previous) {
+        if (previous.answer !== userAnswer) return res.status(409).json({ error: 'This question already has a saved answer. Reload the quiz.' });
+        await applyQuizResult(String(userId), run, questionIndex, previous);
+        return res.json({ ...previous, correctAnswer, explanation: source.explanation });
+      }
+      if (run.status !== 'draft') return res.status(409).json({ error: 'This quiz is already completed' });
+    }
     if (typeof chatId !== 'string' || !chatId.trim()) {
       return res.status(400).json({ error: 'chat_id is required' });
     }
     if (typeof conceptId !== 'string' || !conceptId.trim()) {
       return res.status(400).json({ error: 'conceptId is required' });
     }
-    const submissionId = req.body.submission_id;
+    const submissionId = run ? `quiz:${run._id}:${questionIndex}` : req.body.submission_id;
     if (typeof submissionId !== 'string' || !submissionId.trim()) {
       return res.status(400).json({ error: 'submission_id is required' });
     }
     const chatOwner = await User.exists({
       _id: userId,
-      ...(graphId
+      ...(!run && graphId
         ? { chats: { $elemMatch: { chat_id: chatId, graph_id: graphId } } }
         : { 'chats.chat_id': chatId }),
     });
@@ -326,11 +364,20 @@ export const verifyAnswer = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Chat not found' });
     }
     const normalizedConceptId = conceptId.trim();
+    const finish = async (response: { isCorrect: boolean; feedback: string; followUpQuestion: string }) => {
+      if (run) {
+        const verdict = await storeQuizResult(String(userId), run, questionIndex, { ...response, answer: userAnswer,
+          skipped: userAnswer === 'SKIPPED' || userAnswer.trim().toUpperCase() === 'SKIP' });
+        await applyQuizResult(String(userId), run, questionIndex, verdict);
+        return res.json({ ...verdict, correctAnswer, explanation: run.definition![questionIndex].explanation });
+      }
+      await updateConfidenceScore(userId, chatId!, normalizedConceptId, response.isCorrect, isRetry || false, submissionId);
+      return res.json(response);
+    };
 
     // Handle skipped questions - treat as incorrect
     if (userAnswer === 'SKIPPED' || userAnswer.trim().toUpperCase() === 'SKIP') {
-      await updateConfidenceScore(userId, chatId, normalizedConceptId, false, false, submissionId);
-      return res.json({
+      return await finish({
         isCorrect: false,
         feedback: `You skipped this question. Skipped questions are counted as incorrect for confidence tracking.`,
         followUpQuestion: ''
@@ -409,10 +456,10 @@ Provide feedback in this JSON format:
       console.error('LLM verify fallback engaged:', llmError);
       response = evaluateAnswerFallback(userAnswer, correctAnswer || '');
     }
-    await updateConfidenceScore(userId, chatId, normalizedConceptId, response.isCorrect, isRetry || false, submissionId);
-    return res.json(response);
+    return await finish(response);
   } catch (error) {
     console.error('Error verifying answer:', error);
+    if (error instanceof QuizRunError) return res.status(error.status).json({ error: error.message });
     return res.status(500).json({ error: 'Failed to verify answer or save progress' });
   }
 };

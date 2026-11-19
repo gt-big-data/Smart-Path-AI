@@ -71,9 +71,19 @@ export const getConceptProgress = async (req: Request, res: Response, next: Next
 
     try {
         const chatId = typeof req.query.chat_id === 'string' ? req.query.chat_id : undefined;
+    const user = await User.findById(userId).select('chats.chat_id');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Legacy progress can outlive its chat or predate chat-scoped tracking.
+    const ownedChatIds = user.chats
+      .map(chat => chat.chat_id)
+      .filter(id => typeof id === 'string' && id.trim().length > 0);
+    if (chatId && !ownedChatIds.includes(chatId)) {
+      return res.status(404).json({ message: 'Chat not found' });
+    }
         const progress = await ConceptProgress.find({
           user: userId,
-          ...(chatId ? { chatId } : {}),
+      chatId: chatId || { $in: ownedChatIds },
         });
         console.log(`[getConceptProgress] Found ${progress.length} progress records for user ${userId}`);
         

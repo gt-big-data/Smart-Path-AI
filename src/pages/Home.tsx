@@ -153,7 +153,7 @@ const landingTeams: LandingTeam[] = [
   {
     name: 'Project Leads',
     members: [
-      { name: 'Vinh Pham', linkedin: 'https://www.linkedin.com/in/vinh-t-pham/', photo: '/team/vihn.png' },
+      { name: 'Vinh Pham', linkedin: 'https://www.linkedin.com/in/vinh-t-pham/', photo: '/team/vinh.jpg' },
       { name: 'Raghav Garg', linkedin: 'https://www.linkedin.com/in/raghav-garg-22b787303/', photo: '/team/raghav.jpg' },
     ],
   },

@@ -2,6 +2,9 @@ import { Request, Response } from 'express';
 import User, { IUser, IChat } from '../models/User';
 import ConceptProgress from '../models/ConceptProgress';
 import QuizHistory from '../models/QuizHistory';
+import PracticeExam from '../models/PracticeExam';
+import PracticeExamAttempt from '../models/PracticeExamAttempt';
+import PracticeExamSample from '../models/PracticeExamSample';
 import { v4 as uuidv4 } from 'uuid';
 import mongoose from 'mongoose';
 
@@ -93,6 +96,11 @@ export const addMessageToChat = async (req: Request, res: Response) => {
       console.log("unauthorized");
       res.status(401).json({ message: 'Unauthorized' });
       return; // CRITICAL: Stop execution after sending error response
+    }
+
+    if (typeof chat_id !== 'string' || !chat_id.trim()) {
+      res.status(400).json({ message: 'A valid chat ID is required' });
+      return;
     }
 
     const user = await User.findById(userId);
@@ -281,6 +289,10 @@ export const deleteChat = async (req: Request, res: Response): Promise<void> => 
 
     await ConceptProgress.deleteMany({ user: userId, chatId: chat_id });
     await QuizHistory.deleteMany({ userID: String(userId), chatID: chat_id });
+    const exams = await PracticeExam.find({ user_id: String(userId), chat_id }).select('_id');
+    await PracticeExamAttempt.deleteMany({ user_id: String(userId), exam_id: { $in: exams.map(exam => exam._id) } });
+    await PracticeExam.deleteMany({ user_id: String(userId), chat_id });
+    await PracticeExamSample.deleteMany({ user_id: String(userId), chat_id });
 
     // Remove the chat from the array
     user.chats.splice(chatIndex, 1);

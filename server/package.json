@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "prestart": "npm run build",
     "start": "node index.js",
     "dev": "npx ts-node --prefer-ts-exts --project tsconfig.json index.ts",
     "build": "tsc",

@@ -23,10 +23,11 @@ export function useChatQuiz({ currentChatId, currentChat }: UseChatQuizOptions) 
   // A quiz belongs to the chat it was started in, so it is only shown while that chat is open
   const activeQuiz = quizSession?.chatId === currentChatId ? quizSession : null;
 
-  const openQuizSession = (length: string, format: string) => {
+  const openQuizSession = (length: string, format: string, quizId?: string) => {
     if (!currentChat?.graph_id) return;
     setQuizSession({
-      id: String(Date.now()),
+      id: crypto.randomUUID(),
+      quizId,
       chatId: currentChatId,
       graphId: currentChat.graph_id,
       title: currentChat.title,
@@ -36,12 +37,12 @@ export function useChatQuiz({ currentChatId, currentChat }: UseChatQuizOptions) 
   };
 
   const handleStartQuiz = () => {
-    if (savedQuiz?.completed) clearQuiz(currentChatId);
+    clearQuiz(currentChatId);
     openQuizSession(String(quizLength), questionFormat);
   };
 
   // Progress is restored from localStorage, so the settings only matter for a brand-new quiz
-  const handleResumeQuiz = () => openQuizSession('5', 'mixed');
+  const handleResumeQuiz = () => openQuizSession('5', 'mixed', savedQuiz?.quizId);
 
   return {
     isQuizModalOpen,

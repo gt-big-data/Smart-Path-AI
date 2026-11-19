@@ -10,6 +10,7 @@ import type { SetChats } from './useChatList';
 
 interface UsePdfUploadOptions {
   currentChatId: string;
+  createChat: () => Promise<Chat | undefined>;
   setChats: SetChats;
   showErrorToast: (message: string) => void;
   appendErrorMessage: (chatId: string, content: string) => void;
@@ -22,6 +23,7 @@ interface UsePdfUploadOptions {
 /** PDF upload for the open chat: streams progress, attaches the file message, and shows the resulting graph */
 export function usePdfUpload({
   currentChatId,
+  createChat,
   setChats,
   showErrorToast,
   appendErrorMessage,
@@ -52,9 +54,18 @@ export function usePdfUpload({
     }
 
     setSelectedFile(file);
-    clearGraphData();
+    let uploadChatId = currentChatId;
     try {
       setIsProcessingFile(true);
+      if (!uploadChatId) {
+        const chat = await createChat();
+        if (!chat?.id) {
+          showErrorToast('Could not create a chat. Please try uploading again.');
+          return;
+        }
+        uploadChatId = chat.id;
+      }
+      clearGraphData();
       const formData = new FormData();
       formData.append('file', file);
 
@@ -76,15 +87,18 @@ export function usePdfUpload({
         setProgressMessage(message);
       });
 
-      // The server can finish without writing anything to the graph (e.g. missing LLM or Neo4j config).
-      // Report that as an error instead of showing the upload as a success.
+      // Image-only PDFs can produce a valid graph without any text chunks.
       const processedChunks = responseData.processed_chunks;
-      if (typeof processedChunks === 'number' && processedChunks < 1 && responseData.status !== 'cancelled') {
+      const processedImages = responseData.images_processed;
+      if (typeof processedChunks === 'number' && processedChunks < 1 &&
+          !(typeof processedImages === 'number' && processedImages > 0) && responseData.status !== 'cancelled') {
         const failedChunks = Array.isArray(responseData.failed_chunks) ? responseData.failed_chunks : [];
-        const firstFailure = String((failedChunks[0] as { error?: string } | undefined)?.error || '');
+        const failedImages = Array.isArray(responseData.failed_images) ? responseData.failed_images : [];
+        const firstFailure = String((failedChunks[0] as { error?: string } | undefined)?.error ||
+          (failedImages[0] as { error?: string } | undefined)?.error || '');
         throw new Error(
           firstFailure ||
-            'No concepts were written to the graph (0 chunks processed). On GCP, verify OPENAI_API_KEY / LLM config and Neo4j env on the AI service, and PYTHON_SERVICE_URL on the Node service.',
+            "No readable text or image concepts could be processed from this PDF. For handwritten or scanned notes, check the AI service's OCR output.",
         );
       }
 
@@ -103,13 +117,13 @@ export function usePdfUpload({
 
       await axios.post(
         `${API_BASE_URL}/chat/message`,
-        { chat_id: currentChatId, sender: 'user', text: fileUploadMessage.content },
+        { chat_id: uploadChatId, sender: 'user', text: fileUploadMessage.content },
         { withCredentials: true },
       );
 
       setChats((prev) =>
         prev.map((c): Chat =>
-          c.id === currentChatId
+          c.id === uploadChatId
             ? {
                 ...c,
                 timestamp: new Date(),
@@ -123,27 +137,27 @@ export function usePdfUpload({
       if (responseData.graph_id) {
         await axios.post(
           `${API_BASE_URL}/chat/message`,
-          { chat_id: currentChatId, graph_id: responseData.graph_id },
+          { chat_id: uploadChatId, graph_id: responseData.graph_id },
           { withCredentials: true },
         );
 
         setChats((prev) =>
-          prev.map((c) => (c.id === currentChatId ? { ...c, graph_id: responseData.graph_id } : c)),
+          prev.map((c) => (c.id === uploadChatId ? { ...c, graph_id: responseData.graph_id } : c)),
         );
       }
 
       const uploadIncludesGraph = responseData.graph && !isPlaceholderGraph(responseData);
       if (uploadIncludesGraph) {
-        showGraph(responseData, responseData.graph_id, currentChatId);
+        showGraph(responseData, responseData.graph_id, uploadChatId);
       } else {
-        await fetchGraphData(responseData.graph_id, currentChatId);
+        await fetchGraphData(responseData.graph_id, uploadChatId);
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         return;
       }
       const message = error instanceof Error ? error.message : 'Upload failed. Please try again.';
-      appendErrorMessage(currentChatId, `Error processing PDF: ${message}`);
+      appendErrorMessage(uploadChatId, `Error processing PDF: ${message}`);
     } finally {
       uploadAbortRef.current = null;
       setSelectedFile(null);

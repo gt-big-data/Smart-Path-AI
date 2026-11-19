@@ -290,54 +290,51 @@ export default function Sidebar({
                 <span>No chats found...</span>
               </div>
             )}
-          </div>
-        )}
-
-        {!isCollapsed && (
-          <div
-            onDragOver={onRootDropOver}
-            onDragLeave={(e) => {
-              if (isLeavingDropTarget(e)) onRootDropLeave(e);
-            }}
-            onDrop={onRootDrop}
-            className={`root-drop-zone ${dragOverFolderId === 'root' ? 'drop-active' : ''}`}
-            aria-label="Library root drop area"
-          >
-            {unorganizedChats.map((chat) => (
-              <SidebarChatRow
-                key={chat.id}
-                chat={chat}
-                isActive={currentChatId === chat.id}
-                isRenaming={renamingChatId === chat.id}
-                renameValue={chatRenameValue}
-                isDragging={draggedChatId === chat.id}
-                isDropTarget={dragOverFolderId === `chat-${chat.id}`}
-                inlineAction={
-                  inlineFolderAction?.type === 'chat' &&
-                  inlineFolderAction.id === chat.id
-                }
-                inlineFolderDestination={inlineFolderDestination}
-                inlineFolderValue={inlineFolderValue}
-                isShining={shiningId === chat.id}
-                folders={folders}
-                onSelect={onSelectChat}
-                onBeginRename={onBeginRenameChat}
-                onRenameChange={onRenameChatChange}
-                onRenameSave={onRenameChatSave}
-                onRenameCancel={onRenameChatCancel}
-                onRequestDelete={onRequestDeleteChat}
-                onToggleMoveFolder={onToggleMoveFolder}
-                onInlineDestinationChange={onInlineDestinationChange}
-                onInlineValueChange={onInlineValueChange}
-                onInlineActionConfirm={onConfirmInlineAction}
-                onInlineActionCancel={onCloseInlineAction}
-                onDragStart={onChatDragStart}
-                onDragEnd={onChatDragEnd}
-                onDragOver={onChatDragOver}
-                onDragLeave={onChatDragLeave}
-                onDrop={onChatDrop}
-              />
-            ))}
+            <div
+              onDragOver={onRootDropOver}
+              onDragLeave={(e) => {
+                if (isLeavingDropTarget(e)) onRootDropLeave(e);
+              }}
+              onDrop={onRootDrop}
+              className={`root-drop-zone ${dragOverFolderId === 'root' ? 'drop-active' : ''}`}
+              aria-label="Library root drop area"
+            >
+              {unorganizedChats.map((chat) => (
+                <SidebarChatRow
+                  key={chat.id}
+                  chat={chat}
+                  isActive={currentChatId === chat.id}
+                  isRenaming={renamingChatId === chat.id}
+                  renameValue={chatRenameValue}
+                  isDragging={draggedChatId === chat.id}
+                  isDropTarget={dragOverFolderId === `chat-${chat.id}`}
+                  inlineAction={
+                    inlineFolderAction?.type === 'chat' &&
+                    inlineFolderAction.id === chat.id
+                  }
+                  inlineFolderDestination={inlineFolderDestination}
+                  inlineFolderValue={inlineFolderValue}
+                  isShining={shiningId === chat.id}
+                  folders={folders}
+                  onSelect={onSelectChat}
+                  onBeginRename={onBeginRenameChat}
+                  onRenameChange={onRenameChatChange}
+                  onRenameSave={onRenameChatSave}
+                  onRenameCancel={onRenameChatCancel}
+                  onRequestDelete={onRequestDeleteChat}
+                  onToggleMoveFolder={onToggleMoveFolder}
+                  onInlineDestinationChange={onInlineDestinationChange}
+                  onInlineValueChange={onInlineValueChange}
+                  onInlineActionConfirm={onConfirmInlineAction}
+                  onInlineActionCancel={onCloseInlineAction}
+                  onDragStart={onChatDragStart}
+                  onDragEnd={onChatDragEnd}
+                  onDragOver={onChatDragOver}
+                  onDragLeave={onChatDragLeave}
+                  onDrop={onChatDrop}
+                />
+              ))}
+            </div>
           </div>
         )}
 

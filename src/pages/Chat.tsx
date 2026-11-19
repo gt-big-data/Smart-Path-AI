@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { buildAskAssistantPrompt } from '../lib/quizQuestions';
 import { getFolderPath } from '../lib/folderPath';
 import { getSourceFileNames, getSourceFileUrl } from '../lib/sourceFiles';
@@ -37,6 +37,7 @@ interface ChatPageProps {
 
 // Practice exam taking over the chat area
 interface ExamTab {
+  initialAttemptId?: string;
   id: string;
   chatId: string;
   examId: string;
@@ -45,6 +46,8 @@ interface ExamTab {
 export default function ChatPage({ view = 'workspace' }: ChatPageProps) {
   const { userName, logout } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const handledAssessment = useRef('');
 
   // Layout and exam state
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -74,6 +77,7 @@ export default function ChatPage({ view = 'workspace' }: ChatPageProps) {
   });
   const upload = usePdfUpload({
     currentChatId,
+    createChat: chatList.createChat,
     setChats,
     showErrorToast,
     appendErrorMessage: chatList.appendErrorMessage,
@@ -89,6 +93,28 @@ export default function ChatPage({ view = 'workspace' }: ChatPageProps) {
     appendErrorMessage: chatList.appendErrorMessage,
   });
   const quiz = useChatQuiz({ currentChatId, currentChat });
+  const link = searchParams.toString();
+  useEffect(() => {
+    if (view !== 'workspace' || !link) { handledAssessment.current = ''; return; }
+    if (view !== 'workspace' || chatsLoading || handledAssessment.current === link) return;
+    const params = new URLSearchParams(link);
+    const chatId = params.get('chat_id'), kind = params.get('assessment'), id = params.get('assessment_id');
+    if (!chatId || !kind || !id) return;
+    handledAssessment.current = link;
+    const target = chats.find(chat => chat.id === chatId);
+    if (!target) { showErrorToast('This chat is no longer available.'); return; }
+    setCurrentChatId(target.id);
+    if (kind === 'exam') {
+      setExamTab({ id: link, chatId, examId: id, initialAttemptId: params.get('attempt_id') || undefined });
+    } else if (kind === 'quiz') {
+      quiz.setQuizSession({ id: link, chatId, graphId: target.graph_id || '', title: target.title,
+        length: '5', format: 'mixed', quizId: id });
+    }
+  }, [link, view, chatsLoading, chats, setCurrentChatId, quiz.setQuizSession, showErrorToast]);
+  const closeAssessment = () => {
+    quiz.setQuizSession(null); setExamTab(null);
+    if (searchParams.get('from') === 'progress') navigate('/progress');
+  };
 
   const currentFolderPath = getFolderPath(folders, currentChat?.folder_id);
   const moveModalChat = folderState.moveModalChatId
@@ -106,12 +132,12 @@ export default function ChatPage({ view = 'workspace' }: ChatPageProps) {
       id: 'tab-quiz',
       name: 'Quiz',
       sessionKey: activeQuiz.id,
-      onRequestClose: () => quiz.setQuizSession(null),
+      onRequestClose: closeAssessment,
       content: (
         <Quiz
           key={activeQuiz.id}
           session={activeQuiz}
-          onClose={() => quiz.setQuizSession(null)}
+          onClose={closeAssessment}
           onAskAssistant={(question) => void messages.handleSendMessage(buildAskAssistantPrompt(question))}
         />
       ),
@@ -120,7 +146,7 @@ export default function ChatPage({ view = 'workspace' }: ChatPageProps) {
 
   const handleSelectChat = (cId: string) => {
     // Picking a chat from the progress page returns to the workspace
-    if (view === 'progress') navigate('/chat');
+    if (view === 'progress' || searchParams.has('assessment')) navigate('/chat');
     // Re-selecting the open chat keeps its graph and open tabs
     if (cId === currentChatId) return;
     graph.clearGraphData();
@@ -300,8 +326,10 @@ export default function ChatPage({ view = 'workspace' }: ChatPageProps) {
             key={activeExam.id}
             chatId={activeExam.chatId}
             examId={activeExam.examId}
+            initialAttemptId={activeExam.initialAttemptId}
+            backLabel={searchParams.get('from') === 'progress' ? 'Back to progress' : undefined}
             title={currentChat.title}
-            onClose={() => setExamTab(null)}
+            onClose={closeAssessment}
           />
         ) : (
           <>

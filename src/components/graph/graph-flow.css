@@ -17,9 +17,6 @@
 }
 /* Size is set on the MiniMap style prop (GraphVisualization.tsx) so the SVG matches the panel */
 .graph-view .react-flow__minimap {
-  top: 184px;
-  bottom: auto;
-  left: auto;
   border: 1px solid #c3cfcd;
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.95);
