@@ -52,11 +52,15 @@ const ATTEMPT_ROW =
 export default function PracticeExamPanel({
   chatId,
   examId,
+  initialAttemptId,
+  backLabel = 'Back to chat',
   title,
   onClose,
 }: {
   chatId: string;
   examId: string;
+  initialAttemptId?: string;
+  backLabel?: string;
   title: string;
   onClose: () => void;
 }) {
@@ -103,7 +107,15 @@ export default function PracticeExamPanel({
     latest.current = {};
     requestId.current = undefined;
     setSaveStatus("");
-  }, []);
+    if (initialAttemptId) {
+      const { data } = await examApi.get(`/${id}/attempts/${initialAttemptId}`);
+      if (!mounted.current) return;
+      current.current = data.attempt;
+      setAttempt(data.attempt);
+      const restored = Object.fromEntries(data.attempt.answers.map((a: Answer) => [a.part_id, a.user_answer]));
+      latest.current = restored; setAnswers(restored); dirty.current = false;
+    }
+  }, [initialAttemptId]);
 
   const adopt = (value: Attempt) => {
     current.current = value;
@@ -188,7 +200,7 @@ export default function PracticeExamPanel({
     void act("Opening exam…", () => loadExam(examId));
     // act is recreated on every render, so only the exam id drives this effect
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [examId]);
+  }, [examId, initialAttemptId]);
 
   // Save pending answers if the panel unmounts first, for example when the user switches chats
   const flushRef = useRef(flush);
@@ -321,7 +333,7 @@ export default function PracticeExamPanel({
       <header className="grid min-h-14.5 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3.5 border-b border-[#d8e0de] bg-paper px-4.5 max-[600px]:grid-cols-[auto_1fr] max-[600px]:px-3">
         <button type="button" className={`${examButtonClass()} ${BACK_BUTTON}`} disabled={!!busy} onClick={close}>
           <ArrowLeft size={14} aria-hidden="true" />
-          Back to chat
+          {backLabel}
         </button>
         <div className="flex min-w-0 flex-col items-center gap-0.5 text-center">
           <span className="text-[8px] font-semibold uppercase tracking-widest text-[#8d9996]">Practice exam</span>
@@ -413,6 +425,7 @@ export default function PracticeExamPanel({
                           { request_id: requestId.current },
                         );
                         adopt(data.attempt);
+                        invalidateProgressCache(chatId);
                         requestId.current = undefined;
                       })
                     }

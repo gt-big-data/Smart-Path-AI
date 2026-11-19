@@ -1,4 +1,4 @@
-export const PROGRESS_CACHE_KEY = 'progressPageCache:v2';
+export const PROGRESS_CACHE_KEY = 'progressPageCache:v3';
 export const PROGRESS_INVALIDATED_EVENT = 'smartpath:progress-invalidated';
 
 export function invalidateProgressCache(chatId: string) {

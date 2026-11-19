@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BookOpen, X } from "lucide-react";
 import { Exam, examApi, errorText } from "../practiceExamApi";
+import { invalidateProgressCache } from '../../lib/progressCache';
 import PracticeExamSamples from "../PracticeExamSamples";
 import {
   examButtonClass,
@@ -124,7 +125,7 @@ export default function PracticeExamSetupModal({ chatId, onClose, onOpenExam }: 
           chatId={chatId}
           onBusyChange={setGenerating}
           onError={setSampleError}
-          onGenerated={(exam) => onOpenExam(exam.id)}
+          onGenerated={(exam) => { invalidateProgressCache(chatId); onOpenExam(exam.id); }}
         />
 
         <section className={setupSectionClass} aria-label="Saved exams">

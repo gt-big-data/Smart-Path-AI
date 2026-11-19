@@ -464,6 +464,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         }}
       >
         <MiniMap
+          position="bottom-left"
           nodeColor={(n) => (n.style?.background as string) || '#fff'}
           zoomable={!minimapLocked}
           pannable={!minimapLocked}

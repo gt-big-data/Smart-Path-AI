@@ -1,4 +1,5 @@
 import express, { Router, RequestHandler } from 'express';
+import { getQuizRun, finishQuizRun } from '../controllers/quizRunController';
 import { 
   saveQuizHistory, 
   getUserQuizHistories, 
@@ -8,6 +9,8 @@ import {
 } from '../controllers/quizHistoryController';
 
 const router: Router = express.Router();
+router.get('/runs/:id', getQuizRun as RequestHandler);
+router.post('/runs/:id/complete', finishQuizRun as RequestHandler);
 
 // Save a new quiz history when a quiz is completed
 router.post('/', saveQuizHistory as RequestHandler);

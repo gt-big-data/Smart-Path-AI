@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from '../config/api';
 import { useAuth } from '../context/AuthContext';
 import Icon from '../components/common/Icon';
+import ChatActivityTabs from '../components/progress/ChatActivityTabs';
+import { groupStudyProgress, type StudyChat } from '../lib/progressGroups';
 import { PROGRESS_CACHE_KEY, PROGRESS_INVALIDATED_EVENT } from '../lib/progressCache';
 import { hasResolvedProgressName } from '../lib/progressDisplay';
 
@@ -24,7 +26,7 @@ interface ProfileData {
 // The last loaded progress is shown instantly when the page reopens, then refreshed in the background.
 // sessionStorage clears when the tab closes and on sign-out (AuthContext.logout); the email check
 // keeps another account in the same tab from seeing it.
-type ProgressCache = { userEmail: string; profileData: ProfileData; chatTitles: [string, string][] };
+type ProgressCache = { userEmail: string; profileData: ProfileData; chatTitles: [string, string][]; studyChats: StudyChat[] };
 
 const readProgressCache = (userEmail: string | null): ProgressCache | null => {
   if (!userEmail) return null;
@@ -93,6 +95,7 @@ const ProgressPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const [chatTitleMap, setChatTitleMap] = useState<Map<string, string>>(new Map(cached?.chatTitles ?? []));
+  const [studyChats, setStudyChats] = useState<StudyChat[]>(cached?.studyChats || []);
   const [refreshVersion, setRefreshVersion] = useState(0);
   // Chat groups the user collapsed; every group starts open
   const [collapsedChats, setCollapsedChats] = useState<Set<string>>(() => new Set());
@@ -145,12 +148,14 @@ const ProgressPage: React.FC = () => {
 
         // Fetch chat titles to label accordion sections
         const localChatTitleMap = new Map<string, string>();
+        let localStudyChats: StudyChat[] = [];
         try {
           const userRes = await axios.get(`${API_BASE_URL}/chat/user`, { withCredentials: true });
           const userId = userRes.data;
           if (userId) {
             const chatsRes = await axios.get(`${API_BASE_URL}/chat/${userId}/chats`, { withCredentials: true });
             const chats = Array.isArray(chatsRes.data) ? chatsRes.data : [];
+            localStudyChats = chats.filter((chat: any) => chat.chat_id).map((chat: any) => ({ id: chat.chat_id, title: chat.title || 'Untitled chat', graphId: chat.graph_id }));
             chats.forEach((chat: any) => {
               if (chat.chat_id) localChatTitleMap.set(chat.chat_id, chat.title || 'Untitled Chat');
               if (chat.graph_id) localChatTitleMap.set(chat.graph_id, chat.title || 'Untitled Chat');
@@ -161,6 +166,7 @@ const ProgressPage: React.FC = () => {
         }
         if (!active) return;
         setChatTitleMap(localChatTitleMap);
+        setStudyChats(localStudyChats);
 
         // Fetch all graph IDs for the user
         let graphIds: string[] = [];
@@ -552,7 +558,7 @@ const ProgressPage: React.FC = () => {
         setProfileData({ full_progress, topics_to_review });
         updateError(null);
         if (userEmail && active) {
-          writeProgressCache({ userEmail, profileData: { full_progress, topics_to_review }, chatTitles: [...localChatTitleMap] });
+          writeProgressCache({ userEmail, profileData: { full_progress, topics_to_review }, chatTitles: [...localChatTitleMap], studyChats: localStudyChats });
         }
       } catch (err: any) {
         console.error('Error fetching profile data:', err);
@@ -585,22 +591,8 @@ const ProgressPage: React.FC = () => {
   }, [cached, userEmail, refreshVersion]); // Refresh on mount and whenever progress is invalidated
 
   // Progress grouped by the chat (or graph) it was practiced in, most recent group first in the data order
-  const practicedChats = useMemo(() => {
-    const groups = new Map<string, ProgressItem[]>();
-    (profileData?.full_progress ?? []).forEach((item) => {
-      const chatId = item.chat_id || item.graph_id || 'unknown';
-      groups.set(chatId, [...(groups.get(chatId) ?? []), item]);
-    });
-    return Array.from(groups, ([chatId, items]) => ({
-      chatId,
-      title: chatTitleMap.get(chatId) || 'Untitled Chat',
-      items,
-      lastPracticed: items.reduce(
-        (latest, item) => (new Date(item.last_practiced) > new Date(latest) ? item.last_practiced : latest),
-        items[0].last_practiced,
-      ),
-    }));
-  }, [profileData, chatTitleMap]);
+  const practicedChats = useMemo(() => groupStudyProgress(studyChats, profileData?.full_progress || []),
+    [profileData, studyChats]);
 
   const toggleChat = (chatId: string) => {
     setCollapsedChats((items) => {
@@ -624,7 +616,7 @@ const ProgressPage: React.FC = () => {
   }
 
   // With saved progress on screen, a failed background refresh keeps the data (see the notice below)
-  if (error && !profileData) {
+  if (error && !profileData && !studyChats.length) {
     return (
       <div className="flex min-h-0 flex-auto flex-col items-center justify-center bg-[#f8faf9] p-6 text-center font-brand text-ink" role="alert">
         <h2 className="mb-[18px] mt-0 text-xl font-semibold">Progress unavailable</h2>
@@ -701,60 +693,39 @@ const ProgressPage: React.FC = () => {
 
         <section className="border border-[#cbd7d4] bg-[#fbfcfc] p-[22px]" aria-labelledby="progress-practiced-title">
           <div className="mb-[18px] flex items-start gap-[11px]">
-            <span className="grid h-[34px] w-[34px] shrink-0 place-items-center bg-teal-pale text-teal">
-              <Icon name="book" size={18} />
-            </span>
+            <span className="grid h-[34px] w-[34px] shrink-0 place-items-center bg-teal-pale text-teal"><Icon name="book" size={18} /></span>
             <div>
-              <h2 id="progress-practiced-title" className="mb-1 mt-0 text-[17px] font-semibold text-[#2d3937]">All practiced topics</h2>
-              <p className="m-0 text-[9px] leading-[1.45] text-[#7a8885]">Confidence grouped by the chat where you practiced it.</p>
+              <h2 id="progress-practiced-title" className="mb-1 mt-0 text-[17px] font-semibold text-[#2d3937]">Your study activity</h2>
+              <p className="m-0 text-[9px] leading-[1.45] text-[#7a8885]">Confidence, quizzes, and practice exams grouped by chat.</p>
             </div>
           </div>
-          {practicedChats.length > 0 ? (
-            <div className="grid gap-2.5">
-              {practicedChats.map((group) => {
-                const open = !collapsedChats.has(group.chatId);
-                return (
-                  <article key={group.chatId} className="border border-[#d5dddb] bg-white">
-                    <button
-                      type="button"
-                      className="flex min-h-16 w-full cursor-pointer items-center gap-3 border-0 bg-[#f0f4f3] px-3.5 py-[11px] text-left [&>svg]:text-[#7d8b88] [&>svg]:transition-transform aria-expanded:[&>svg]:rotate-90"
-                      aria-expanded={open}
-                      onClick={() => toggleChat(group.chatId)}
-                    >
-                      <span className="grid min-w-0 flex-1 gap-1">
-                        <strong className="overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-[#303c39]">{group.title}</strong>
-                        <small className="text-[9px] text-[#778481]">
-                          {group.items.length} topics · Last practiced {new Date(group.lastPracticed).toLocaleDateString()}
-                        </small>
-                      </span>
-                      <Icon name="chevron" size={16} />
-                    </button>
-                    {open &&
-                      group.items.map((item) => {
-                        const band = confidenceBand(item.confidence_score);
-                        const percent = Math.round(item.confidence_score * 100);
-                        return (
-                          <div
-                            key={item.concept_id}
-                            className={`grid min-h-[43px] grid-cols-[minmax(130px,1fr)_minmax(70px,120px)_38px] items-center gap-3 border-t border-[#e3e8e7] px-3.5 ${BAND_COLOR[band]}`}
-                          >
-                            <span title={item.topic_name} className="overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-[#4d5b58]">
-                              {friendlyTopicLabel(item.topic_name)}
-                            </span>
-                            <div className="h-1 bg-[#e2e8e6]" aria-hidden="true">
-                              <span className="block h-full bg-(--band-color)" style={{ width: `${percent}%` }} />
-                            </div>
-                            <strong className="text-right text-[10px] text-(--band-color)">{percent}%</strong>
-                          </div>
-                        );
-                      })}
-                  </article>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="m-0 text-[11px] text-[#6f7d7a]">You haven't practiced any topics yet. Complete a quiz to see your progress!</p>
-          )}
+          {practicedChats.length > 0 ? <div className="grid gap-2.5">
+            {practicedChats.map(group => {
+              const open = !collapsedChats.has(group.chatId);
+              return <article key={group.chatId} className="border border-[#d5dddb] bg-white">
+                <button type="button" aria-expanded={open} onClick={() => toggleChat(group.chatId)}
+                  className="flex min-h-16 w-full cursor-pointer items-center gap-3 border-0 bg-[#f0f4f3] px-3.5 py-[11px] text-left [&>svg]:text-[#7d8b88] [&>svg]:transition-transform aria-expanded:[&>svg]:rotate-90">
+                  <span className="grid min-w-0 flex-1 gap-1">
+                    <strong className="overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-[#303c39]">{group.title}</strong>
+                    <small className="text-[9px] text-[#778481]">{group.items.length} confidence topics{group.lastPracticed ? ` · Last practiced ${new Date(group.lastPracticed).toLocaleDateString()}` : ''}</small>
+                  </span>
+                  <Icon name="chevron" size={16} />
+                </button>
+                {open && <ChatActivityTabs chatId={group.chatId}>
+                  {!group.items.length && <p className="m-0 p-3.5 text-xs text-[#6f7d7a]">No confidence scores yet. Complete a quiz or practice exam to track this chat's topics.</p>}
+                  {group.items.map(item => {
+                    const band = confidenceBand(item.confidence_score);
+                    const percent = Math.round(item.confidence_score * 100);
+                    return <div key={item.concept_id} className={`grid min-h-[43px] grid-cols-[minmax(80px,1fr)_minmax(50px,120px)_38px] items-center gap-3 border-t border-[#e3e8e7] px-3.5 ${BAND_COLOR[band]}`}>
+                      <span title={item.topic_name} className="overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-[#4d5b58]">{friendlyTopicLabel(item.topic_name)}</span>
+                      <div className="h-1 bg-[#e2e8e6]" aria-hidden="true"><span className="block h-full bg-(--band-color)" style={{ width: `${percent}%` }} /></div>
+                      <strong className="text-right text-[10px] text-(--band-color)">{percent}%</strong>
+                    </div>;
+                  })}
+                </ChatActivityTabs>}
+              </article>;
+            })}
+          </div> : <p className="m-0 text-[11px] text-[#6f7d7a]">Upload a document to see your study activity here.</p>}
         </section>
       </div>
     </div>

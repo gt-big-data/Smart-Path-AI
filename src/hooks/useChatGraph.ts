@@ -27,6 +27,7 @@ export function useChatGraph({ currentChatId, currentChat, setChats }: UseChatGr
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- graph payload shape is owned by the backend
   const [graphData, setGraphData] = useState<any>(null);
   const [isGraphLoading, setIsGraphLoading] = useState(false);
+  const autoNameAttemptRef = useRef<string | null>(null);
   const [conceptProgress, setConceptProgress] = useState<ConceptProgress[]>([]);
   const [focusedConcept, setFocusedConcept] = useState<string | null>(null);
   const [focusClearToken, setFocusClearToken] = useState(0);
@@ -144,6 +145,7 @@ export function useChatGraph({ currentChatId, currentChat, setChats }: UseChatGr
   // Load the graph when the open chat (or its graph) changes
   const currentGraphId = currentChat?.graph_id;
   useEffect(() => {
+    autoNameAttemptRef.current = null;
     if (currentGraphId) {
       setGraphData(null);
       setIsGraphLoading(true);
@@ -163,12 +165,15 @@ export function useChatGraph({ currentChatId, currentChat, setChats }: UseChatGr
     if (!title) return;
 
     const chatId = currentChat.id;
+    const attemptKey = JSON.stringify([chatId, currentChat.graph_id, title]);
+    if (autoNameAttemptRef.current === attemptKey) return;
+    autoNameAttemptRef.current = attemptKey;
     setChats((prev) => prev.map((chat) => (chat.id === chatId ? { ...chat, title } : chat)));
     axios
       .patch(`${API_BASE_URL}/chat/rename/${chatId}`, { title }, { withCredentials: true })
       .catch((err) => {
         console.error('Could not auto-name chat', err);
-        setChats((prev) => prev.map((chat) => (chat.id === chatId ? { ...chat, title: 'New Chat' } : chat)));
+        setChats((prev) => prev.map((chat) => (chat.id === chatId && chat.title === title ? { ...chat, title: 'New Chat' } : chat)));
       });
   }, [graphData, currentChat, setChats]);
 

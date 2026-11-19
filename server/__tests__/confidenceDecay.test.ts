@@ -16,7 +16,7 @@ vi.mock('openai', () => ({ __esModule: true, default: vi.fn(function () { return
   } }] }) } },
 }; }) }));
 vi.mock('../utils/axiosConfig', () => ({ pythonServiceClient: {} }));
-vi.mock('../models/User', () => ({ __esModule: true, default: { exists: vi.fn() } }));
+vi.mock('../models/User', () => ({ __esModule: true, default: { exists: vi.fn(), findById: vi.fn() } }));
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = new Date('2026-11-01T12:00:00Z');
@@ -56,6 +56,9 @@ function response() {
 beforeEach(() => {
   vi.useFakeTimers().setSystemTime(NOW);
   vi.clearAllMocks();
+  vi.mocked(User.findById).mockReturnValue({
+    select: vi.fn().mockResolvedValue({ chats: [{ chat_id: 'chat1' }] }),
+  } as never);
   model.find = vi.fn();
   model.findOne = vi.fn();
   model.updateOne = vi.fn().mockResolvedValue({});

@@ -1,4 +1,4 @@
-// Quiz progress lives in localStorage per chat so the quiz page and the chat page agree on it.
+// Browser cache for the current quiz. New runs and verified results also persist on the server.
 export type Question = {
   question: string;
   answer: string;
@@ -9,9 +9,11 @@ export type Question = {
   format?: string;
 };
 
-export type Result = { answer: string; isCorrect: boolean; feedback: string; skipped: boolean };
+export type Result = { answer: string; isCorrect: boolean | null; feedback: string; skipped: boolean };
 export type ClarifyMessage = { sender: 'user' | 'ai'; text: string };
 export type QuizState = {
+  quizId?: string;
+  scoreAvailable?: boolean;
   attemptId: string;
   qaData: Question[];
   currentQuestionIndex: number;
@@ -33,6 +35,8 @@ export function readQuiz(chatId: string): QuizState | null {
       localStorage.setItem(quizKey(chatId), JSON.stringify({ ...saved, attemptId }));
     }
     return {
+      quizId: saved.quizId,
+      scoreAvailable: saved.scoreAvailable,
       attemptId,
       qaData: saved.qaData,
       currentQuestionIndex: Math.min(saved.currentQuestionIndex || 0, saved.qaData.length - 1),

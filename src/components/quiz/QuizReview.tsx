@@ -4,6 +4,7 @@ import { displayAnswer, splitQuestion } from '../../lib/quizQuestions';
 import { quizButtonClass, quizCard, quizError, quizNavigation, quizQuestionNumber, quizStage } from './quizClasses';
 
 interface QuizReviewProps {
+  scoreAvailable?: boolean;
   questions: Question[];
   results: (Result | null)[];
   error: string;
@@ -11,7 +12,7 @@ interface QuizReviewProps {
 }
 
 /** Completed quiz: score summary, then each question with the student's answer and the explanation */
-export default function QuizReview({ questions, results, error, onDone }: QuizReviewProps) {
+export default function QuizReview({ questions, results, error, onDone, scoreAvailable = true }: QuizReviewProps) {
   const correctCount = results.filter(result => result?.isCorrect).length;
 
   return (
@@ -22,7 +23,7 @@ export default function QuizReview({ questions, results, error, onDone }: QuizRe
         <span className={quizQuestionNumber}>Quiz review</span>
         <h2 className="mt-2.25 mb-1.5 font-heading text-xl font-semibold text-[#202a29]">Quiz complete</h2>
         <p className="m-0 text-[11px] leading-[1.55] text-[#687572]">
-          {correctCount} of {questions.length} correct. Review your answers and explanations below.
+          {scoreAvailable ? `${correctCount} of ${questions.length} correct.` : 'Score unavailable for this older quiz.'} Review your answers and explanations below.
         </p>
       </section>
 
@@ -31,9 +32,9 @@ export default function QuizReview({ questions, results, error, onDone }: QuizRe
         return (
           <section key={itemIndex} className="border border-[#ccd8d5] bg-paper px-5 py-4.5">
             <div className="flex items-center gap-1.75 text-[9px] font-bold uppercase tracking-[0.08em] text-[#52625f]">
-              {result?.isCorrect
+              {scoreAvailable && (result?.isCorrect
                 ? <Check size={13} className="text-teal" aria-label="Correct" />
-                : <X size={13} className="text-[#c4474d]" aria-label="Incorrect" />}
+                : <X size={13} className="text-[#c4474d]" aria-label="Incorrect" />)}
               Question {itemIndex + 1}
             </div>
             <h3 className="mt-2 mb-3 text-xs font-medium leading-normal whitespace-pre-wrap text-[#202a29]">
