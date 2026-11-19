@@ -4,6 +4,7 @@ import axios from 'axios';
 import { API_BASE_URL } from '../config/api';
 import { toneForStoredMessage } from '../lib/chatTone';
 import { generateMessageId } from '../lib/messageId';
+import { chatActivityDate } from '../lib/chatActivity';
 import { invalidateProgressCache } from '../lib/progressCache';
 import { loadLastChatId, saveLastChatId } from '../lib/lastChat';
 import type { Chat, Message } from '../types/chat';
@@ -25,6 +26,7 @@ interface StoredChat {
   chat_id: string;
   title?: string;
   date_created: string;
+  last_used_at?: string;
   messages?: StoredMessage[];
   graph_id?: string;
   folder_id?: string | null;
@@ -49,6 +51,13 @@ export function useChatList({ showErrorToast, flashNewItem }: UseChatListOptions
   const deletingChatRef = useRef<string | null>(null);
 
   const currentChat = chats.find((chat) => chat.id === currentChatId) ?? null;
+
+  const markChatUsed = useCallback((chatId: string) => {
+    const timestamp = new Date();
+    setChats(prev => prev.map(chat => chat.id === chatId ? { ...chat, timestamp } : chat));
+    void axios.patch(`${API_BASE_URL}/chat/activity/${encodeURIComponent(chatId)}`, {}, { withCredentials: true })
+      .catch(error => console.error('Could not save chat activity:', error));
+  }, []);
 
   // Remember the open chat so the workspace reopens it after leaving the page
   useEffect(() => {
@@ -139,7 +148,7 @@ export function useChatList({ showErrorToast, flashNewItem }: UseChatListOptions
         const formattedChats: Chat[] = userChats.map((chat) => ({
           id: chat.chat_id,
           title: chat.title || 'Chat',
-          timestamp: new Date(chat.date_created),
+          timestamp: chatActivityDate(chat.date_created, chat.last_used_at, (chat.messages || []).map(message => message.timestamp)),
           messages: (chat.messages || []).map((msg, index) => ({
             id: `${chat.chat_id}-${index}`,
             content: msg.text,
@@ -246,6 +255,7 @@ export function useChatList({ showErrorToast, flashNewItem }: UseChatListOptions
     setChats,
     currentChatId,
     setCurrentChatId,
+    markChatUsed,
     currentChat,
     chatsLoading,
     createChat,

@@ -8,7 +8,7 @@ const CHAT_DRAG_TYPE = 'text/plain';
 
 interface UseSidebarDragDropOptions {
   chats: Chat[];
-  moveChatToFolder: (chatId: string, folderId: string | null) => Promise<void>;
+  moveChatToFolder: (chatId: string, folderId: string | null) => Promise<boolean>;
   moveFolderToFolder: (folderId: string, parentFolderId: string | null) => Promise<void>;
   createFolderRecord: (name: string, parentFolderId: string | null) => Promise<Folder>;
   /** Called after a folder is created by a drop, so the sidebar can reveal it */
@@ -102,7 +102,7 @@ export function useSidebarDragDrop({
     try {
       const newFolder = await createFolderRecord('New folder', parentFolderId);
       onFolderCreated(newFolder);
-      await moveChatToFolder(targetChatId, newFolder.folder_id);
+      if (!await moveChatToFolder(targetChatId, newFolder.folder_id)) return;
       await moveChatToFolder(sourceChatId, newFolder.folder_id);
     } catch {
       showErrorToast('Could not create folder for chats.');

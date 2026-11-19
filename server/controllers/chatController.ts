@@ -139,6 +139,7 @@ export const addMessageToChat = async (req: Request, res: Response) => {
         timestamp: new Date(),
       };
       chat.messages.push(newMessage);
+      chat.last_used_at = newMessage.timestamp;
     }
 
     if (user) {
@@ -161,6 +162,24 @@ export const addMessageToChat = async (req: Request, res: Response) => {
 
 
 // GET /chat/chats
+/** Record a chat visit without rewriting the user's other chats or folders. */
+export const markChatUsed = async (req: Request, res: Response) => {
+  const rawUserId = (req.session as any)?.passport?.user;
+  if (!rawUserId) return res.status(401).json({ message: 'Unauthorized' });
+  const userId = typeof rawUserId === 'object' && rawUserId._id ? rawUserId._id : rawUserId;
+  try {
+    const result = await User.updateOne(
+      { _id: userId, 'chats.chat_id': req.params.chat_id },
+      { $max: { 'chats.$.last_used_at': new Date() } },
+    );
+    if (!result.matchedCount) return res.status(404).json({ message: 'Chat not found' });
+    return res.status(204).end();
+  } catch (error) {
+    console.error('Error recording chat activity:', error);
+    return res.status(500).json({ message: 'Could not record chat activity' });
+  }
+};
+
 export const getUserChats = async (req: Request, res: Response) => {
   try {
     const userId = req.params.userId;

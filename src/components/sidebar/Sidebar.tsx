@@ -9,6 +9,7 @@ import SidebarChatRow from './SidebarChatRow';
 import SidebarNav from './SidebarNav';
 import SidebarAccount from './SidebarAccount';
 import { isLeavingDropTarget } from '../../lib/dragTargets';
+import { sortChatsByActivity } from '../../lib/chatActivity';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -156,6 +157,7 @@ export default function Sidebar({
   isProgressActive = false,
 }: SidebarProps) {
   const normalizedSearch = searchQuery.trim().toLowerCase();
+  const orderedChats = sortChatsByActivity(chats);
 
   const folderHasMatch = (folder: Folder): boolean => {
     if (!normalizedSearch) return true;
@@ -173,7 +175,7 @@ export default function Sidebar({
     .filter((f) => !f.parent_folder_id)
     .filter(folderHasMatch);
 
-  const unorganizedChats = chats
+  const unorganizedChats = orderedChats
     .filter((c) => !c.folder_id)
     .filter((c) => !normalizedSearch || c.title.toLowerCase().includes(normalizedSearch));
 
@@ -239,7 +241,7 @@ export default function Sidebar({
                 key={folder.folder_id}
                 folder={folder}
                 allFolders={folders}
-                chats={chats}
+                chats={orderedChats}
                 currentChatId={currentChatId}
                 expandedFolders={expandedFolders}
                 renamingFolderId={renamingFolderId}

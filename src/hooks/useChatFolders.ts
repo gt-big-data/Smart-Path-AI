@@ -14,7 +14,11 @@ interface UseChatFoldersOptions {
 }
 
 function serverMessage(err: unknown): string {
-  return (axios.isAxiosError(err) && err.response?.data?.message) || 'Server error';
+  if (axios.isAxiosError(err)) {
+    if (!err.response) return 'Could not reach the server. Check your connection.';
+    return err.response.data?.message || `Server error (${err.response.status})`;
+  }
+  return 'Server error';
 }
 
 /** Folder tree and every folder and chat-to-folder action: create, rename, delete, move, and the inline sidebar pickers */
@@ -67,17 +71,14 @@ export function useChatFolders({ setChats, showErrorToast, flashNewItem }: UseCh
   const moveChatToFolder = useCallback(
     async (chatId: string, folderId: string | null) => {
       try {
-        const res = await fetch(`${API_BASE_URL}/chat/move-to-folder`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ chat_id: chatId, folder_id: folderId }),
-        });
-        if (!res.ok) throw new Error(`Server error (${res.status})`);
+        await axios.patch(`${API_BASE_URL}/chat/move-to-folder`,
+          { chat_id: chatId, folder_id: folderId }, { withCredentials: true });
         setChats((prev) => prev.map((chat) => (chat.id === chatId ? { ...chat, folder_id: folderId } : chat)));
+        return true;
       } catch (err) {
         console.error('Error moving chat:', err);
-        showErrorToast('Could not move chat to folder.');
+        showErrorToast(`Could not move chat to folder: ${serverMessage(err)}`);
+        return false;
       }
     },
     [setChats, showErrorToast],
@@ -146,11 +147,11 @@ export function useChatFolders({ setChats, showErrorToast, flashNewItem }: UseCh
       } catch (err) {
         console.error('Error creating folder:', err);
         showErrorToast(`Could not create folder: ${serverMessage(err)}`);
-      } finally {
+        return;
+      }
         setNewFolderName('');
         setNewFolderParentId(null);
         setIsCreatingFolder(false);
-      }
     },
     [createFolderRecord, revealFolder, newFolderName, newFolderParentId, showErrorToast],
   );
@@ -254,15 +255,19 @@ export function useChatFolders({ setChats, showErrorToast, flashNewItem }: UseCh
         if (!name) return;
         try {
           const newFolder = await createFolderRecord(name, null);
-          await moveChatToFolder(inlineFolderAction.id, newFolder.folder_id);
+            if (!await moveChatToFolder(inlineFolderAction.id, newFolder.folder_id)) {
+              setInlineFolderDestination(newFolder.folder_id);
+              return;
+            }
         } catch {
           showErrorToast('Could not create folder for chat.');
+            return;
         }
       } else {
-        await moveChatToFolder(
+          if (!await moveChatToFolder(
           inlineFolderAction.id,
           inlineFolderDestination === 'root' ? null : inlineFolderDestination,
-        );
+          )) return;
       }
     } else {
       const name = inlineFolderValue.trim();
@@ -277,6 +282,7 @@ export function useChatFolders({ setChats, showErrorToast, flashNewItem }: UseCh
         }));
       } catch {
         showErrorToast('Could not create subfolder.');
+          return;
       }
     }
 
@@ -300,12 +306,13 @@ export function useChatFolders({ setChats, showErrorToast, flashNewItem }: UseCh
       if (newName) {
         try {
           const newFolder = await createFolderRecord(newName, null);
-          await moveChatToFolder(moveModalChatId, newFolder.folder_id);
+          if (!await moveChatToFolder(moveModalChatId, newFolder.folder_id)) return;
         } catch {
           showErrorToast('Could not create folder.');
+          return;
         }
       } else {
-        await moveChatToFolder(moveModalChatId, destFolderId);
+        if (!await moveChatToFolder(moveModalChatId, destFolderId)) return;
       }
       setMoveModalChatId(null);
     },

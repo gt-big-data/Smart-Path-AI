@@ -103,6 +103,7 @@ export default function ChatPage({ view = 'workspace' }: ChatPageProps) {
     handledAssessment.current = link;
     const target = chats.find(chat => chat.id === chatId);
     if (!target) { showErrorToast('This chat is no longer available.'); return; }
+    chatList.markChatUsed(target.id);
     setCurrentChatId(target.id);
     if (kind === 'exam') {
       setExamTab({ id: link, chatId, examId: id, initialAttemptId: params.get('attempt_id') || undefined });
@@ -110,7 +111,7 @@ export default function ChatPage({ view = 'workspace' }: ChatPageProps) {
       quiz.setQuizSession({ id: link, chatId, graphId: target.graph_id || '', title: target.title,
         length: '5', format: 'mixed', quizId: id });
     }
-  }, [link, view, chatsLoading, chats, setCurrentChatId, quiz.setQuizSession, showErrorToast]);
+  }, [link, view, chatsLoading, chats, setCurrentChatId, chatList.markChatUsed, quiz.setQuizSession, showErrorToast]);
   const closeAssessment = () => {
     quiz.setQuizSession(null); setExamTab(null);
     if (searchParams.get('from') === 'progress') navigate('/progress');
@@ -145,6 +146,7 @@ export default function ChatPage({ view = 'workspace' }: ChatPageProps) {
   }
 
   const handleSelectChat = (cId: string) => {
+    chatList.markChatUsed(cId);
     // Picking a chat from the progress page returns to the workspace
     if (view === 'progress' || searchParams.has('assessment')) navigate('/chat');
     // Re-selecting the open chat keeps its graph and open tabs
