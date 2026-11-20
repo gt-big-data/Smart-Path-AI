@@ -186,10 +186,12 @@ export default function Quiz({ session, onClose, onAskAssistant }: QuizProps) {
     <main className={QUIZ_PAGE}>
       <div className={quizStatus}>
         <p role="alert">{error}</p>
-        <button type="button" className={quizButtonClass('primary')} onClick={() => {
-          started.current = undefined; setError(''); setLoading(true); setLoadVersion(v => v + 1);
-        }}>Retry</button>
-        <button type="button" className={quizButtonClass('primary')} onClick={onClose}>Close quiz</button>
+        <div className="flex flex-wrap justify-center gap-2.5">
+          <button type="button" className={quizButtonClass('primary')} onClick={() => {
+            started.current = undefined; setError(''); setLoading(true); setLoadVersion(v => v + 1);
+          }}>Retry</button>
+          <button type="button" className={quizButtonClass('primary')} onClick={onClose}>Close quiz</button>
+        </div>
       </div>
     </main>
   );
