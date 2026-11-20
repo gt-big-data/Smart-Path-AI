@@ -185,7 +185,7 @@ const landingTeams: LandingTeam[] = [
       { name: 'Bayan Mardon' },
       { name: 'Ronika Medegam', linkedin: 'www.linkedin.com/in/ronika-m-259b3b296', photo: '/team/ronika_medegam.png' },
       { name: 'Ben Doan', linkedin: 'https://www.linkedin.com/in/ben--doan/', photo: '/team/ben_doan.png' },
-      { name: 'Shreeja Das' }
+      { name: 'Shreeja Das', linkedin: 'https://www.linkedin.com/in/shreeja-das-compsci/', photo: '/team/shreeja_das.png' }
     ],
   },
 ];
