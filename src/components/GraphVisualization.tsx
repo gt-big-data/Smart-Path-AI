@@ -432,7 +432,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         onToggleMinimapLock={() => setMinimapLocked(locked => !locked)}
       />
 
-      {focusedLabel && <GraphFocusHint label={focusedLabel} onClear={clearActivePath} />}
+      {/* {focusedLabel && <GraphFocusHint label={focusedLabel} onClear={clearActivePath} />} */}
 
       <GraphLegend
         entries={legendEntries}
