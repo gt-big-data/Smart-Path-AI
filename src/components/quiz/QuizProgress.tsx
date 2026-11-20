@@ -1,10 +1,11 @@
 import type { Result } from '../../lib/quizState';
 
+// One complete background class per state. Stacking a base bg with a state bg leaves the base winning.
 const SEGMENT_CLASS: Record<string, string> = {
-  current: 'bg-[#8fc8c2]',
+  current: 'bg-[#fadaa0]',
   correct: 'bg-[#48a99f]',
   incorrect: 'bg-[#e79095]',
-  '': '',
+  '': 'bg-[#dce5e3]',
 };
 
 interface QuizProgressProps {
@@ -33,7 +34,7 @@ export default function QuizProgress({ total, currentIndex, results }: QuizProgr
           const state = result
             ? result.isCorrect ? 'correct' : 'incorrect'
             : step === currentIndex ? 'current' : '';
-          return <span key={step} className={`h-1 bg-[#dce5e3] [transition:background_0.18s_ease] ${SEGMENT_CLASS[state]}`} />;
+          return <span key={step} className={`h-1 [transition:background_0.18s_ease] ${SEGMENT_CLASS[state]}`} />;
         })}
       </div>
     </div>
