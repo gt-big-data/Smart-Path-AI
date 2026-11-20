@@ -14,36 +14,19 @@ interface PathBarProps {
 
 const PathBar: React.FC<PathBarProps> = ({ steps, onStepClick, onFocus, onClear }) => {
   return (
-    <div style={{
-      display: 'flex',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: '8px',
-      background: '#ffffff',
-      border: '1.5px solid #d4581c',
-      borderRadius: '8px',
-      padding: '8px 12px',
-      fontSize: '13.5px',
-      color: '#16202e',
-    }}>
-      <span style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', minWidth: 0 }}>
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xs border border-line bg-paper px-3 py-2 font-brand text-[12px] text-ink">
+      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
         {steps.map((step, index) => {
           const isLast = index === steps.length - 1;
           return (
             <React.Fragment key={step.id}>
-              {index > 0 && <span style={{ color: '#586476' }}>›</span>}
+              {index > 0 && <span className="text-faint" aria-hidden="true">›</span>}
               <button
+                type="button"
                 onClick={() => onStepClick(step.id)}
-                style={{
-                  padding: 0,
-                  border: 'none',
-                  background: 'transparent',
-                  font: 'inherit',
-                  cursor: 'pointer',
-                  color: isLast ? '#d4581c' : 'inherit',
-                  fontWeight: isLast ? 600 : 'inherit',
-                }}
+                className={`cursor-pointer border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal ${
+                  isLast ? 'font-semibold text-teal' : 'hover:text-teal'
+                }`}
               >
                 {step.label}
               </button>
@@ -51,34 +34,18 @@ const PathBar: React.FC<PathBarProps> = ({ steps, onStepClick, onFocus, onClear 
           );
         })}
       </span>
-      <span style={{ display: 'flex', gap: '6px' }}>
+      <span className="flex items-center gap-1.5">
         <button
+          type="button"
           onClick={onFocus}
-          style={{
-            fontSize: '12px',
-            fontWeight: 600,
-            padding: '3px 10px',
-            borderRadius: '6px',
-            border: 'none',
-            background: '#d4581c',
-            color: '#f5f7fa',
-            cursor: 'pointer',
-          }}
+          className="cursor-pointer rounded-xs border-0 bg-teal px-2.5 py-0.75 text-[12px] font-semibold text-white hover:bg-teal-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
         >
           Focus
         </button>
         <button
+          type="button"
           onClick={onClear}
-          style={{
-            fontSize: '12px',
-            fontWeight: 600,
-            padding: '3px 10px',
-            borderRadius: '6px',
-            border: '1px solid #d9dfe7',
-            background: 'transparent',
-            color: '#586476',
-            cursor: 'pointer',
-          }}
+          className="cursor-pointer rounded-xs border border-line bg-transparent px-2.5 py-0.75 text-[12px] font-semibold text-muted hover:bg-teal-hover hover:text-teal-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
         >
           Clear
         </button>
